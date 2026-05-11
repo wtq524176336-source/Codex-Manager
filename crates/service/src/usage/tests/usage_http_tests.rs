@@ -489,7 +489,7 @@ fn subscription_request_uses_only_authorization_without_custom_usage_headers() {
         })
         .expect("send subscription request");
         let response = Response::from_string(
-            r#"{"id":"sub_123","plan_type":"plus","active_until":"2026-05-06T03:31:29Z"}"#,
+            r#"{"id":"sub_123","plan_type":"plus","active_until":"2036-05-06T03:31:29Z"}"#,
         )
         .with_status_code(TinyStatusCode(200))
         .with_header(

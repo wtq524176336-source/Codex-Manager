@@ -30,6 +30,9 @@ export interface Account {
   subscriptionPlan: string | null;
   subscriptionExpiresAt: number | null;
   subscriptionRenewsAt: number | null;
+  currentWindowCostUsd: number;
+  currentWindowStartedAt: number | null;
+  currentWindowResetsAt: number | null;
   note: string | null;
   tags: string[];
   isAvailable: boolean;

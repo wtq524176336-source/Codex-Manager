@@ -1,7 +1,5 @@
-use crate::account_status::is_banned_status_reason;
 use codexmanager_core::storage::{Account, Storage, Token};
 use crossbeam_channel::unbounded;
-use std::collections::HashSet;
 use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -31,7 +29,6 @@ pub(crate) fn refresh_usage_for_all_accounts() -> Result<(), String> {
     let tasks = build_usage_refresh_tasks(
         storage.list_tokens().map_err(|e| e.to_string())?,
         &accounts,
-        &load_banned_account_ids(&storage, &accounts)?,
     );
     if tasks.is_empty() {
         return Ok(());
@@ -59,7 +56,6 @@ pub(crate) fn refresh_usage_for_polling_batch() -> Result<(), String> {
     let all_tasks = build_usage_refresh_tasks(
         storage.list_tokens().map_err(|e| e.to_string())?,
         &accounts,
-        &load_banned_account_ids(&storage, &accounts)?,
     );
     if all_tasks.is_empty() {
         return Ok(());
@@ -123,26 +119,17 @@ struct UsageRefreshBatchTask {
 /// # 参数
 /// - tokens: 参数 tokens
 /// - accounts: 参数 accounts
-/// - banned_ids: 参数 banned_ids
 ///
 /// # 返回
 /// 返回函数执行结果
 fn build_usage_refresh_tasks(
     tokens: Vec<Token>,
     accounts: &[Account],
-    banned_ids: &HashSet<String>,
 ) -> Vec<UsageRefreshBatchTask> {
-    let mut skipped_ids = accounts
-        .iter()
-        .filter(|account| is_account_refresh_skipped(account))
-        .map(|account| account.id.clone())
-        .collect::<HashSet<_>>();
-    skipped_ids.extend(banned_ids.iter().cloned());
     let workspace_map = build_workspace_map_from_accounts(accounts);
 
     tokens
         .into_iter()
-        .filter(|token| !skipped_ids.contains(&token.account_id))
         .map(|token| {
             let account_id = token.account_id.clone();
             UsageRefreshBatchTask {
@@ -239,36 +226,6 @@ fn run_usage_refresh_task(storage: &Storage, task: UsageRefreshBatchTask) {
     }
 }
 
-/// 函数 `load_banned_account_ids`
-///
-/// 作者: gaohongshun
-///
-/// 时间: 2026-04-02
-///
-/// # 参数
-/// - storage: 参数 storage
-/// - accounts: 参数 accounts
-///
-/// # 返回
-/// 返回函数执行结果
-fn load_banned_account_ids(
-    storage: &Storage,
-    accounts: &[Account],
-) -> Result<HashSet<String>, String> {
-    let account_ids = accounts
-        .iter()
-        .map(|account| account.id.clone())
-        .collect::<Vec<_>>();
-    let reasons = storage
-        .latest_account_status_reasons(&account_ids)
-        .map_err(|err| err.to_string())?;
-    Ok(reasons
-        .into_iter()
-        .filter(|(_, reason)| is_banned_status_reason(reason))
-        .map(|(account_id, _)| account_id)
-        .collect())
-}
-
 /// 函数 `usage_refresh_worker_count`
 ///
 /// 作者: gaohongshun
@@ -282,22 +239,6 @@ fn load_banned_account_ids(
 /// 返回函数执行结果
 fn usage_refresh_worker_count() -> usize {
     USAGE_REFRESH_WORKERS.load(Ordering::Relaxed).max(1)
-}
-
-/// 函数 `is_account_refresh_skipped`
-///
-/// 作者: gaohongshun
-///
-/// 时间: 2026-04-02
-///
-/// # 参数
-/// - account: 参数 account
-///
-/// # 返回
-/// 返回函数执行结果
-fn is_account_refresh_skipped(account: &Account) -> bool {
-    let normalized = account.status.trim().to_ascii_lowercase();
-    normalized == "disabled" || normalized == "banned"
 }
 
 /// 函数 `usage_poll_batch_limit`
@@ -443,7 +384,6 @@ fn next_usage_poll_cursor(total: usize, cursor: usize, processed: usize) -> usiz
 mod tests {
     use super::build_usage_refresh_tasks;
     use codexmanager_core::storage::{now_ts, Account, Token};
-    use std::collections::HashSet;
 
     /// 函数 `account`
     ///
@@ -495,7 +435,7 @@ mod tests {
         }
     }
 
-    /// 函数 `build_usage_refresh_tasks_skips_disabled_and_banned_accounts`
+    /// 函数 `build_usage_refresh_tasks_keeps_accounts_regardless_of_status`
     ///
     /// 作者: gaohongshun
     ///
@@ -507,7 +447,7 @@ mod tests {
     /// # 返回
     /// 无
     #[test]
-    fn build_usage_refresh_tasks_skips_disabled_and_banned_accounts() {
+    fn build_usage_refresh_tasks_keeps_accounts_regardless_of_status() {
         let tasks = build_usage_refresh_tasks(
             vec![
                 token("acc-active"),
@@ -524,7 +464,6 @@ mod tests {
                 account("acc-inactive", "inactive", Some("ws-inactive")),
                 account("acc-unavailable", "unavailable", Some("ws-unavailable")),
             ],
-            &HashSet::from([String::from("acc-banned")]),
         );
 
         let account_ids = tasks
@@ -535,14 +474,18 @@ mod tests {
             account_ids,
             vec![
                 "acc-active",
+                "acc-disabled",
+                "acc-banned",
                 "acc-inactive",
                 "acc-unavailable",
                 "acc-missing"
             ]
         );
         assert_eq!(tasks[0].workspace_id.as_deref(), Some("ws-active"));
-        assert_eq!(tasks[1].workspace_id.as_deref(), Some("ws-inactive"));
-        assert_eq!(tasks[2].workspace_id.as_deref(), Some("ws-unavailable"));
-        assert_eq!(tasks[3].workspace_id, None);
+        assert_eq!(tasks[1].workspace_id.as_deref(), Some("ws-disabled"));
+        assert_eq!(tasks[2].workspace_id.as_deref(), Some("ws-banned"));
+        assert_eq!(tasks[3].workspace_id.as_deref(), Some("ws-inactive"));
+        assert_eq!(tasks[4].workspace_id.as_deref(), Some("ws-unavailable"));
+        assert_eq!(tasks[5].workspace_id, None);
     }
 }

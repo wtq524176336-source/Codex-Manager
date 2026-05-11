@@ -221,40 +221,6 @@ function normalizedAccountStatusReason(
 }
 
 /**
- * 函数 `isDisabledAccount`
- *
- * 作者: gaohongshun
- *
- * 时间: 2026-04-02
- *
- * # 参数
- * - account?: 参数 account?
- *
- * # 返回
- * 返回函数执行结果
- */
-function isDisabledAccount(account?: { status?: string } | null): boolean {
-  return normalizedAccountStatus(account) === "disabled";
-}
-
-/**
- * 函数 `isRecoveryRequiredAccount`
- *
- * 作者: gaohongshun
- *
- * 时间: 2026-04-02
- *
- * # 参数
- * - account?: 参数 account?
- *
- * # 返回
- * 返回函数执行结果
- */
-function isRecoveryRequiredAccount(account?: { status?: string } | null): boolean {
-  return normalizedAccountStatus(account) === "inactive";
-}
-
-/**
  * 函数 `isUnavailableAccount`
  *
  * 作者: gaohongshun
@@ -645,12 +611,6 @@ export function calcAvailability(
   const primaryExhausted = (usage?.usedPercent ?? 0) >= 100;
   const secondaryExhausted = (usage?.secondaryUsedPercent ?? 0) >= 100;
 
-  if (isDisabledAccount(account)) {
-    return { text: "已禁用", level: "bad" };
-  }
-  if (isRecoveryRequiredAccount(account)) {
-    return { text: "不可用", level: "bad" };
-  }
   if (isBannedAccount(account)) {
     return { text: "封禁", level: "bad" };
   }
@@ -661,7 +621,7 @@ export function calcAvailability(
     return { text: "不可用", level: "bad" };
   }
   if (!usage) {
-    return { text: "未知", level: "unknown" };
+    return { text: "正常", level: "ok" };
   }
 
   const normalizedStatus = String(usage.availabilityStatus || "")

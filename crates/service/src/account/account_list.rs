@@ -1,6 +1,6 @@
 use codexmanager_core::{
     rpc::types::{AccountListParams, AccountListResult, AccountSummary},
-    storage::{Account, AccountMetadata, AccountSubscription, Token, UsageSnapshotRecord},
+    storage::{now_ts, Account, AccountMetadata, AccountSubscription, Token, UsageSnapshotRecord},
 };
 use std::collections::HashMap;
 
@@ -9,12 +9,21 @@ use crate::storage_helpers::open_storage;
 
 const DEFAULT_ACCOUNT_PAGE_SIZE: i64 = 5;
 const MAX_ACCOUNT_PAGE_SIZE: i64 = 500;
+const FIVE_HOUR_WINDOW_MINUTES: i64 = 300;
+const FIVE_HOUR_WINDOW_SECS: i64 = FIVE_HOUR_WINDOW_MINUTES * 60;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AccountFilter {
     All,
     Active,
     Low,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct AccountWindowCost {
+    cost_usd: f64,
+    started_at: i64,
+    resets_at: i64,
 }
 
 /// 函数 `read_accounts`
@@ -306,6 +315,7 @@ fn to_account_summary_with_reason(
     subscription_plan: Option<String>,
     subscription_expires_at: Option<i64>,
     subscription_renews_at: Option<i64>,
+    window_cost: Option<AccountWindowCost>,
     note: Option<String>,
     tags: Option<String>,
 ) -> AccountSummary {
@@ -323,6 +333,9 @@ fn to_account_summary_with_reason(
         subscription_plan,
         subscription_expires_at,
         subscription_renews_at,
+        current_window_cost_usd: window_cost.map(|value| value.cost_usd).unwrap_or(0.0),
+        current_window_started_at: window_cost.map(|value| value.started_at),
+        current_window_resets_at: window_cost.map(|value| value.resets_at),
         note,
         tags,
     }
@@ -366,6 +379,24 @@ fn to_account_summaries(
         .into_iter()
         .map(|snapshot| (snapshot.account_id.clone(), snapshot))
         .collect::<HashMap<String, UsageSnapshotRecord>>();
+    let now = now_ts();
+    let mut window_costs = HashMap::new();
+    for account_id in &account_ids {
+        let (started_at, resets_at) = current_five_hour_window(usages.get(account_id), now);
+        let cost_usd = storage
+            .summarize_request_token_stats_cost_for_account_between(
+                account_id, started_at, resets_at,
+            )
+            .map_err(|err| format!("load account window cost failed: {err}"))?;
+        window_costs.insert(
+            account_id.clone(),
+            AccountWindowCost {
+                cost_usd,
+                started_at,
+                resets_at,
+            },
+        );
+    }
     let metadata = storage
         .list_account_metadata()
         .map_err(|err| format!("load account metadata failed: {err}"))?
@@ -387,8 +418,10 @@ fn to_account_summaries(
                 &status_reasons,
                 &tokens,
                 &usages,
+                &window_costs,
                 &metadata,
                 &subscriptions,
+                now,
             )
         })
         .collect())
@@ -415,8 +448,10 @@ fn map_account_summary(
     status_reasons: &HashMap<String, String>,
     tokens: &HashMap<String, Token>,
     usages: &HashMap<String, UsageSnapshotRecord>,
+    window_costs: &HashMap<String, AccountWindowCost>,
     metadata: &HashMap<String, AccountMetadata>,
     subscriptions: &HashMap<String, AccountSubscription>,
+    now: i64,
 ) -> AccountSummary {
     let account_id = account.id.clone();
     let status_reason = status_reasons.get(&account_id).cloned();
@@ -424,12 +459,31 @@ fn map_account_summary(
     let plan = resolve_account_plan(tokens.get(&account_id), usages.get(&account_id));
     let account_metadata = metadata.get(&account_id);
     let subscription = subscriptions.get(&account_id);
+    let subscription_expired = subscription.is_some_and(|value| {
+        value
+            .expires_at
+            .is_some_and(|expires_at| expires_at <= now)
+    });
+    let has_subscription = subscription.map(|value| {
+        value.has_subscription
+            && value
+                .expires_at
+                .map_or(true, |expires_at| expires_at > now)
+    });
     let (fallback_plan_type, plan_type_raw) = match plan {
         Some(value) => (Some(value.normalized), value.raw),
         None => (None, None),
     };
-    let subscription_plan = subscription.and_then(|value| value.plan_type.clone());
-    let subscription_plan_type = subscription.and_then(resolve_subscription_plan_type);
+    let subscription_plan = if subscription_expired {
+        None
+    } else {
+        subscription.and_then(|value| value.plan_type.clone())
+    };
+    let subscription_plan_type = if subscription_expired {
+        Some("free".to_string())
+    } else {
+        subscription.and_then(resolve_subscription_plan_type)
+    };
     let plan_type = subscription_plan_type.or(fallback_plan_type);
     to_account_summary_with_reason(
         account,
@@ -437,13 +491,50 @@ fn map_account_summary(
         status_reason,
         plan_type,
         plan_type_raw,
-        subscription.map(|value| value.has_subscription),
+        has_subscription,
         subscription_plan,
         subscription.and_then(|value| value.expires_at),
-        subscription.and_then(|value| value.renews_at),
+        if subscription_expired {
+            None
+        } else {
+            subscription.and_then(|value| value.renews_at)
+        },
+        window_costs.get(&account_id).copied(),
         account_metadata.and_then(|value| value.note.clone()),
         account_metadata.and_then(|value| value.tags.clone()),
     )
+}
+
+fn current_five_hour_window(
+    snapshot: Option<&UsageSnapshotRecord>,
+    now: i64,
+) -> (i64, i64) {
+    if let Some(resets_at) = find_five_hour_resets_at(snapshot) {
+        let mut end_ts = resets_at;
+        if end_ts > 0 {
+            if end_ts <= now {
+                let elapsed_windows = ((now - end_ts) / FIVE_HOUR_WINDOW_SECS) + 1;
+                end_ts += elapsed_windows * FIVE_HOUR_WINDOW_SECS;
+            }
+            return (end_ts - FIVE_HOUR_WINDOW_SECS, end_ts);
+        }
+    }
+
+    let start_ts = (now / FIVE_HOUR_WINDOW_SECS) * FIVE_HOUR_WINDOW_SECS;
+    (start_ts, start_ts + FIVE_HOUR_WINDOW_SECS)
+}
+
+fn find_five_hour_resets_at(snapshot: Option<&UsageSnapshotRecord>) -> Option<i64> {
+    let snapshot = snapshot?;
+    if snapshot.window_minutes == Some(FIVE_HOUR_WINDOW_MINUTES) {
+        if let Some(resets_at) = snapshot.resets_at {
+            return Some(resets_at);
+        }
+    }
+    if snapshot.secondary_window_minutes == Some(FIVE_HOUR_WINDOW_MINUTES) {
+        return snapshot.secondary_resets_at;
+    }
+    None
 }
 
 fn resolve_subscription_plan_type(subscription: &AccountSubscription) -> Option<String> {

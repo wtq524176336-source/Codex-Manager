@@ -387,6 +387,24 @@ export function normalizeAccount(item: unknown, usage?: AccountUsage | null): Ac
   const statusReason = asString(source.statusReason ?? source.status_reason);
   const availability = calcAvailability(usage, { status, statusReason });
   const usageBuckets = getUsageDisplayBuckets(usage);
+  const rawPlanType =
+    asString(source.planType ?? source.plan_type ?? source.subscriptionPlan ?? source.subscription_plan) ||
+    null;
+  const hasSubscription =
+    typeof (source.hasSubscription ?? source.has_subscription) === "boolean"
+      ? Boolean(source.hasSubscription ?? source.has_subscription)
+      : null;
+  const subscriptionPlan =
+    asString(source.subscriptionPlan ?? source.subscription_plan) || null;
+  const subscriptionExpiresAt = toNullableNumber(
+    source.subscriptionExpiresAt ?? source.subscription_expires_at
+  );
+  const subscriptionRenewsAt = toNullableNumber(
+    source.subscriptionRenewsAt ?? source.subscription_renews_at
+  );
+  const isSubscriptionExpired =
+    subscriptionExpiresAt != null &&
+    subscriptionExpiresAt <= Math.floor(Date.now() / 1000);
 
   return {
     id,
@@ -399,21 +417,21 @@ export function normalizeAccount(item: unknown, usage?: AccountUsage | null): Ac
     sort: asInteger(source.sort ?? source.priority, 0, 0),
     status,
     statusReason,
-    planType:
-      asString(source.planType ?? source.plan_type ?? source.subscriptionPlan ?? source.subscription_plan) ||
-      null,
+    planType: isSubscriptionExpired ? "free" : rawPlanType,
     planTypeRaw: asString(source.planTypeRaw ?? source.plan_type_raw) || null,
-    hasSubscription:
-      typeof (source.hasSubscription ?? source.has_subscription) === "boolean"
-        ? Boolean(source.hasSubscription ?? source.has_subscription)
-        : null,
-    subscriptionPlan:
-      asString(source.subscriptionPlan ?? source.subscription_plan) || null,
-    subscriptionExpiresAt: toNullableNumber(
-      source.subscriptionExpiresAt ?? source.subscription_expires_at
+    hasSubscription: isSubscriptionExpired ? false : hasSubscription,
+    subscriptionPlan: isSubscriptionExpired ? null : subscriptionPlan,
+    subscriptionExpiresAt,
+    subscriptionRenewsAt: isSubscriptionExpired ? null : subscriptionRenewsAt,
+    currentWindowCostUsd: Math.max(
+      0,
+      toNullableNumber(source.currentWindowCostUsd ?? source.current_window_cost_usd) ?? 0
     ),
-    subscriptionRenewsAt: toNullableNumber(
-      source.subscriptionRenewsAt ?? source.subscription_renews_at
+    currentWindowStartedAt: toNullableNumber(
+      source.currentWindowStartedAt ?? source.current_window_started_at
+    ),
+    currentWindowResetsAt: toNullableNumber(
+      source.currentWindowResetsAt ?? source.current_window_resets_at
     ),
     note: asString(source.note) || null,
     tags: asStringArray(source.tags),

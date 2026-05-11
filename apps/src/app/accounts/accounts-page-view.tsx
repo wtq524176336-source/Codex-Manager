@@ -2,9 +2,6 @@
 
 import type { Dispatch, SetStateAction } from "react";
 import {
-  ArrowDown,
-  ArrowUp,
-  ArrowUpDown,
   BarChart3,
   Download,
   FileUp,
@@ -13,7 +10,6 @@ import {
   Loader2,
   MoreVertical,
   PencilLine,
-  Pin,
   Plus,
   RefreshCw,
   Search,
@@ -55,6 +51,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import {
   Table,
   TableBody,
@@ -75,7 +72,6 @@ import type { Account } from "@/types";
 import {
   type AccountEditorState,
   type AccountExportMode,
-  type AccountSizeSortMode,
   type DeleteDialogState,
   type StatusFilter,
   AccountInfoCell,
@@ -86,7 +82,6 @@ import {
   formatAccountPlanValueLabel,
   formatPlanFilterLabel,
   formatStatusFilterLabel,
-  getAccountStatusAction,
 } from "@/app/accounts/accounts-page-helpers";
 
 interface PlanTypeOption {
@@ -120,7 +115,6 @@ export interface AccountsPageViewProps {
   totalPages: number;
   filteredAccounts: Account[];
   visibleAccounts: Account[];
-  filteredAccountIndexMap: Map<string, number>;
   effectiveSelectedIds: string[];
   addAccountModalOpen: boolean;
   usageModalOpen: boolean;
@@ -138,7 +132,6 @@ export interface AccountsPageViewProps {
   labelDraft: string;
   tagsDraft: string;
   noteDraft: string;
-  sortDraft: string;
   isRefreshingAllAccounts: boolean;
   isRefreshingAccountId: string | null;
   isRefreshingRtAccountId: string | null;
@@ -148,9 +141,7 @@ export interface AccountsPageViewProps {
   isDeletingMany: boolean;
   isCleaningAccountsByStatus: boolean;
   isUpdatingPreferred: boolean;
-  isReorderingAccounts: boolean;
   isUpdatingProfileAccountId: string | null;
-  isUpdatingStatusAccountId: string | null;
   statusFilterOptions: StatusFilterOption[];
   importFileActionLabel: string;
   importDirectoryActionLabel: string;
@@ -165,7 +156,6 @@ export interface AccountsPageViewProps {
   setLabelDraft: Dispatch<SetStateAction<string>>;
   setTagsDraft: Dispatch<SetStateAction<string>>;
   setNoteDraft: Dispatch<SetStateAction<string>>;
-  setSortDraft: Dispatch<SetStateAction<string>>;
   setPage: Dispatch<SetStateAction<number>>;
   handleSearchChange: (value: string) => void;
   handlePlanFilterChange: (value: string | null) => void;
@@ -184,11 +174,6 @@ export interface AccountsPageViewProps {
   handleConfirmExport: () => Promise<void>;
   handleDeleteSingle: (account: Account) => void;
   openAccountEditor: (account: Account) => void;
-  handleMoveAccount: (
-    account: Account,
-    direction: "up" | "down",
-  ) => Promise<void>;
-  handleApplyAccountSizeSort: (mode: AccountSizeSortMode) => Promise<void>;
   handleConfirmAccountEditor: () => Promise<void>;
   handleConfirmDelete: () => void;
   refreshAllAccounts: () => void;
@@ -200,11 +185,6 @@ export interface AccountsPageViewProps {
   refreshAccount: (accountId: string) => void;
   clearPreferredAccount: (accountId: string) => void;
   setPreferredAccount: (accountId: string) => void;
-  toggleAccountStatus: (
-    accountId: string,
-    enabled: boolean,
-    currentStatus: string,
-  ) => void;
 }
 
 export function AccountsPageView(props: AccountsPageViewProps) {
@@ -223,7 +203,6 @@ export function AccountsPageView(props: AccountsPageViewProps) {
     totalPages,
     filteredAccounts,
     visibleAccounts,
-    filteredAccountIndexMap,
     effectiveSelectedIds,
     addAccountModalOpen,
     usageModalOpen,
@@ -241,7 +220,6 @@ export function AccountsPageView(props: AccountsPageViewProps) {
     labelDraft,
     tagsDraft,
     noteDraft,
-    sortDraft,
     isRefreshingAllAccounts,
     isRefreshingAccountId,
     isRefreshingRtAccountId,
@@ -251,9 +229,7 @@ export function AccountsPageView(props: AccountsPageViewProps) {
     isDeletingMany,
     isCleaningAccountsByStatus,
     isUpdatingPreferred,
-    isReorderingAccounts,
     isUpdatingProfileAccountId,
-    isUpdatingStatusAccountId,
     statusFilterOptions,
     importFileActionLabel,
     importDirectoryActionLabel,
@@ -268,7 +244,6 @@ export function AccountsPageView(props: AccountsPageViewProps) {
     setLabelDraft,
     setTagsDraft,
     setNoteDraft,
-    setSortDraft,
     setPage,
     handleSearchChange,
     handlePlanFilterChange,
@@ -287,8 +262,6 @@ export function AccountsPageView(props: AccountsPageViewProps) {
     handleConfirmExport,
     handleDeleteSingle,
     openAccountEditor,
-    handleMoveAccount,
-    handleApplyAccountSizeSort,
     handleConfirmAccountEditor,
     handleConfirmDelete,
     refreshAllAccounts,
@@ -300,7 +273,6 @@ export function AccountsPageView(props: AccountsPageViewProps) {
     refreshAccount,
     clearPreferredAccount,
     setPreferredAccount,
-    toggleAccountStatus,
   } = props;
   const cleanupSelectedCount = cleanupStatusOptions.reduce(
     (total, option) =>
@@ -506,38 +478,6 @@ export function AccountsPageView(props: AccountsPageViewProps) {
                     <DropdownMenuShortcut>
                       {exportActionShortcut}
                     </DropdownMenuShortcut>
-                  </DropdownMenuItem>
-                </DropdownMenuGroup>
-                <DropdownMenuSeparator />
-                <DropdownMenuGroup>
-                  <DropdownMenuLabel className="px-2 py-1 text-[11px] uppercase tracking-[0.16em] text-muted-foreground/80">
-                    {t("排序")}
-                  </DropdownMenuLabel>
-                  <DropdownMenuItem
-                    className="h-9 rounded-lg px-2"
-                    disabled={
-                      !isServiceReady ||
-                      isReorderingAccounts ||
-                      accounts.length < 2
-                    }
-                    onClick={() => void handleApplyAccountSizeSort("large-first")}
-                  >
-                    <ArrowUpDown className="mr-2 h-4 w-4" />
-                    {t("大号优先排序")}
-                    <DropdownMenuShortcut>BIZ</DropdownMenuShortcut>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    className="h-9 rounded-lg px-2"
-                    disabled={
-                      !isServiceReady ||
-                      isReorderingAccounts ||
-                      accounts.length < 2
-                    }
-                    onClick={() => void handleApplyAccountSizeSort("small-first")}
-                  >
-                    <ArrowDown className="mr-2 h-4 w-4" />
-                    {t("小号优先排序")}
-                    <DropdownMenuShortcut>FREE</DropdownMenuShortcut>
                   </DropdownMenuItem>
                 </DropdownMenuGroup>
                 <DropdownMenuSeparator />
@@ -757,11 +697,11 @@ export function AccountsPageView(props: AccountsPageViewProps) {
                   />
                 </TableHead>
                 <TableHead className="max-w-[220px]">{t("账号信息")}</TableHead>
+                <TableHead className="w-[96px] text-center">{t("是否启用")}</TableHead>
                 <TableHead className="min-w-[250px] text-center">
                   {t("额度详情")}
                 </TableHead>
-                <TableHead className="w-[156px]">{t("顺序")}</TableHead>
-                <TableHead>{t("状态")}</TableHead>
+                <TableHead>{t("账号状态")}</TableHead>
                 <TableHead className="table-sticky-action-head w-[112px] text-center">
                   {t("操作")}
                 </TableHead>
@@ -778,14 +718,14 @@ export function AccountsPageView(props: AccountsPageViewProps) {
                       <Skeleton className="h-4 w-32" />
                     </TableCell>
                     <TableCell>
+                      <Skeleton className="mx-auto h-5 w-9 rounded-full" />
+                    </TableCell>
+                    <TableCell>
                       <div className="space-y-2">
                         <Skeleton className="h-4 w-40" />
                         <Skeleton className="h-4 w-40" />
                         <Skeleton className="h-4 w-40" />
                       </div>
-                    </TableCell>
-                    <TableCell>
-                      <Skeleton className="h-4 w-10" />
                     </TableCell>
                     <TableCell>
                       <Skeleton className="h-6 w-16 rounded-full" />
@@ -807,18 +747,10 @@ export function AccountsPageView(props: AccountsPageViewProps) {
               ) : (
                 visibleAccounts.map((account) => {
                   const quotaItems = buildQuotaSummaryItems(account, t);
-                  const statusAction = getAccountStatusAction(account, t);
-                  const StatusActionIcon = statusAction.icon;
                   const isRefreshingCurrentAccount =
                     isRefreshingAccountId === account.id;
                   const isRefreshingCurrentRt =
                     isRefreshingRtAccountId === account.id;
-                  const filteredIndex =
-                    filteredAccountIndexMap.get(account.id) ?? -1;
-                  const canMoveUp = filteredIndex > 0;
-                  const canMoveDown =
-                    filteredIndex !== -1 &&
-                    filteredIndex < filteredAccounts.length - 1;
                   return (
                     <TableRow key={account.id} className="group">
                       <TableCell className="text-center">
@@ -833,64 +765,40 @@ export function AccountsPageView(props: AccountsPageViewProps) {
                           isPreferred={account.preferred}
                         />
                       </TableCell>
+                      <TableCell className="text-center">
+                        <Switch
+                          size="sm"
+                          checked={account.preferred}
+                          disabled={
+                            !isServiceReady ||
+                            isUpdatingPreferred ||
+                            (!account.preferred && !account.isAvailable)
+                          }
+                          onCheckedChange={(checked) =>
+                            checked
+                              ? setPreferredAccount(account.id)
+                              : clearPreferredAccount(account.id)
+                          }
+                          aria-label={
+                            account.preferred
+                              ? t("关闭当前启用账号")
+                              : t("启用此账号")
+                          }
+                          title={
+                            account.preferred
+                              ? t("关闭当前启用账号")
+                              : t("启用此账号")
+                          }
+                        />
+                      </TableCell>
                       <TableCell>
                         <QuotaOverviewCell items={quotaItems} />
                       </TableCell>
                       <TableCell>
-                        <div className="flex items-center gap-1">
-                          <span className="rounded bg-muted/50 px-2 py-0.5 font-mono text-xs">
-                            {account.priority}
-                          </span>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 text-muted-foreground transition-colors hover:text-primary"
-                            disabled={
-                              !isServiceReady ||
-                              !canMoveUp ||
-                              isReorderingAccounts ||
-                              isUpdatingProfileAccountId === account.id
-                            }
-                            onClick={() => void handleMoveAccount(account, "up")}
-                            title={t("上移一位")}
-                          >
-                            <ArrowUp className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 text-muted-foreground transition-colors hover:text-primary"
-                            disabled={
-                              !isServiceReady ||
-                              !canMoveDown ||
-                              isReorderingAccounts ||
-                              isUpdatingProfileAccountId === account.id
-                            }
-                            onClick={() =>
-                              void handleMoveAccount(account, "down")
-                            }
-                            title={t("下移一位")}
-                          >
-                            <ArrowDown className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 text-muted-foreground transition-colors hover:text-primary"
-                            disabled={
-                              !isServiceReady ||
-                              isReorderingAccounts ||
-                              isUpdatingProfileAccountId === account.id
-                            }
-                            onClick={() => openAccountEditor(account)}
-                            title={t("编辑账号信息")}
-                          >
-                            <PencilLine className="h-3.5 w-3.5" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-1.5">
+                        <div
+                          className="flex items-center gap-1.5"
+                          title={account.availabilityText || undefined}
+                        >
                           <div
                             className={cn(
                               "h-1.5 w-1.5 rounded-full",
@@ -905,7 +813,7 @@ export function AccountsPageView(props: AccountsPageViewProps) {
                                 : "text-red-600 dark:text-red-400",
                             )}
                           >
-                            {t(account.availabilityText || "未知")}
+                            {account.isAvailable ? t("正常") : t("异常")}
                           </span>
                         </div>
                       </TableCell>
@@ -972,37 +880,16 @@ export function AccountsPageView(props: AccountsPageViewProps) {
                                 {t("刷新 AT/RT")}
                                 <DropdownMenuShortcut>RT</DropdownMenuShortcut>
                               </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem
-                                className="gap-2"
-                                disabled={!isServiceReady || isUpdatingPreferred}
-                                onClick={() =>
-                                  account.preferred
-                                    ? clearPreferredAccount(account.id)
-                                    : setPreferredAccount(account.id)
-                                }
-                              >
-                                <Pin className="h-4 w-4" />
-                                {account.preferred ? t("取消优先") : t("设为优先")}
-                              </DropdownMenuItem>
                               <DropdownMenuItem
                                 className="gap-2"
                                 disabled={
                                   !isServiceReady ||
-                                  isUpdatingStatusAccountId === account.id ||
-                                  statusAction.action === null
+                                  isUpdatingProfileAccountId === account.id
                                 }
-                                onClick={() =>
-                                  statusAction.action &&
-                                  toggleAccountStatus(
-                                    account.id,
-                                    statusAction.action === "enable",
-                                    account.status,
-                                  )
-                                }
+                                onClick={() => openAccountEditor(account)}
                               >
-                                <StatusActionIcon className="h-4 w-4" />
-                                {statusAction.label}
+                                <PencilLine className="h-4 w-4" />
+                                {t("编辑账号信息")}
                               </DropdownMenuItem>
                               <DropdownMenuSeparator />
                               <DropdownMenuItem
@@ -1134,7 +1021,7 @@ export function AccountsPageView(props: AccountsPageViewProps) {
             <DialogTitle>{t("编辑账号信息")}</DialogTitle>
             <DialogDescription>
               {accountEditorState
-                ? `${t("修改")} ${accountEditorState.accountName} ${t("的名称、标签、备注与排序。")}`
+                ? `${t("修改")} ${accountEditorState.accountName} ${t("的名称、标签与备注。")}`
                 : t("修改账号的基础资料。")}
             </DialogDescription>
           </DialogHeader>
@@ -1172,30 +1059,6 @@ export function AccountsPageView(props: AccountsPageViewProps) {
                 placeholder={t("例如：主账号 / 测试号 / 团队共享")}
                 className="min-h-[108px]"
               />
-            </div>
-            <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_120px] sm:items-end">
-              <div className="grid gap-2">
-                <Label htmlFor="account-sort-input">{t("顺序值")}</Label>
-                <Input
-                  id="account-sort-input"
-                  type="number"
-                  min={0}
-                  step={1}
-                  value={sortDraft}
-                  disabled={Boolean(isUpdatingProfileAccountId)}
-                  onChange={(event) => setSortDraft(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      void handleConfirmAccountEditor();
-                    }
-                  }}
-                />
-              </div>
-              <div className="grid gap-1 rounded-xl bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">
-                <span>{t("值越小越靠前")}</span>
-                <span>{t("仅修改当前账号")}</span>
-              </div>
             </div>
             <div className="grid gap-3 rounded-xl bg-muted/20 px-3 py-3 text-[11px] text-muted-foreground sm:grid-cols-2">
               <div className="space-y-1">

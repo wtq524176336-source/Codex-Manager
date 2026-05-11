@@ -343,18 +343,26 @@ pub(crate) fn refresh_current_chatgpt_auth_tokens(
             subscription.renews_at,
         )
         .map_err(|err| format!("store account subscription failed: {err}"))?;
-    let chatgpt_plan_type = subscription.plan_type.clone().or_else(|| {
-        plan_type_resolution
-            .as_ref()
-            .map(|plan| plan.normalized.clone())
-    });
+    let chatgpt_plan_type = if subscription.has_subscription {
+        subscription.plan_type.clone().or_else(|| {
+            plan_type_resolution
+                .as_ref()
+                .map(|plan| plan.normalized.clone())
+        })
+    } else {
+        Some("free".to_string())
+    };
 
     Ok(ChatgptAuthTokensRefreshResponse {
         access_token: token.access_token,
         chatgpt_account_id,
         chatgpt_plan_type,
         has_subscription: Some(subscription.has_subscription),
-        subscription_plan: subscription.plan_type,
+        subscription_plan: if subscription.has_subscription {
+            subscription.plan_type
+        } else {
+            None
+        },
         subscription_expires_at: subscription.expires_at,
         subscription_renews_at: subscription.renews_at,
     })
@@ -584,15 +592,22 @@ fn current_account_payload(
         .find_account_subscription(&account.id)
         .ok()
         .flatten();
-    let plan_type = subscription
-        .as_ref()
-        .and_then(|value| value.plan_type.clone())
-        .or_else(|| {
-            plan_type_resolution
-                .as_ref()
-                .map(|plan| plan.normalized.clone())
-        })
-        .unwrap_or_else(|| "unknown".to_string());
+    let plan_type = match subscription.as_ref() {
+        Some(value) if value.has_subscription => value
+            .plan_type
+            .clone()
+            .or_else(|| {
+                plan_type_resolution
+                    .as_ref()
+                    .map(|plan| plan.normalized.clone())
+            })
+            .unwrap_or_else(|| "unknown".to_string()),
+        Some(_) => "free".to_string(),
+        None => plan_type_resolution
+            .as_ref()
+            .map(|plan| plan.normalized.clone())
+            .unwrap_or_else(|| "unknown".to_string()),
+    };
     CurrentAuthAccount {
         kind: auth_mode.to_string(),
         account_id: account.id.clone(),
@@ -603,9 +618,13 @@ fn current_account_payload(
         plan_type,
         plan_type_raw: plan_type_resolution.and_then(|plan| plan.raw),
         has_subscription: subscription.as_ref().map(|value| value.has_subscription),
-        subscription_plan: subscription
-            .as_ref()
-            .and_then(|value| value.plan_type.clone()),
+        subscription_plan: subscription.as_ref().and_then(|value| {
+            if value.has_subscription {
+                value.plan_type.clone()
+            } else {
+                None
+            }
+        }),
         subscription_expires_at: subscription.as_ref().and_then(|value| value.expires_at),
         subscription_renews_at: subscription.as_ref().and_then(|value| value.renews_at),
         chatgpt_account_id: normalize_chatgpt_account_id(account.chatgpt_account_id.as_deref()),

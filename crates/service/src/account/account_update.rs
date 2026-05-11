@@ -1,6 +1,6 @@
 use codexmanager_core::storage::{now_ts, Event};
 
-use crate::{account_status, storage_helpers::open_storage};
+use crate::storage_helpers::open_storage;
 
 /// 函数 `update_account`
 ///
@@ -15,28 +15,23 @@ use crate::{account_status, storage_helpers::open_storage};
 /// 返回函数执行结果
 pub(crate) fn update_account(
     account_id: &str,
-    sort: Option<i64>,
     preferred: Option<bool>,
-    status: Option<&str>,
     label: Option<&str>,
     note: Option<&str>,
     tags: Option<&str>,
 ) -> Result<(), String> {
-    // 更新账号排序或状态并记录事件
+    // 更新账号启用开关或资料并记录事件
     let normalized_account_id = account_id.trim();
     if normalized_account_id.is_empty() {
         return Err("missing accountId".to_string());
     }
 
-    let normalized_status = status.map(normalize_account_status).transpose()?;
     let normalized_label = normalize_optional_label(label)?;
     let normalized_note = normalize_optional_text(note);
     let normalized_tags = normalize_optional_tags(tags);
     let metadata_requested = note.is_some() || tags.is_some();
 
-    if sort.is_none()
-        && preferred.is_none()
-        && normalized_status.is_none()
+    if preferred.is_none()
         && normalized_label.is_none()
         && !metadata_requested
     {
@@ -68,27 +63,7 @@ pub(crate) fn update_account(
             message: format!("preferred={preferred}"),
             created_at: now,
         });
-    }
-
-    if let Some(sort) = sort {
-        storage
-            .update_account_sort(normalized_account_id, sort)
-            .map_err(|e| e.to_string())?;
-        let _ = storage.insert_event(&Event {
-            account_id: Some(normalized_account_id.to_string()),
-            event_type: "account_sort_update".to_string(),
-            message: format!("sort={sort}"),
-            created_at: now,
-        });
-    }
-
-    if let Some(status) = normalized_status {
-        let reason = if status == "disabled" {
-            "manual_disable"
-        } else {
-            "manual_enable"
-        };
-        account_status::set_account_status(&storage, normalized_account_id, status, reason);
+        crate::gateway::invalidate_candidate_cache();
     }
 
     if let Some(label) = normalized_label {
@@ -127,26 +102,6 @@ pub(crate) fn update_account(
     }
 
     Ok(())
-}
-
-/// 函数 `normalize_account_status`
-///
-/// 作者: gaohongshun
-///
-/// 时间: 2026-04-02
-///
-/// # 参数
-/// - status: 参数 status
-///
-/// # 返回
-/// 返回函数执行结果
-fn normalize_account_status(status: &str) -> Result<&'static str, String> {
-    let normalized = status.trim().to_ascii_lowercase();
-    match normalized.as_str() {
-        "active" => Ok("active"),
-        "disabled" | "inactive" => Ok("disabled"),
-        _ => Err(format!("unsupported account status: {status}")),
-    }
 }
 
 /// 函数 `normalize_optional_label`

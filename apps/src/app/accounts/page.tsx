@@ -8,8 +8,6 @@ import { usePageTransitionReady } from "@/hooks/usePageTransitionReady";
 import { useRuntimeCapabilities } from "@/hooks/useRuntimeCapabilities";
 import { useI18n } from "@/lib/i18n/provider";
 import {
-  buildAccountsBySizeOrder,
-  buildAccountOrderUpdates,
   type AccountEditorState,
   type DeleteDialogState,
   normalizeAccountPlanKey,
@@ -20,14 +18,12 @@ import { AccountsPageView } from "@/app/accounts/accounts-page-view";
 import { isBannedAccount, isLimitedAccount } from "@/lib/utils/usage";
 import type { Account } from "@/types";
 
-type CleanupStatus = "unavailable" | "banned" | "limited" | "disabled" | "inactive";
+type CleanupStatus = "unavailable" | "banned" | "limited";
 
 const CLEANUP_STATUSES: CleanupStatus[] = [
   "unavailable",
   "banned",
   "limited",
-  "disabled",
-  "inactive",
 ];
 
 function normalizeCleanupStatus(status: string): CleanupStatus | null {
@@ -69,12 +65,8 @@ export default function AccountsPage() {
     setPreferredAccount,
     clearPreferredAccount,
     isUpdatingPreferred,
-    reorderAccounts,
-    isReorderingAccounts,
     updateAccountProfile,
     isUpdatingProfileAccountId,
-    toggleAccountStatus,
-    isUpdatingStatusAccountId,
   } = useAccounts();
   const isPageActive = useDesktopPageActive("/accounts/");
   usePageTransitionReady("/accounts/", !isServiceReady || !isLoading);
@@ -95,7 +87,6 @@ export default function AccountsPage() {
   const [labelDraft, setLabelDraft] = useState("");
   const [tagsDraft, setTagsDraft] = useState("");
   const [noteDraft, setNoteDraft] = useState("");
-  const [sortDraft, setSortDraft] = useState("");
   const [accountEditorState, setAccountEditorState] =
     useState<AccountEditorState | null>(null);
   const [deleteDialogState, setDeleteDialogState] =
@@ -145,7 +136,7 @@ export default function AccountsPage() {
       { id: "all" as const, label: `${t("全部")} (${accounts.length})` },
       {
         id: "available" as const,
-        label: `${t("可用")} (${accounts.filter((account) => account.isAvailable).length})`,
+        label: `${t("正常")} (${accounts.filter((account) => account.isAvailable).length})`,
       },
       {
         id: "low_quota" as const,
@@ -187,22 +178,12 @@ export default function AccountsPage() {
         {
           id: "banned" as const,
           label: t("封禁"),
-          description: t("账号或工作区被停用的账号"),
+          description: t("账号或工作区被官方停用的账号"),
         },
         {
           id: "limited" as const,
           label: t("用量限制"),
           description: t("明确触发 usage_limit_reached 的账号，不包含低额度账号"),
-        },
-        {
-          id: "disabled" as const,
-          label: t("禁用"),
-          description: t("手动禁用的账号"),
-        },
-        {
-          id: "inactive" as const,
-          label: t("停用"),
-          description: t("手动停用或旧版本标记的账号"),
         },
       ].map((option) => ({
         ...option,
@@ -237,12 +218,6 @@ export default function AccountsPage() {
     const offset = (safePage - 1) * pageSizeNumber;
     return filteredAccounts.slice(offset, offset + pageSizeNumber);
   }, [filteredAccounts, pageSizeNumber, safePage]);
-
-  const filteredAccountIndexMap = useMemo(
-    () =>
-      new Map(filteredAccounts.map((account, index) => [account.id, index])),
-    [filteredAccounts],
-  );
 
   const selectedAccount = useMemo(
     () => accounts.find((account) => account.id === selectedAccountId) ?? null,
@@ -422,85 +397,10 @@ const toggleCleanupStatus = (rawStatus: string) => {
       currentLabel: account.label,
       currentTags: account.tags.join(", "),
       currentNote: account.note || "",
-      currentSort: account.priority,
     });
     setLabelDraft(account.label);
     setTagsDraft(account.tags.join(", "));
     setNoteDraft(account.note || "");
-    setSortDraft(String(account.priority));
-  };
-
-  const handleMoveAccount = async (
-    account: Account,
-    direction: "up" | "down",
-  ) => {
-    const filteredIndex = filteredAccountIndexMap.get(account.id);
-    if (filteredIndex == null) {
-      toast.error(t("未找到当前账号，请刷新后重试"));
-      return;
-    }
-
-    const targetFilteredIndex =
-      direction === "up" ? filteredIndex - 1 : filteredIndex + 1;
-    if (targetFilteredIndex < 0) {
-      toast.info(t("当前账号已经在最前面"));
-      return;
-    }
-    if (targetFilteredIndex >= filteredAccounts.length) {
-      toast.info(t("当前账号已经在最后面"));
-      return;
-    }
-
-    const targetAccount = filteredAccounts[targetFilteredIndex];
-    const reorderedAccounts = accounts.filter((item) => item.id !== account.id);
-    const anchorIndex = reorderedAccounts.findIndex(
-      (item) => item.id === targetAccount.id,
-    );
-    if (anchorIndex === -1) {
-      toast.error(t("未找到目标账号，请刷新后重试"));
-      return;
-    }
-
-    reorderedAccounts.splice(
-      direction === "up" ? anchorIndex : anchorIndex + 1,
-      0,
-      account,
-    );
-    const updates = buildAccountOrderUpdates(reorderedAccounts);
-    if (!updates.length) {
-      toast.info(t("账号顺序未变化"));
-      return;
-    }
-
-    try {
-      await reorderAccounts(updates);
-    } catch {
-      // hook 内统一处理 toast，这里保持静默即可
-    }
-  };
-
-  const handleApplyAccountSizeSort = async (
-    mode: "large-first" | "small-first",
-  ) => {
-    if (accounts.length < 2) {
-      toast.info(t("账号数量不足，无需重新排序"));
-      return;
-    }
-    const reorderedAccounts = buildAccountsBySizeOrder(accounts, mode);
-    const updates = buildAccountOrderUpdates(reorderedAccounts);
-    if (!updates.length) {
-      toast.info(
-        mode === "large-first"
-          ? t("当前已经是大号优先顺序")
-          : t("当前已经是小号优先顺序"),
-      );
-      return;
-    }
-    try {
-      await reorderAccounts(updates);
-    } catch {
-      // hook 已统一处理 toast，这里保持静默即可
-    }
   };
 
   const handleConfirmAccountEditor = async () => {
@@ -515,23 +415,10 @@ const toggleCleanupStatus = (rawStatus: string) => {
       toast.error(t("请输入账号名称"));
       return;
     }
-    const rawSort = sortDraft.trim();
-    if (!rawSort) {
-      toast.error(t("请输入顺序值"));
-      return;
-    }
-    const parsed = Number(rawSort);
-    if (!Number.isFinite(parsed)) {
-      toast.error(t("顺序必须是数字"));
-      return;
-    }
-
-    const nextSort = Math.max(0, Math.trunc(parsed));
     if (
       nextLabel === accountEditorState.currentLabel &&
       nextTagsText === accountEditorState.currentTags &&
-      nextNote === accountEditorState.currentNote &&
-      nextSort === accountEditorState.currentSort
+      nextNote === accountEditorState.currentNote
     ) {
       setAccountEditorState(null);
       return;
@@ -542,7 +429,6 @@ const toggleCleanupStatus = (rawStatus: string) => {
         label: nextLabel,
         note: nextNote || null,
         tags: nextTags,
-        sort: nextSort,
       });
       setAccountEditorState(null);
     } catch {
@@ -577,7 +463,6 @@ const toggleCleanupStatus = (rawStatus: string) => {
       totalPages={totalPages}
       filteredAccounts={filteredAccounts}
       visibleAccounts={visibleAccounts}
-      filteredAccountIndexMap={filteredAccountIndexMap}
       effectiveSelectedIds={effectiveSelectedIds}
       addAccountModalOpen={addAccountModalOpen}
       usageModalOpen={usageModalOpen}
@@ -595,7 +480,6 @@ const toggleCleanupStatus = (rawStatus: string) => {
       labelDraft={labelDraft}
       tagsDraft={tagsDraft}
       noteDraft={noteDraft}
-      sortDraft={sortDraft}
       isRefreshingAllAccounts={isRefreshingAllAccounts}
       isRefreshingAccountId={isRefreshingAccountId}
       isRefreshingRtAccountId={isRefreshingRtAccountId}
@@ -605,9 +489,7 @@ const toggleCleanupStatus = (rawStatus: string) => {
       isDeletingMany={isDeletingMany}
       isCleaningAccountsByStatus={isCleaningAccountsByStatus}
       isUpdatingPreferred={isUpdatingPreferred}
-      isReorderingAccounts={isReorderingAccounts}
       isUpdatingProfileAccountId={isUpdatingProfileAccountId}
-      isUpdatingStatusAccountId={isUpdatingStatusAccountId}
       statusFilterOptions={statusFilterOptions}
       importFileActionLabel={importFileActionLabel}
       importDirectoryActionLabel={importDirectoryActionLabel}
@@ -622,7 +504,6 @@ const toggleCleanupStatus = (rawStatus: string) => {
       setLabelDraft={setLabelDraft}
       setTagsDraft={setTagsDraft}
       setNoteDraft={setNoteDraft}
-      setSortDraft={setSortDraft}
       setPage={setPage}
       handleSearchChange={handleSearchChange}
       handlePlanFilterChange={handlePlanFilterChange}
@@ -641,8 +522,6 @@ const toggleCleanupStatus = (rawStatus: string) => {
       handleConfirmExport={handleConfirmExport}
       handleDeleteSingle={handleDeleteSingle}
       openAccountEditor={openAccountEditor}
-      handleMoveAccount={handleMoveAccount}
-      handleApplyAccountSizeSort={handleApplyAccountSizeSort}
       handleConfirmAccountEditor={handleConfirmAccountEditor}
       handleConfirmDelete={handleConfirmDelete}
       refreshAllAccounts={refreshAllAccounts}
@@ -654,7 +533,6 @@ const toggleCleanupStatus = (rawStatus: string) => {
       refreshAccount={refreshAccount}
       clearPreferredAccount={clearPreferredAccount}
       setPreferredAccount={setPreferredAccount}
-      toggleAccountStatus={toggleAccountStatus}
     />
   );
 }

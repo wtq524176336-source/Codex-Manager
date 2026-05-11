@@ -82,9 +82,6 @@ interface LoginStartPayload {
 }
 
 interface AccountUpdatePayload {
-  sort?: number | null;
-  preferred?: boolean | null;
-  status?: string | null;
   label?: string | null;
   note?: string | null;
   tags?: string[] | string | null;
@@ -315,16 +312,11 @@ export const accountClient = {
         })
       )
     ),
-  updateSort: (accountId: string, sort: number) =>
-    invoke("service_account_update", withAddr({ accountId, sort })),
   updateProfile: (accountId: string, params: AccountUpdatePayload) =>
     invoke(
       "service_account_update",
       withAddr({
         accountId,
-        sort: typeof params.sort === "number" ? params.sort : null,
-        preferred: typeof params.preferred === "boolean" ? params.preferred : null,
-        status: params.status || null,
         label: params.label ?? null,
         note: params.note ?? null,
         tags: Array.isArray(params.tags)
@@ -339,10 +331,6 @@ export const accountClient = {
     invoke("service_account_update", withAddr({ accountId, preferred: true })),
   clearPreferred: (accountId: string) =>
     invoke("service_account_update", withAddr({ accountId, preferred: false })),
-  disableAccount: (accountId: string) =>
-    invoke("service_account_update", withAddr({ accountId, status: "disabled" })),
-  enableAccount: (accountId: string) =>
-    invoke("service_account_update", withAddr({ accountId, status: "active" })),
   import: importAccountContents,
   async importByDirectory(): Promise<AccountImportResult> {
     const picked = readAccountImportResult(

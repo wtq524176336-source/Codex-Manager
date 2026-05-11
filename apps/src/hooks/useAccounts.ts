@@ -31,24 +31,6 @@ type RefreshAllRtResult = Awaited<
 type DeleteAccountsByStatusesResult = Awaited<
   ReturnType<typeof accountClient.deleteByStatuses>
 >;
-type AccountSortUpdate = { accountId: string; sort: number };
-
-/**
- * 函数 `isAccountRefreshBlocked`
- *
- * 作者: gaohongshun
- *
- * 时间: 2026-04-02
- *
- * # 参数
- * - status: 参数 status
- *
- * # 返回
- * 返回函数执行结果
- */
-function isAccountRefreshBlocked(status: string | null | undefined): boolean {
-  return String(status || "").trim().toLowerCase() === "disabled";
-}
 
 /**
  * 函数 `buildImportSummaryMessage`
@@ -504,58 +486,22 @@ export function useAccounts() {
     },
   });
 
-  const updateAccountSortMutation = useMutation({
-    mutationFn: ({ accountId, sort }: { accountId: string; sort: number }) =>
-      accountClient.updateSort(accountId, sort),
-    onSuccess: async () => {
-      await invalidateAll();
-      toast.success(t("账号顺序已更新"));
-    },
-    onError: (error: unknown) => {
-      toast.error(`${t("更新顺序失败")}: ${getAppErrorMessage(error)}`);
-    },
-  });
-
-  const reorderAccountsMutation = useMutation({
-    mutationFn: async (updates: AccountSortUpdate[]) => {
-      for (const update of updates) {
-        await accountClient.updateSort(update.accountId, update.sort);
-      }
-      return updates.length;
-    },
-    onSuccess: async (count) => {
-      await invalidateAll();
-      toast.success(
-        count > 1
-          ? t("账号顺序已调整（{count} 项）", { count })
-          : t("账号顺序已更新"),
-      );
-    },
-    onError: async (error: unknown) => {
-      await invalidateAll();
-      toast.error(`${t("调整账号顺序失败")}: ${getAppErrorMessage(error)}`);
-    },
-  });
-
   const updateAccountProfileMutation = useMutation({
     mutationFn: ({
       accountId,
       label,
       note,
       tags,
-      sort,
     }: {
       accountId: string;
       label?: string | null;
       note?: string | null;
       tags?: string[] | string | null;
-      sort?: number | null;
     }) =>
       accountClient.updateProfile(accountId, {
         label,
         note,
         tags,
-        sort,
       }),
     onSuccess: async () => {
       await invalidateAll();
@@ -563,49 +509,6 @@ export function useAccounts() {
     },
     onError: (error: unknown) => {
       toast.error(`${t("更新账号信息失败")}: ${getAppErrorMessage(error)}`);
-    },
-  });
-
-  const toggleAccountStatusMutation = useMutation({
-    mutationFn: ({
-      accountId,
-      enabled,
-    }: {
-      accountId: string;
-      enabled: boolean;
-      sourceStatus?: string | null;
-    }) =>
-      enabled
-        ? accountClient.enableAccount(accountId)
-        : accountClient.disableAccount(accountId),
-    onSuccess: async (_result, variables) => {
-      await invalidateAll();
-      const normalizedSourceStatus = String(variables.sourceStatus || "")
-        .trim()
-        .toLowerCase();
-      toast.success(
-        variables.enabled
-          ? normalizedSourceStatus === "inactive"
-            ? t("账号已恢复")
-            : t("账号已启用")
-          : t("账号已禁用")
-      );
-    },
-    onError: (error: unknown, variables) => {
-      const normalizedSourceStatus = String(variables.sourceStatus || "")
-        .trim()
-        .toLowerCase();
-      const actionLabel = variables.enabled
-        ? normalizedSourceStatus === "inactive"
-          ? t("恢复")
-          : t("启用")
-        : t("禁用");
-      toast.error(
-        t("账号{action}失败: {error}", {
-          action: actionLabel,
-          error: getAppErrorMessage(error),
-        })
-      );
     },
   });
 
@@ -703,10 +606,10 @@ export function useAccounts() {
     mutationFn: (accountId: string) => accountClient.setPreferred(accountId),
     onSuccess: async () => {
       await invalidateAll();
-      toast.success(t("已设为优先账号"));
+      toast.success(t("已启用此账号"));
     },
     onError: (error: unknown) => {
-      toast.error(`${t("设置优先账号失败")}: ${getAppErrorMessage(error)}`);
+      toast.error(`${t("启用账号失败")}: ${getAppErrorMessage(error)}`);
     },
   });
 
@@ -714,10 +617,10 @@ export function useAccounts() {
     mutationFn: (accountId: string) => accountClient.clearPreferred(accountId),
     onSuccess: async () => {
       await invalidateAll();
-      toast.success(t("已取消优先账号"));
+      toast.success(t("已关闭当前启用账号"));
     },
     onError: (error: unknown) => {
-      toast.error(`${t("取消优先账号失败")}: ${getAppErrorMessage(error)}`);
+      toast.error(`${t("关闭启用账号失败")}: ${getAppErrorMessage(error)}`);
     },
   });
 
@@ -758,7 +661,7 @@ export function useAccounts() {
     },
     refreshAllAccounts: () => {
       if (!ensureServiceReady("刷新账号")) return;
-      if (!accounts.some((account) => !isAccountRefreshBlocked(account.status))) {
+      if (!accounts.length) {
         toast.info(t("当前没有可刷新的账号"));
         return;
       }
@@ -798,21 +701,12 @@ export function useAccounts() {
       return await warmupMutation.mutateAsync(params);
     },
     setPreferredAccount: (accountId: string) => {
-      if (!ensureServiceReady("设置优先账号")) return;
+      if (!ensureServiceReady("启用账号")) return;
       setPreferredMutation.mutate(accountId);
     },
     clearPreferredAccount: (accountId: string) => {
-      if (!ensureServiceReady("取消优先账号")) return;
+      if (!ensureServiceReady("关闭启用账号")) return;
       clearPreferredMutation.mutate(accountId);
-    },
-    updateAccountSort: async (accountId: string, sort: number) => {
-      if (!ensureServiceReady("更新账号顺序")) return;
-      await updateAccountSortMutation.mutateAsync({ accountId, sort });
-    },
-    reorderAccounts: async (updates: AccountSortUpdate[]) => {
-      if (!ensureServiceReady("调整账号顺序")) return;
-      if (!updates.length) return;
-      await reorderAccountsMutation.mutateAsync(updates);
     },
     updateAccountProfile: async (
       accountId: string,
@@ -820,19 +714,10 @@ export function useAccounts() {
         label?: string | null;
         note?: string | null;
         tags?: string[] | string | null;
-        sort?: number | null;
       }
     ) => {
       if (!ensureServiceReady("更新账号信息")) return;
       await updateAccountProfileMutation.mutateAsync({ accountId, ...params });
-    },
-    toggleAccountStatus: (
-      accountId: string,
-      enabled: boolean,
-      sourceStatus?: string | null
-    ) => {
-      if (!ensureServiceReady(enabled ? "启用账号" : "禁用账号")) return;
-      toggleAccountStatusMutation.mutate({ accountId, enabled, sourceStatus });
     },
     isRefreshingAccountId:
       refreshAccountMutation.isPending && typeof refreshAccountMutation.variables === "string"
@@ -851,16 +736,6 @@ export function useAccounts() {
     isCleaningAccountsByStatus: deleteByStatusesMutation.isPending,
     isUpdatingPreferred:
       setPreferredMutation.isPending || clearPreferredMutation.isPending,
-    isUpdatingSortAccountId:
-      updateAccountSortMutation.isPending &&
-      updateAccountSortMutation.variables &&
-      typeof updateAccountSortMutation.variables === "object" &&
-      "accountId" in updateAccountSortMutation.variables
-        ? String(
-            (updateAccountSortMutation.variables as { accountId?: unknown }).accountId || ""
-          )
-        : "",
-    isReorderingAccounts: reorderAccountsMutation.isPending,
     isUpdatingProfileAccountId:
       updateAccountProfileMutation.isPending &&
       updateAccountProfileMutation.variables &&
@@ -868,15 +743,6 @@ export function useAccounts() {
       "accountId" in updateAccountProfileMutation.variables
         ? String(
             (updateAccountProfileMutation.variables as { accountId?: unknown }).accountId || ""
-          )
-        : "",
-    isUpdatingStatusAccountId:
-      toggleAccountStatusMutation.isPending &&
-      toggleAccountStatusMutation.variables &&
-      typeof toggleAccountStatusMutation.variables === "object" &&
-      "accountId" in toggleAccountStatusMutation.variables
-        ? String(
-            (toggleAccountStatusMutation.variables as { accountId?: unknown }).accountId || ""
           )
         : "",
   };

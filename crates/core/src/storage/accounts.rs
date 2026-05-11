@@ -291,6 +291,7 @@ impl Storage {
                ON lu.account_id = a.id
               AND lu.rn = 1
              WHERE {availability_clause}
+               AND COALESCE(a.preferred, 0) = 1
              ORDER BY a.sort ASC, a.updated_at DESC",
             latest_usage_cte = latest_usage_cte_sql(),
             account_select = account_select_columns("a"),
@@ -916,7 +917,7 @@ fn account_usage_filter_clause(
 ) -> String {
     match mode {
         AccountUsageQueryMode::ActiveAvailable => format!(
-            "LOWER(TRIM(COALESCE({account_alias}.status, ''))) NOT IN ('inactive', 'disabled', 'unavailable', 'limited', 'banned')
+            "LOWER(TRIM(COALESCE({account_alias}.status, ''))) NOT IN ('unavailable', 'limited', 'banned')
              AND ({usage_alias}.account_id IS NULL OR ({}))",
             available_usage_clause(usage_alias)
         ),
@@ -1096,8 +1097,8 @@ mod tests {
     }
 
     #[test]
-    fn list_gateway_candidates_only_returns_active_available_accounts() {
-        let storage = Storage::open_in_memory().expect("open");
+    fn list_gateway_candidates_only_returns_enabled_active_available_account() {
+        let mut storage = Storage::open_in_memory().expect("open");
         storage.init().expect("init");
         let now = now_ts();
 
@@ -1139,22 +1140,22 @@ mod tests {
             })
             .expect("insert usage");
 
+        assert!(storage
+            .list_gateway_candidates()
+            .expect("list without enabled account")
+            .is_empty());
+        storage
+            .set_preferred_account(Some(active_available.id.as_str()))
+            .expect("enable account");
         let candidates = storage
             .list_gateway_candidates()
             .expect("list gateway candidates");
-        let mut ids = candidates
+        let ids = candidates
             .into_iter()
             .map(|(account, _)| account.id)
             .collect::<Vec<_>>();
-        ids.sort();
 
-        assert_eq!(
-            ids,
-            vec![
-                "acc-active-missing".to_string(),
-                "acc-active-ok".to_string()
-            ]
-        );
+        assert_eq!(ids, vec!["acc-active-ok".to_string()]);
     }
 
     #[test]

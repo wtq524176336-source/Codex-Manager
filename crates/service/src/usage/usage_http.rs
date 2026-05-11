@@ -1,5 +1,8 @@
 use chrono::DateTime;
-use codexmanager_core::usage::{subscription_endpoint, usage_endpoint};
+use codexmanager_core::{
+    storage::now_ts,
+    usage::{subscription_endpoint, usage_endpoint},
+};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue, CONTENT_TYPE};
 use reqwest::Client;
 use reqwest::Proxy;
@@ -1054,10 +1057,14 @@ async fn fetch_account_subscription_async(
                 None
             }
         });
-    let has_subscription = normalize_optional_text(response.id.as_deref()).is_some()
+    let has_subscription_evidence = normalize_optional_text(response.id.as_deref()).is_some()
         || plan_type.is_some()
         || expires_at.is_some()
         || renews_at.is_some();
+    let has_subscription =
+        has_subscription_evidence && expires_at.map_or(true, |value| value > now_ts());
+    let plan_type = if has_subscription { plan_type } else { None };
+    let renews_at = if has_subscription { renews_at } else { None };
 
     Ok(AccountSubscriptionSnapshot {
         has_subscription,

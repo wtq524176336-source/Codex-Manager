@@ -188,6 +188,9 @@ pub struct AccountSummary {
     pub subscription_plan: Option<String>,
     pub subscription_expires_at: Option<i64>,
     pub subscription_renews_at: Option<i64>,
+    pub current_window_cost_usd: f64,
+    pub current_window_started_at: Option<i64>,
+    pub current_window_resets_at: Option<i64>,
     pub note: Option<String>,
     pub tags: Option<String>,
 }

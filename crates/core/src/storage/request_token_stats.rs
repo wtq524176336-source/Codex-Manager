@@ -86,6 +86,39 @@ impl Storage {
         })
     }
 
+    /// 函数 `summarize_request_token_stats_cost_for_account_between`
+    ///
+    /// 作者: gaohongshun
+    ///
+    /// 时间: 2026-04-02
+    ///
+    /// # 参数
+    /// - self: 参数 self
+    /// - account_id: 参数 account_id
+    /// - start_ts: 参数 start_ts
+    /// - end_ts: 参数 end_ts
+    ///
+    /// # 返回
+    /// 返回函数执行结果
+    pub fn summarize_request_token_stats_cost_for_account_between(
+        &self,
+        account_id: &str,
+        start_ts: i64,
+        end_ts: i64,
+    ) -> Result<f64> {
+        if end_ts <= start_ts {
+            return Ok(0.0);
+        }
+        let mut stmt = self.conn.prepare(
+            "SELECT IFNULL(SUM(estimated_cost_usd), 0.0)
+             FROM request_token_stats
+             WHERE account_id = ?1
+               AND created_at >= ?2
+               AND created_at < ?3",
+        )?;
+        stmt.query_row((account_id, start_ts, end_ts), |row| row.get(0))
+    }
+
     /// 函数 `summarize_request_token_stats_by_key`
     ///
     /// 作者: gaohongshun
