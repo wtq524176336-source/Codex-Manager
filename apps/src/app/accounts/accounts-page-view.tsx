@@ -682,7 +682,7 @@ export function AccountsPageView(props: AccountsPageViewProps) {
 
       <Card className="glass-card overflow-hidden border-none py-0 shadow-xl backdrop-blur-md">
         <CardContent className="p-0">
-          <Table>
+          <Table className="text-[15px]">
             <TableHeader>
               <TableRow>
                 <TableHead className="w-12 text-center">
@@ -792,7 +792,7 @@ export function AccountsPageView(props: AccountsPageViewProps) {
                         />
                       </TableCell>
                       <TableCell>
-                        <QuotaOverviewCell items={quotaItems} />
+                        <QuotaOverviewCell account={account} items={quotaItems} />
                       </TableCell>
                       <TableCell>
                         <div
@@ -807,7 +807,7 @@ export function AccountsPageView(props: AccountsPageViewProps) {
                           />
                           <span
                             className={cn(
-                              "text-[11px] font-medium",
+                              "text-xs font-medium",
                               account.isAvailable
                                 ? "text-green-600 dark:text-green-400"
                                 : "text-red-600 dark:text-red-400",

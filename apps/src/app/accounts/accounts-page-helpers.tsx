@@ -5,7 +5,6 @@ import { RefreshCw, Zap } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
 import { cn } from "@/lib/utils";
 import {
-  formatRemainingDurationFromSeconds,
   formatTsFromSeconds,
   getExtraUsageDisplayRows,
   getUsageDisplayBuckets,
@@ -179,61 +178,69 @@ function QuotaProgress({
   );
 }
 
-export function QuotaOverviewCell({ items }: { items: QuotaSummaryItem[] }) {
+export function QuotaOverviewCell({
+  account,
+  items,
+}: {
+  account: Account;
+  items: QuotaSummaryItem[];
+}) {
   const { t } = useI18n();
   const summaryItems = items.slice(0, 2);
+  const currentWindowCostText = formatAccountWindowCostUsd(
+    account.currentWindowCostUsd,
+  );
+  const currentWindowCostLabel = formatAccountWindowCostLabel(account, t);
 
   return (
     <Tooltip>
       <TooltipTrigger render={<div />} className="block cursor-help">
-        <div className="rounded-xl border border-primary/5 bg-accent/10 px-3 py-1.5">
-          <div className="space-y-1">
-            {summaryItems.map((item) => (
-              <div
-                key={item.id}
-                className="grid grid-cols-[42px_minmax(120px,1fr)_minmax(220px,auto)] items-center gap-2 text-[10px]"
-              >
-                <span className="truncate text-muted-foreground">{item.label}</span>
-                <Progress
-                  value={item.remainPercent ?? 0}
-                  trackClassName={
-                    item.tone === "blue"
-                      ? "bg-blue-500/20"
-                      : item.tone === "amber"
-                        ? "bg-amber-500/20"
-                        : "bg-green-500/20"
-                  }
-                  indicatorClassName={
-                    item.tone === "blue"
-                      ? "bg-blue-500"
-                      : item.tone === "amber"
-                        ? "bg-amber-500"
-                        : "bg-green-500"
-                  }
-                />
-                <div className="flex min-w-0 items-center justify-end gap-2 text-muted-foreground">
-                  <span className="w-9 shrink-0 text-right font-medium text-foreground/80">
-                    {item.remainPercent == null
-                      ? (item.emptyText ?? "--")
-                      : `${item.remainPercent}%`}
-                  </span>
-                  <span className="min-w-0 truncate">
-                    {formatTsFromSeconds(
-                      item.resetsAt,
-                      item.emptyResetText ?? t("未知"),
-                    )}
-                  </span>
-                  <span className="w-[90px] shrink-0 text-right">
-                    {formatRemainingDurationFromSeconds(
-                      item.resetsAt,
-                      item.id.endsWith("-primary") ? "hours" : "days",
-                      item.emptyResetText ?? t("未知"),
-                    )}
-                    后刷新
-                  </span>
-                </div>
+        <div className="rounded-xl border border-primary/5 bg-accent/10 px-3 py-2">
+          <div className="grid grid-cols-[140px_minmax(220px,1fr)] items-center gap-4">
+            <div className="min-w-0 text-xs text-muted-foreground">
+              <div className="truncate font-medium text-foreground/80">
+                {currentWindowCostLabel}
               </div>
-            ))}
+              <div className="mt-0.5 font-semibold tabular-nums text-foreground">
+                {currentWindowCostText}
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              {summaryItems.map((item) => (
+                <div
+                  key={item.id}
+                  className="grid grid-cols-[42px_minmax(120px,1fr)_44px] items-center gap-2 text-xs"
+                >
+                  <span className="truncate text-muted-foreground">
+                    {item.label}
+                  </span>
+                  <Progress
+                    value={item.remainPercent ?? 0}
+                    trackClassName={
+                      item.tone === "blue"
+                        ? "bg-blue-500/20"
+                        : item.tone === "amber"
+                          ? "bg-amber-500/20"
+                          : "bg-green-500/20"
+                    }
+                    indicatorClassName={
+                      item.tone === "blue"
+                        ? "bg-blue-500"
+                        : item.tone === "amber"
+                          ? "bg-amber-500"
+                          : "bg-green-500"
+                    }
+                  />
+                  <div className="flex min-w-0 items-center justify-end gap-2 text-muted-foreground">
+                    <span className="w-9 shrink-0 text-right font-medium text-foreground/80">
+                      {item.remainPercent == null
+                        ? (item.emptyText ?? "--")
+                        : `${item.remainPercent}%`}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </TooltipTrigger>
@@ -460,14 +467,14 @@ export function AccountInfoCell({
       <TooltipTrigger render={<div />} className="block cursor-help text-left">
         <div className="flex flex-col overflow-hidden">
           <div className="flex items-center gap-2 overflow-hidden">
-            <span className="truncate text-sm font-semibold">
+            <span className="truncate text-base font-semibold">
               {account.name}
             </span>
             {accountPlanLabel ? (
               <Badge
                 variant="secondary"
                 className={cn(
-                  "h-4 shrink-0 px-1.5 text-[9px]",
+                  "h-5 shrink-0 px-1.5 text-[10px]",
                   getAccountPlanBadgeClassName(accountPlanLabel),
                 )}
               >
@@ -477,24 +484,21 @@ export function AccountInfoCell({
             {isPreferred ? (
               <Badge
                 variant="secondary"
-                className="h-4 shrink-0 bg-emerald-500/15 px-1.5 text-[9px] text-emerald-700 dark:text-emerald-300"
+                className="h-5 shrink-0 bg-emerald-500/15 px-1.5 text-[10px] text-emerald-700 dark:text-emerald-300"
               >
                 {t("启用")}
               </Badge>
             ) : null}
           </div>
-          <span className="truncate font-mono text-[10px] uppercase text-muted-foreground opacity-60">
+          <span className="truncate font-mono text-xs uppercase text-muted-foreground opacity-60">
             {account.id.slice(0, 16)}...
           </span>
-          <span className="mt-1 text-[10px] text-muted-foreground">
+          <span className="mt-1 text-xs text-muted-foreground">
             {t("最近刷新")}:{" "}
             {formatTsFromSeconds(account.lastRefreshAt, t("从未刷新"))}
           </span>
-          <span className="text-[10px] text-muted-foreground">
+          <span className="text-xs text-muted-foreground">
             {t("订阅到期")}: {subscriptionExpiryText}
-          </span>
-          <span className="text-[10px] text-muted-foreground">
-            {currentWindowCostLabel}: {currentWindowCostText}
           </span>
         </div>
       </TooltipTrigger>
