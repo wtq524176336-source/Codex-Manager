@@ -5,6 +5,7 @@ import { RefreshCw, Zap } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
 import { cn } from "@/lib/utils";
 import {
+  formatRemainingDurationFromSeconds,
   formatTsFromSeconds,
   getExtraUsageDisplayRows,
   getUsageDisplayBuckets,
@@ -209,7 +210,7 @@ export function QuotaOverviewCell({
               {summaryItems.map((item) => (
                 <div
                   key={item.id}
-                  className="grid grid-cols-[42px_minmax(120px,1fr)_44px] items-center gap-2 text-xs"
+                  className="grid grid-cols-[42px_minmax(120px,1fr)_44px_112px] items-center gap-2 text-xs"
                 >
                   <span className="truncate text-muted-foreground">
                     {item.label}
@@ -238,6 +239,14 @@ export function QuotaOverviewCell({
                         : `${item.remainPercent}%`}
                     </span>
                   </div>
+                  <span className="shrink-0 text-right text-muted-foreground">
+                    {formatRemainingDurationFromSeconds(
+                      item.resetsAt,
+                      item.id.endsWith("-primary") ? "hours" : "days",
+                      item.emptyResetText ?? t("未知"),
+                    )}
+                    后刷新
+                  </span>
                 </div>
               ))}
             </div>
