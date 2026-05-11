@@ -11,6 +11,7 @@ const DEFAULT_ACCOUNT_PAGE_SIZE: i64 = 5;
 const MAX_ACCOUNT_PAGE_SIZE: i64 = 500;
 const FIVE_HOUR_WINDOW_MINUTES: i64 = 300;
 const FIVE_HOUR_WINDOW_SECS: i64 = FIVE_HOUR_WINDOW_MINUTES * 60;
+const MINUTES_PER_HOUR: i64 = 60;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AccountFilter {
@@ -382,7 +383,7 @@ fn to_account_summaries(
     let now = now_ts();
     let mut window_costs = HashMap::new();
     for account_id in &account_ids {
-        let (started_at, resets_at) = current_five_hour_window(usages.get(account_id), now);
+        let (started_at, resets_at) = current_usage_cost_window(usages.get(account_id), now);
         let cost_usd = storage
             .summarize_request_token_stats_cost_for_account_between(
                 account_id, started_at, resets_at,
@@ -459,16 +460,10 @@ fn map_account_summary(
     let plan = resolve_account_plan(tokens.get(&account_id), usages.get(&account_id));
     let account_metadata = metadata.get(&account_id);
     let subscription = subscriptions.get(&account_id);
-    let subscription_expired = subscription.is_some_and(|value| {
-        value
-            .expires_at
-            .is_some_and(|expires_at| expires_at <= now)
-    });
+    let subscription_expired = subscription
+        .is_some_and(|value| value.expires_at.is_some_and(|expires_at| expires_at <= now));
     let has_subscription = subscription.map(|value| {
-        value.has_subscription
-            && value
-                .expires_at
-                .map_or(true, |expires_at| expires_at > now)
+        value.has_subscription && value.expires_at.map_or(true, |expires_at| expires_at > now)
     });
     let (fallback_plan_type, plan_type_raw) = match plan {
         Some(value) => (Some(value.normalized), value.raw),
@@ -505,23 +500,32 @@ fn map_account_summary(
     )
 }
 
-fn current_five_hour_window(
-    snapshot: Option<&UsageSnapshotRecord>,
-    now: i64,
-) -> (i64, i64) {
+fn current_usage_cost_window(snapshot: Option<&UsageSnapshotRecord>, now: i64) -> (i64, i64) {
     if let Some(resets_at) = find_five_hour_resets_at(snapshot) {
-        let mut end_ts = resets_at;
-        if end_ts > 0 {
-            if end_ts <= now {
-                let elapsed_windows = ((now - end_ts) / FIVE_HOUR_WINDOW_SECS) + 1;
-                end_ts += elapsed_windows * FIVE_HOUR_WINDOW_SECS;
-            }
-            return (end_ts - FIVE_HOUR_WINDOW_SECS, end_ts);
-        }
+        return normalize_window(resets_at, FIVE_HOUR_WINDOW_MINUTES, now);
+    }
+
+    if let Some((resets_at, window_minutes)) = find_long_window_resets_at(snapshot) {
+        return normalize_window(resets_at, window_minutes, now);
     }
 
     let start_ts = (now / FIVE_HOUR_WINDOW_SECS) * FIVE_HOUR_WINDOW_SECS;
     (start_ts, start_ts + FIVE_HOUR_WINDOW_SECS)
+}
+
+fn normalize_window(resets_at: i64, window_minutes: i64, now: i64) -> (i64, i64) {
+    let window_secs = window_minutes.max(1) * MINUTES_PER_HOUR;
+    let mut end_ts = resets_at;
+    if end_ts > 0 {
+        if end_ts <= now {
+            let elapsed_windows = ((now - end_ts) / window_secs) + 1;
+            end_ts += elapsed_windows * window_secs;
+        }
+        return (end_ts - window_secs, end_ts);
+    }
+
+    let start_ts = (now / window_secs) * window_secs;
+    (start_ts, start_ts + window_secs)
 }
 
 fn find_five_hour_resets_at(snapshot: Option<&UsageSnapshotRecord>) -> Option<i64> {
@@ -533,6 +537,24 @@ fn find_five_hour_resets_at(snapshot: Option<&UsageSnapshotRecord>) -> Option<i6
     }
     if snapshot.secondary_window_minutes == Some(FIVE_HOUR_WINDOW_MINUTES) {
         return snapshot.secondary_resets_at;
+    }
+    None
+}
+
+fn find_long_window_resets_at(snapshot: Option<&UsageSnapshotRecord>) -> Option<(i64, i64)> {
+    let snapshot = snapshot?;
+    if let (Some(window_minutes), Some(resets_at)) = (snapshot.window_minutes, snapshot.resets_at) {
+        if window_minutes > FIVE_HOUR_WINDOW_MINUTES {
+            return Some((resets_at, window_minutes));
+        }
+    }
+    if let (Some(window_minutes), Some(resets_at)) = (
+        snapshot.secondary_window_minutes,
+        snapshot.secondary_resets_at,
+    ) {
+        if window_minutes > FIVE_HOUR_WINDOW_MINUTES {
+            return Some((resets_at, window_minutes));
+        }
     }
     None
 }

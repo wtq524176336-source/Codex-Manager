@@ -354,6 +354,27 @@ function formatAccountWindowCostUsd(value: number): string {
   }).format(normalized);
 }
 
+function formatAccountWindowCostLabel(account: Account, t: TranslateFn): string {
+  const startedAt =
+    typeof account.currentWindowStartedAt === "number"
+      ? account.currentWindowStartedAt
+      : null;
+  const resetsAt =
+    typeof account.currentWindowResetsAt === "number"
+      ? account.currentWindowResetsAt
+      : null;
+  if (startedAt != null && resetsAt != null) {
+    const windowSeconds = Math.max(0, resetsAt - startedAt);
+    if (windowSeconds >= 6 * 24 * 60 * 60) {
+      return t("1周 API 费用");
+    }
+  }
+  if (isSecondaryWindowOnlyUsage(account.usage)) {
+    return t("1周 API 费用");
+  }
+  return t("5小时 API 费用");
+}
+
 export function normalizeTagsDraft(tagsDraft: string): string[] {
   return tagsDraft
     .split(",")
@@ -432,6 +453,7 @@ export function AccountInfoCell({
   const currentWindowCostText = formatAccountWindowCostUsd(
     account.currentWindowCostUsd,
   );
+  const currentWindowCostLabel = formatAccountWindowCostLabel(account, t);
 
   return (
     <Tooltip>
@@ -472,7 +494,7 @@ export function AccountInfoCell({
             {t("订阅到期")}: {subscriptionExpiryText}
           </span>
           <span className="text-[10px] text-muted-foreground">
-            {t("5小时 API 费用")}: {currentWindowCostText}
+            {currentWindowCostLabel}: {currentWindowCostText}
           </span>
         </div>
       </TooltipTrigger>
@@ -527,7 +549,7 @@ export function AccountInfoCell({
           <div className="grid gap-2 sm:grid-cols-2">
             <div className="space-y-0.5">
               <div className="text-[10px] text-background/70">
-                {t("5小时 API 费用")}
+                {currentWindowCostLabel}
               </div>
               <div className="font-medium">{currentWindowCostText}</div>
             </div>

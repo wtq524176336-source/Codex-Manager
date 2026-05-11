@@ -245,6 +245,8 @@ export const EN_MESSAGES: MessageCatalog = {
   未找到符合条件的账号: "No accounts match the current filters",
   "5小时": "5h",
   "7天": "7d",
+  "5小时 API 费用": "5-hour API cost",
+  "1周 API 费用": "1-week API cost",
   未提供: "Unavailable",
   上移一位: "Move up",
   下移一位: "Move down",

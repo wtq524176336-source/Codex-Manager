@@ -111,6 +111,20 @@ pub(crate) fn resolve_account_plan(
     token: Option<&Token>,
     snapshot: Option<&UsageSnapshotRecord>,
 ) -> Option<ResolvedAccountPlan> {
+    let usage_plan = snapshot
+        .and_then(|value| extract_plan_type_from_credits_json(value.credits_json.as_deref()));
+    if let Some(plan) = usage_plan.as_deref().and_then(normalize_plan_type) {
+        if plan.normalized == "free" {
+            return Some(plan);
+        }
+    }
+    if snapshot.is_some_and(is_single_window_long_usage_snapshot) {
+        return Some(ResolvedAccountPlan {
+            normalized: "free".to_string(),
+            raw: None,
+        });
+    }
+
     let token_plan = token
         .and_then(|value| extract_plan_type_from_id_token(&value.access_token))
         .or_else(|| token.and_then(|value| extract_plan_type_from_id_token(&value.id_token)));
@@ -118,17 +132,8 @@ pub(crate) fn resolve_account_plan(
         return Some(plan);
     }
 
-    let usage_plan = snapshot
-        .and_then(|value| extract_plan_type_from_credits_json(value.credits_json.as_deref()));
     if let Some(plan) = usage_plan.as_deref().and_then(normalize_plan_type) {
         return Some(plan);
-    }
-
-    if snapshot.is_some_and(is_single_window_long_usage_snapshot) {
-        return Some(ResolvedAccountPlan {
-            normalized: "free".to_string(),
-            raw: None,
-        });
     }
 
     None
@@ -628,7 +633,7 @@ mod tests {
         );
     }
 
-    /// 函数 `resolve_account_plan_prefers_token_claims_and_falls_back_to_usage`
+    /// 函数 `resolve_account_plan_uses_free_usage_over_stale_token_claims`
     ///
     /// 作者: gaohongshun
     ///
@@ -640,7 +645,7 @@ mod tests {
     /// # 返回
     /// 无
     #[test]
-    fn resolve_account_plan_prefers_token_claims_and_falls_back_to_usage() {
+    fn resolve_account_plan_uses_free_usage_over_stale_token_claims() {
         let token = Token {
             account_id: "acc-plus".to_string(),
             id_token: "header.payload.sig".to_string(),
@@ -675,7 +680,7 @@ mod tests {
         };
 
         let resolved = resolve_account_plan(Some(&token), Some(&usage)).expect("resolve plan");
-        assert_eq!(resolved.normalized, "plus");
+        assert_eq!(resolved.normalized, "free");
     }
 
     /// 函数 `account_plan_filter_unknown_accepts_unresolved_accounts`

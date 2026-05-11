@@ -405,6 +405,7 @@ export function normalizeAccount(item: unknown, usage?: AccountUsage | null): Ac
   const isSubscriptionExpired =
     subscriptionExpiresAt != null &&
     subscriptionExpiresAt <= Math.floor(Date.now() / 1000);
+  const isSubscriptionInactive = hasSubscription === false || isSubscriptionExpired;
 
   return {
     id,
@@ -417,12 +418,12 @@ export function normalizeAccount(item: unknown, usage?: AccountUsage | null): Ac
     sort: asInteger(source.sort ?? source.priority, 0, 0),
     status,
     statusReason,
-    planType: isSubscriptionExpired ? "free" : rawPlanType,
+    planType: isSubscriptionInactive ? "free" : rawPlanType,
     planTypeRaw: asString(source.planTypeRaw ?? source.plan_type_raw) || null,
-    hasSubscription: isSubscriptionExpired ? false : hasSubscription,
-    subscriptionPlan: isSubscriptionExpired ? null : subscriptionPlan,
+    hasSubscription: isSubscriptionInactive ? false : hasSubscription,
+    subscriptionPlan: isSubscriptionInactive ? null : subscriptionPlan,
     subscriptionExpiresAt,
-    subscriptionRenewsAt: isSubscriptionExpired ? null : subscriptionRenewsAt,
+    subscriptionRenewsAt: isSubscriptionInactive ? null : subscriptionRenewsAt,
     currentWindowCostUsd: Math.max(
       0,
       toNullableNumber(source.currentWindowCostUsd ?? source.current_window_cost_usd) ?? 0
