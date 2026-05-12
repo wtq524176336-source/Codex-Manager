@@ -91,12 +91,7 @@ fn resolve_target_accounts(
     storage: &Storage,
     account_ids: &[String],
 ) -> Result<Vec<Account>, String> {
-    let accounts = storage
-        .list_gateway_candidates()
-        .map_err(|err| err.to_string())?
-        .into_iter()
-        .map(|(account, _token)| account)
-        .collect::<Vec<_>>();
+    let accounts = storage.list_accounts().map_err(|err| err.to_string())?;
 
     if account_ids.is_empty() {
         return Ok(accounts);
@@ -471,7 +466,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_target_accounts_only_returns_gateway_available_accounts() {
+    fn resolve_target_accounts_returns_all_or_selected_accounts() {
         let storage = Storage::open_in_memory().expect("open in-memory storage");
         storage.init().expect("init in-memory storage");
         let now = now_ts();
@@ -510,8 +505,20 @@ mod tests {
         }
 
         let all_targets = resolve_target_accounts(&storage, &[]).expect("resolve all targets");
-        assert_eq!(all_targets.len(), 1);
-        assert_eq!(all_targets[0].id, "acc-active");
+        let all_target_ids = all_targets
+            .into_iter()
+            .map(|account| account.id)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            all_target_ids,
+            vec![
+                "acc-active".to_string(),
+                "acc-unavailable".to_string(),
+                "acc-disabled".to_string(),
+                "acc-banned".to_string(),
+                "acc-inactive".to_string(),
+            ]
+        );
 
         let selected_targets = resolve_target_accounts(
             &storage,
@@ -522,8 +529,18 @@ mod tests {
             ],
         )
         .expect("resolve selected targets");
-        assert_eq!(selected_targets.len(), 1);
-        assert_eq!(selected_targets[0].id, "acc-active");
+        let selected_target_ids = selected_targets
+            .into_iter()
+            .map(|account| account.id)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            selected_target_ids,
+            vec![
+                "acc-unavailable".to_string(),
+                "acc-active".to_string(),
+                "acc-disabled".to_string(),
+            ]
+        );
     }
 
     #[test]

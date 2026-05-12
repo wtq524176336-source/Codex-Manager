@@ -11,6 +11,9 @@ use tiny_http::Request;
 
 use super::{LocalValidationError, LocalValidationResult};
 
+const CODEX_COMPACT_SUBAGENT: &str = "compact";
+const CODEX_COMPACT_PROMPT_MARKER: &[u8] = b"CONTEXT CHECKPOINT COMPACTION";
+
 /// 函数 `resolve_effective_request_overrides`
 ///
 /// 作者: gaohongshun
@@ -1037,6 +1040,34 @@ fn is_native_codex_client_request(incoming_headers: &super::super::IncomingHeade
         || has_codex_header_signals
 }
 
+fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
+    !needle.is_empty()
+        && haystack.len() >= needle.len()
+        && haystack.windows(needle.len()).any(|window| window == needle)
+}
+
+fn is_codex_compact_request_for_log(
+    incoming_headers: &super::super::IncomingHeaderSnapshot,
+    body: &[u8],
+) -> bool {
+    incoming_headers
+        .subagent()
+        .map(str::trim)
+        .is_some_and(|value| value.eq_ignore_ascii_case(CODEX_COMPACT_SUBAGENT))
+        || contains_bytes(body, CODEX_COMPACT_PROMPT_MARKER)
+}
+
+fn request_type_for_log(
+    incoming_headers: &super::super::IncomingHeaderSnapshot,
+    body: &[u8],
+) -> String {
+    if is_codex_compact_request_for_log(incoming_headers, body) {
+        "compact".to_string()
+    } else {
+        "http".to_string()
+    }
+}
+
 fn should_normalize_compat_service_tier_for_codex_backend(
     protocol_type: &str,
     normalized_path: &str,
@@ -1310,6 +1341,7 @@ pub(super) fn build_local_validation_result(
             initial_request_meta.stream_specified,
             native_codex_client,
         );
+        let request_type_for_log = request_type_for_log(&incoming_headers, &rewritten_body);
         return Ok(LocalValidationResult {
             trace_id,
             incoming_headers,
@@ -1329,6 +1361,7 @@ pub(super) fn build_local_validation_result(
             response_adapter: super::super::ResponseAdapter::Passthrough,
             gemini_stream_output_mode: None,
             tool_name_restore_map: super::super::ToolNameRestoreMap::default(),
+            request_type_for_log,
             request_method,
             key_id: api_key.id,
             platform_key_hash: api_key.key_hash,
@@ -1572,6 +1605,7 @@ pub(super) fn build_local_validation_result(
     );
     let has_prompt_cache_key = request_meta.has_prompt_cache_key;
     let request_shape = client_request_meta.request_shape;
+    let request_type_for_log = request_type_for_log(&incoming_headers, &body);
 
     ensure_anthropic_model_is_listed(&storage, effective_protocol_type, model_for_log.as_deref())?;
 
@@ -1591,6 +1625,7 @@ pub(super) fn build_local_validation_result(
         response_adapter,
         gemini_stream_output_mode,
         tool_name_restore_map,
+        request_type_for_log,
         request_method,
         key_id: api_key.id,
         platform_key_hash: api_key.key_hash,

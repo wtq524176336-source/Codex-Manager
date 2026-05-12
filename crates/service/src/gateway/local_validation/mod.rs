@@ -26,6 +26,7 @@ pub(super) struct LocalValidationResult {
     pub(super) response_adapter: super::ResponseAdapter,
     pub(super) gemini_stream_output_mode: Option<super::GeminiStreamOutputMode>,
     pub(super) tool_name_restore_map: super::ToolNameRestoreMap,
+    pub(super) request_type_for_log: String,
     pub(super) request_method: String,
     pub(super) key_id: String,
     pub(super) platform_key_hash: String,

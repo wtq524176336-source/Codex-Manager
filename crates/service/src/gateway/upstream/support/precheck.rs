@@ -36,6 +36,7 @@ pub(in super::super) fn prepare_candidates_for_proxy(
     model_for_log: Option<&str>,
     reasoning_for_log: Option<&str>,
     account_plan_filter: Option<&str>,
+    request_type_for_log: &str,
     respond_when_empty: bool,
 ) -> CandidatePrecheckResult {
     let candidates: Vec<(Account, Token)> = match super::candidates::prepare_gateway_candidates(
@@ -56,6 +57,7 @@ pub(in super::super) fn prepare_candidates_for_proxy(
                     original_path: Some(original_path),
                     adapted_path: Some(path),
                     response_adapter: Some(response_adapter),
+                    request_type: Some(request_type_for_log),
                     ..Default::default()
                 },
                 Some(key_id),
@@ -103,6 +105,7 @@ pub(in super::super) fn prepare_candidates_for_proxy(
                 original_path: Some(original_path),
                 adapted_path: Some(path),
                 response_adapter: Some(response_adapter),
+                request_type: Some(request_type_for_log),
                 ..Default::default()
             },
             Some(key_id),

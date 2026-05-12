@@ -376,7 +376,14 @@ pub(crate) fn write_request_log_with_attempts(
     let reasoning_output_tokens = normalize_token(usage.reasoning_output_tokens);
     let duration_ms = normalize_duration_ms(duration_ms);
     let first_response_ms = usage.first_response_ms.map(|value| value.max(0));
-    let compact_output_text = if is_compact_request_path(request_path) {
+    let request_type = trace_context
+        .request_type
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("http");
+    let compact_output_text = if is_compact_request_path(request_path)
+        || request_type.eq_ignore_ascii_case("compact")
+    {
         usage
             .output_text
             .as_deref()
@@ -389,11 +396,6 @@ pub(crate) fn write_request_log_with_attempts(
     let created_at = now_ts();
     let estimated_cost_usd =
         estimate_cost_usd(model, input_tokens, cached_input_tokens, output_tokens);
-    let request_type = trace_context
-        .request_type
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or("http");
     let service_tier = trace_context
         .service_tier
         .map(str::trim)

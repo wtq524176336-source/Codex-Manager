@@ -477,6 +477,9 @@ function isCompactRequestPath(path: string): boolean {
 }
 
 function isCompactRequestLog(log: RequestLog): boolean {
+  if (String(log.requestType || "").trim().toLowerCase() === "compact") {
+    return true;
+  }
   const paths = [log.requestPath, log.path, log.originalPath, log.adaptedPath].map((value) =>
     String(value || "").trim(),
   );
@@ -731,8 +734,11 @@ function formatModelEffortDisplay(log: RequestLog): string {
   return model || effort || "-";
 }
 
-function normalizeRequestType(value: string): "ws" | "http" {
-  return String(value || "").trim().toLowerCase() === "ws" ? "ws" : "http";
+function normalizeRequestType(value: string): "ws" | "http" | "compact" {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "ws") return "ws";
+  if (normalized === "compact") return "compact";
+  return "http";
 }
 
 function normalizeDisplayServiceTier(value: string | null | undefined): string {
@@ -758,10 +764,12 @@ function resolveDisplayServiceTier(
 
 function RequestTypeBadge({ requestType }: { requestType: string }) {
   const normalized = normalizeRequestType(requestType);
-  const label = normalized.toUpperCase();
+  const label = normalized === "compact" ? "CMP" : normalized.toUpperCase();
   const toneClass =
     normalized === "ws"
       ? "border-cyan-500/20 bg-cyan-500/10 text-cyan-500"
+      : normalized === "compact"
+        ? "border-violet-500/20 bg-violet-500/10 text-violet-500"
       : "border-slate-500/20 bg-slate-500/10 text-slate-500";
   return (
     <Badge className={cn("h-5 rounded-full px-1.5 text-[10px] font-medium", toneClass)}>
@@ -1032,7 +1040,9 @@ function AccountKeyInfoCell({
 function RequestRouteInfoCell({ log }: { log: RequestLog }) {
   const { t } = useI18n();
   const displayPath = resolveDisplayRequestPath(log) || "-";
-  const displayPathLabel = resolveFriendlyRequestPathLabel(displayPath, t) || "-";
+  const displayPathLabel = isCompactRequestLog(log)
+    ? t("上下文压缩")
+    : resolveFriendlyRequestPathLabel(displayPath, t) || "-";
   const recordedPath = String(log.path || log.requestPath || "").trim();
   const originalPath = String(log.originalPath || "").trim();
   const adaptedPath = String(log.adaptedPath || "").trim();
