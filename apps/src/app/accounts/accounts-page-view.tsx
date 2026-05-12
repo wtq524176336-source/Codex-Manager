@@ -2,14 +2,12 @@
 
 import type { Dispatch, SetStateAction } from "react";
 import {
-  BarChart3,
   Download,
   FileUp,
   FolderOpen,
   KeyRound,
   Loader2,
   MoreVertical,
-  PencilLine,
   Plus,
   RefreshCw,
   Search,
@@ -251,7 +249,6 @@ export function AccountsPageView(props: AccountsPageViewProps) {
     handlePageSizeChange,
     toggleSelect,
     toggleSelectAllVisible,
-    openUsage,
     handleUsageModalOpenChange,
     handleDeleteSelected,
     openCleanupDialog,
@@ -261,7 +258,6 @@ export function AccountsPageView(props: AccountsPageViewProps) {
     openExportDialog,
     handleConfirmExport,
     handleDeleteSingle,
-    openAccountEditor,
     handleConfirmAccountEditor,
     handleConfirmDelete,
     refreshAllAccounts,
@@ -747,10 +743,6 @@ export function AccountsPageView(props: AccountsPageViewProps) {
               ) : (
                 visibleAccounts.map((account) => {
                   const quotaItems = buildQuotaSummaryItems(account, t);
-                  const isRefreshingCurrentAccount =
-                    isRefreshingAccountId === account.id;
-                  const isRefreshingCurrentRt =
-                    isRefreshingRtAccountId === account.id;
                   return (
                     <TableRow key={account.id} className="group">
                       <TableCell className="text-center">
@@ -792,7 +784,7 @@ export function AccountsPageView(props: AccountsPageViewProps) {
                         />
                       </TableCell>
                       <TableCell>
-                        <QuotaOverviewCell account={account} items={quotaItems} />
+                        <QuotaOverviewCell items={quotaItems} />
                       </TableCell>
                       <TableCell>
                         <div
@@ -818,89 +810,18 @@ export function AccountsPageView(props: AccountsPageViewProps) {
                         </div>
                       </TableCell>
                       <TableCell className="table-sticky-action-cell">
-                        <div className="table-action-cell gap-1">
+                        <div className="table-action-cell">
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="h-8 w-8 text-muted-foreground transition-colors hover:text-primary"
+                            className="h-8 w-8 text-red-500 transition-colors hover:bg-red-500/10 hover:text-red-600"
                             disabled={!isServiceReady}
-                            onClick={() => openUsage(account)}
-                            title={t("用量详情")}
-                            aria-label={t("用量详情")}
+                            onClick={() => handleDeleteSingle(account)}
+                            title={t("删除")}
+                            aria-label={t("删除")}
                           >
-                            <BarChart3 className="h-4 w-4" />
+                            <Trash2 className="h-4 w-4" />
                           </Button>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8"
-                                render={<span />}
-                                nativeButton={false}
-                                disabled={!isServiceReady}
-                                title={t("更多账号操作")}
-                                aria-label={t("更多账号操作")}
-                              >
-                                <MoreVertical className="h-4 w-4" />
-                                <span className="sr-only">
-                                  {t("更多账号操作")}
-                                </span>
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem
-                                className="gap-2"
-                                disabled={
-                                  !isServiceReady ||
-                                  isRefreshingAllAccounts ||
-                                  isRefreshingCurrentAccount
-                                }
-                                onClick={() => refreshAccount(account.id)}
-                              >
-                                <RefreshCw
-                                  className={cn(
-                                    "h-4 w-4",
-                                    isRefreshingCurrentAccount && "animate-spin",
-                                  )}
-                                />
-                                {t("刷新用量")}
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                className="gap-2"
-                                disabled={!isServiceReady || isRefreshingCurrentRt}
-                                onClick={() => refreshAccountRt(account.id)}
-                              >
-                                <KeyRound
-                                  className={cn(
-                                    "h-4 w-4",
-                                    isRefreshingCurrentRt && "animate-pulse",
-                                  )}
-                                />
-                                {t("刷新 AT/RT")}
-                                <DropdownMenuShortcut>RT</DropdownMenuShortcut>
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                className="gap-2"
-                                disabled={
-                                  !isServiceReady ||
-                                  isUpdatingProfileAccountId === account.id
-                                }
-                                onClick={() => openAccountEditor(account)}
-                              >
-                                <PencilLine className="h-4 w-4" />
-                                {t("编辑账号信息")}
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem
-                                className="gap-2 text-red-500"
-                                disabled={!isServiceReady}
-                                onClick={() => handleDeleteSingle(account)}
-                              >
-                                <Trash2 className="h-4 w-4" /> {t("删除")}
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
                         </div>
                       </TableCell>
                     </TableRow>

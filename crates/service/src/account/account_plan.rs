@@ -113,12 +113,7 @@ pub(crate) fn resolve_account_plan(
 ) -> Option<ResolvedAccountPlan> {
     let usage_plan = snapshot
         .and_then(|value| extract_plan_type_from_credits_json(value.credits_json.as_deref()));
-    if let Some(plan) = usage_plan.as_deref().and_then(normalize_plan_type) {
-        if plan.normalized == "free" {
-            return Some(plan);
-        }
-    }
-    if snapshot.is_some_and(is_single_window_long_usage_snapshot) {
+    if snapshot.is_some_and(is_free_usage_snapshot) {
         return Some(ResolvedAccountPlan {
             normalized: "free".to_string(),
             raw: None,
@@ -190,6 +185,21 @@ pub(crate) fn is_single_window_long_usage_snapshot(snapshot: &UsageSnapshotRecor
     has_primary_signal && !has_secondary_signal && is_long_window(snapshot.window_minutes)
 }
 
+pub(crate) fn is_secondary_only_long_usage_snapshot(snapshot: &UsageSnapshotRecord) -> bool {
+    let has_primary_signal = snapshot.used_percent.is_some() || snapshot.window_minutes.is_some();
+    let has_secondary_signal =
+        snapshot.secondary_used_percent.is_some() || snapshot.secondary_window_minutes.is_some();
+    !has_primary_signal
+        && has_secondary_signal
+        && is_long_window(snapshot.secondary_window_minutes)
+}
+
+pub(crate) fn is_free_usage_snapshot(snapshot: &UsageSnapshotRecord) -> bool {
+    is_free_plan_from_credits_json(snapshot.credits_json.as_deref())
+        || is_single_window_long_usage_snapshot(snapshot)
+        || is_secondary_only_long_usage_snapshot(snapshot)
+}
+
 /// 函数 `is_free_or_single_window_account`
 ///
 /// 作者: gaohongshun
@@ -216,10 +226,7 @@ pub(crate) fn is_free_or_single_window_account(
         .latest_usage_snapshot_for_account(account_id)
         .ok()
         .flatten()
-        .map(|snapshot| {
-            is_free_plan_from_credits_json(snapshot.credits_json.as_deref())
-                || is_single_window_long_usage_snapshot(&snapshot)
-        })
+        .map(|snapshot| is_free_usage_snapshot(&snapshot))
         .unwrap_or(false)
 }
 
@@ -364,7 +371,8 @@ mod tests {
     use super::{
         account_matches_plan_filter, extract_plan_type_from_credits_json,
         extract_plan_type_from_id_token, is_free_or_single_window_account,
-        is_free_plan_from_credits_json, is_free_plan_type, is_single_window_long_usage_snapshot,
+        is_free_plan_from_credits_json, is_free_plan_type, is_secondary_only_long_usage_snapshot,
+        is_single_window_long_usage_snapshot,
         normalize_plan_type, resolve_account_plan,
     };
     use codexmanager_core::storage::{now_ts, Account, Storage, Token, UsageSnapshotRecord};
@@ -544,6 +552,25 @@ mod tests {
         };
 
         assert!(is_single_window_long_usage_snapshot(&snapshot));
+    }
+
+    #[test]
+    fn secondary_only_long_usage_snapshot_counts_as_free_like() {
+        let snapshot = UsageSnapshotRecord {
+            account_id: "acc-secondary-only".to_string(),
+            used_percent: None,
+            window_minutes: None,
+            resets_at: None,
+            secondary_used_percent: Some(12.0),
+            secondary_window_minutes: Some(10_080),
+            secondary_resets_at: Some(now_ts() + 3600),
+            credits_json: None,
+            captured_at: now_ts(),
+        };
+
+        assert!(is_secondary_only_long_usage_snapshot(&snapshot));
+        let resolved = resolve_account_plan(None, Some(&snapshot)).expect("resolve plan");
+        assert_eq!(resolved.normalized, "free");
     }
 
     /// 函数 `free_or_single_window_account_accepts_weekly_single_window_without_plan_claim`

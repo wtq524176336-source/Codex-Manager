@@ -103,6 +103,7 @@ export interface QuotaProgressProps {
 
 export interface QuotaSummaryItem extends QuotaProgressProps {
   id: string;
+  costText?: string | null;
 }
 
 export interface AccountEditorState {
@@ -180,76 +181,61 @@ function QuotaProgress({
 }
 
 export function QuotaOverviewCell({
-  account,
   items,
 }: {
-  account: Account;
   items: QuotaSummaryItem[];
 }) {
   const { t } = useI18n();
   const summaryItems = items.slice(0, 2);
-  const currentWindowCostText = formatAccountWindowCostUsd(
-    account.currentWindowCostUsd,
-  );
-  const currentWindowCostLabel = formatAccountWindowCostLabel(account, t);
 
   return (
     <Tooltip>
       <TooltipTrigger render={<div />} className="block cursor-help">
         <div className="rounded-xl border border-primary/5 bg-accent/10 px-3 py-2">
-          <div className="grid grid-cols-[140px_minmax(220px,1fr)] items-center gap-4">
-            <div className="min-w-0 text-xs text-muted-foreground">
-              <div className="truncate font-medium text-foreground/80">
-                {currentWindowCostLabel}
-              </div>
-              <div className="mt-0.5 font-semibold tabular-nums text-foreground">
-                {currentWindowCostText}
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              {summaryItems.map((item) => (
-                <div
-                  key={item.id}
-                  className="grid grid-cols-[42px_minmax(120px,1fr)_44px_112px] items-center gap-2 text-xs"
-                >
-                  <span className="truncate text-muted-foreground">
-                    {item.label}
-                  </span>
-                  <Progress
-                    value={item.remainPercent ?? 0}
-                    trackClassName={
-                      item.tone === "blue"
-                        ? "bg-blue-500/20"
-                        : item.tone === "amber"
-                          ? "bg-amber-500/20"
-                          : "bg-green-500/20"
-                    }
-                    indicatorClassName={
-                      item.tone === "blue"
-                        ? "bg-blue-500"
-                        : item.tone === "amber"
-                          ? "bg-amber-500"
-                          : "bg-green-500"
-                    }
-                  />
-                  <div className="flex min-w-0 items-center justify-end gap-2 text-muted-foreground">
-                    <span className="w-9 shrink-0 text-right font-medium text-foreground/80">
-                      {item.remainPercent == null
-                        ? (item.emptyText ?? "--")
-                        : `${item.remainPercent}%`}
-                    </span>
-                  </div>
-                  <span className="shrink-0 text-right text-muted-foreground">
-                    {formatRemainingDurationFromSeconds(
-                      item.resetsAt,
-                      item.id.endsWith("-primary") ? "hours" : "days",
-                      item.emptyResetText ?? t("未知"),
-                    )}
-                    后刷新
+          <div className="space-y-1.5">
+            {summaryItems.map((item) => (
+              <div
+                key={item.id}
+                className="grid grid-cols-[120px_minmax(120px,1fr)_44px_112px] items-center gap-2 text-xs"
+              >
+                <span className="truncate text-muted-foreground">
+                  {item.label}
+                  {item.costText ? `（${item.costText}）` : ""}
+                </span>
+                <Progress
+                  value={item.remainPercent ?? 0}
+                  trackClassName={
+                    item.tone === "blue"
+                      ? "bg-blue-500/20"
+                      : item.tone === "amber"
+                        ? "bg-amber-500/20"
+                        : "bg-green-500/20"
+                  }
+                  indicatorClassName={
+                    item.tone === "blue"
+                      ? "bg-blue-500"
+                      : item.tone === "amber"
+                        ? "bg-amber-500"
+                        : "bg-green-500"
+                  }
+                />
+                <div className="flex min-w-0 items-center justify-end gap-2 text-muted-foreground">
+                  <span className="w-9 shrink-0 text-right font-medium text-foreground/80">
+                    {item.remainPercent == null
+                      ? (item.emptyText ?? "--")
+                      : `${item.remainPercent}%`}
                   </span>
                 </div>
-              ))}
-            </div>
+                <span className="shrink-0 text-right text-muted-foreground">
+                  {formatRemainingDurationFromSeconds(
+                    item.resetsAt,
+                    item.id.endsWith("-primary") ? "hours" : "days",
+                    item.emptyResetText ?? t("未知"),
+                  )}
+                  后刷新
+                </span>
+              </div>
+            ))}
           </div>
         </div>
       </TooltipTrigger>
@@ -410,10 +396,20 @@ export function buildQuotaSummaryItems(
   const secondaryWindowOnly = isSecondaryWindowOnlyUsage(account.usage);
   const usageBuckets = getUsageDisplayBuckets(account.usage);
   const extraUsageRows = getExtraUsageDisplayRows(account.usage);
+  const primaryCostText =
+    account.primaryWindowStartedAt != null && account.primaryWindowResetsAt != null
+      ? formatAccountWindowCostUsd(account.primaryWindowCostUsd)
+      : null;
+  const secondaryCostText =
+    account.secondaryWindowStartedAt != null &&
+    account.secondaryWindowResetsAt != null
+      ? formatAccountWindowCostUsd(account.secondaryWindowCostUsd)
+      : null;
   return [
     {
       id: `${account.id}-primary`,
       label: t("5小时"),
+      costText: primaryCostText,
       remainPercent: account.primaryRemainPercent,
       resetsAt: usageBuckets.primaryResetsAt,
       icon: RefreshCw,
@@ -424,7 +420,8 @@ export function buildQuotaSummaryItems(
     },
     {
       id: `${account.id}-secondary`,
-      label: t("7天"),
+      label: t("1周"),
+      costText: secondaryCostText,
       remainPercent: account.secondaryRemainPercent,
       resetsAt: usageBuckets.secondaryResetsAt,
       icon: RefreshCw,

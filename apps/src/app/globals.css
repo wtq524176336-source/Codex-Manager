@@ -374,8 +374,6 @@ tr {
 .table-sticky-action-cell {
   position: sticky;
   right: 0;
-  border-left: 1px solid var(--border);
-  box-shadow: -10px 0 16px -14px rgb(15 23 42 / 0.18);
 }
 
 .table-sticky-action-head {

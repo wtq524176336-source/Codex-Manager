@@ -33,6 +33,12 @@ export interface Account {
   currentWindowCostUsd: number;
   currentWindowStartedAt: number | null;
   currentWindowResetsAt: number | null;
+  primaryWindowCostUsd: number;
+  primaryWindowStartedAt: number | null;
+  primaryWindowResetsAt: number | null;
+  secondaryWindowCostUsd: number;
+  secondaryWindowStartedAt: number | null;
+  secondaryWindowResetsAt: number | null;
   note: string | null;
   tags: string[];
   isAvailable: boolean;

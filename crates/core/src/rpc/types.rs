@@ -191,6 +191,12 @@ pub struct AccountSummary {
     pub current_window_cost_usd: f64,
     pub current_window_started_at: Option<i64>,
     pub current_window_resets_at: Option<i64>,
+    pub primary_window_cost_usd: f64,
+    pub primary_window_started_at: Option<i64>,
+    pub primary_window_resets_at: Option<i64>,
+    pub secondary_window_cost_usd: f64,
+    pub secondary_window_started_at: Option<i64>,
+    pub secondary_window_resets_at: Option<i64>,
     pub note: Option<String>,
     pub tags: Option<String>,
 }

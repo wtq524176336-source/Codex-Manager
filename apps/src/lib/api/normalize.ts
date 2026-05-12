@@ -434,6 +434,26 @@ export function normalizeAccount(item: unknown, usage?: AccountUsage | null): Ac
     currentWindowResetsAt: toNullableNumber(
       source.currentWindowResetsAt ?? source.current_window_resets_at
     ),
+    primaryWindowCostUsd: Math.max(
+      0,
+      toNullableNumber(source.primaryWindowCostUsd ?? source.primary_window_cost_usd) ?? 0
+    ),
+    primaryWindowStartedAt: toNullableNumber(
+      source.primaryWindowStartedAt ?? source.primary_window_started_at
+    ),
+    primaryWindowResetsAt: toNullableNumber(
+      source.primaryWindowResetsAt ?? source.primary_window_resets_at
+    ),
+    secondaryWindowCostUsd: Math.max(
+      0,
+      toNullableNumber(source.secondaryWindowCostUsd ?? source.secondary_window_cost_usd) ?? 0
+    ),
+    secondaryWindowStartedAt: toNullableNumber(
+      source.secondaryWindowStartedAt ?? source.secondary_window_started_at
+    ),
+    secondaryWindowResetsAt: toNullableNumber(
+      source.secondaryWindowResetsAt ?? source.secondary_window_resets_at
+    ),
     note: asString(source.note) || null,
     tags: asStringArray(source.tags),
     isAvailable: availability.level === "ok",

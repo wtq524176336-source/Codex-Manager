@@ -4,7 +4,7 @@ use codexmanager_core::{
 };
 use std::collections::HashMap;
 
-use crate::account_plan::resolve_account_plan;
+use crate::account_plan::{is_free_usage_snapshot, resolve_account_plan};
 use crate::storage_helpers::open_storage;
 
 const DEFAULT_ACCOUNT_PAGE_SIZE: i64 = 5;
@@ -317,6 +317,8 @@ fn to_account_summary_with_reason(
     subscription_expires_at: Option<i64>,
     subscription_renews_at: Option<i64>,
     window_cost: Option<AccountWindowCost>,
+    primary_window_cost: Option<AccountWindowCost>,
+    secondary_window_cost: Option<AccountWindowCost>,
     note: Option<String>,
     tags: Option<String>,
 ) -> AccountSummary {
@@ -337,6 +339,16 @@ fn to_account_summary_with_reason(
         current_window_cost_usd: window_cost.map(|value| value.cost_usd).unwrap_or(0.0),
         current_window_started_at: window_cost.map(|value| value.started_at),
         current_window_resets_at: window_cost.map(|value| value.resets_at),
+        primary_window_cost_usd: primary_window_cost
+            .map(|value| value.cost_usd)
+            .unwrap_or(0.0),
+        primary_window_started_at: primary_window_cost.map(|value| value.started_at),
+        primary_window_resets_at: primary_window_cost.map(|value| value.resets_at),
+        secondary_window_cost_usd: secondary_window_cost
+            .map(|value| value.cost_usd)
+            .unwrap_or(0.0),
+        secondary_window_started_at: secondary_window_cost.map(|value| value.started_at),
+        secondary_window_resets_at: secondary_window_cost.map(|value| value.resets_at),
         note,
         tags,
     }
@@ -382,21 +394,32 @@ fn to_account_summaries(
         .collect::<HashMap<String, UsageSnapshotRecord>>();
     let now = now_ts();
     let mut window_costs = HashMap::new();
+    let mut primary_window_costs = HashMap::new();
+    let mut secondary_window_costs = HashMap::new();
     for account_id in &account_ids {
-        let (started_at, resets_at) = current_usage_cost_window(usages.get(account_id), now);
-        let cost_usd = storage
-            .summarize_request_token_stats_cost_for_account_between(
-                account_id, started_at, resets_at,
-            )
+        let (current_window, primary_window, secondary_window) =
+            usage_cost_windows(usages.get(account_id), now);
+        let current_cost = load_account_window_cost(&storage, account_id, current_window)
             .map_err(|err| format!("load account window cost failed: {err}"))?;
-        window_costs.insert(
-            account_id.clone(),
-            AccountWindowCost {
-                cost_usd,
-                started_at,
-                resets_at,
-            },
-        );
+        window_costs.insert(account_id.clone(), current_cost);
+        if let Some(primary_cost) = load_optional_account_window_cost(
+            &storage,
+            account_id,
+            primary_window,
+        )
+        .map_err(|err| format!("load account primary window cost failed: {err}"))?
+        {
+            primary_window_costs.insert(account_id.clone(), primary_cost);
+        }
+        if let Some(secondary_cost) = load_optional_account_window_cost(
+            &storage,
+            account_id,
+            secondary_window,
+        )
+        .map_err(|err| format!("load account secondary window cost failed: {err}"))?
+        {
+            secondary_window_costs.insert(account_id.clone(), secondary_cost);
+        }
     }
     let metadata = storage
         .list_account_metadata()
@@ -410,7 +433,7 @@ fn to_account_summaries(
         .into_iter()
         .map(|item| (item.account_id.clone(), item))
         .collect::<HashMap<String, AccountSubscription>>();
-    Ok(accounts
+    let mut summaries = accounts
         .into_iter()
         .map(|account| {
             map_account_summary(
@@ -420,12 +443,46 @@ fn to_account_summaries(
                 &tokens,
                 &usages,
                 &window_costs,
+                &primary_window_costs,
+                &secondary_window_costs,
                 &metadata,
                 &subscriptions,
                 now,
             )
         })
-        .collect())
+        .collect::<Vec<_>>();
+    sort_account_summaries(&mut summaries);
+    Ok(summaries)
+}
+
+fn account_plan_sort_rank(plan_type: Option<&str>) -> i32 {
+    match plan_type
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("free") => 0,
+        Some("team") => 1,
+        Some("plus") => 2,
+        Some("go") => 3,
+        Some("pro") => 4,
+        Some("business") => 5,
+        Some("enterprise") => 6,
+        Some("edu") => 7,
+        Some("unknown") | None => 8,
+        Some(_) => 9,
+    }
+}
+
+fn sort_account_summaries(items: &mut [AccountSummary]) {
+    items.sort_by(|left, right| {
+        account_plan_sort_rank(left.plan_type.as_deref())
+            .cmp(&account_plan_sort_rank(right.plan_type.as_deref()))
+            .then_with(|| left.sort.cmp(&right.sort))
+            .then_with(|| left.label.cmp(&right.label))
+            .then_with(|| left.id.cmp(&right.id))
+    });
 }
 
 /// 函数 `map_account_summary`
@@ -450,6 +507,8 @@ fn map_account_summary(
     tokens: &HashMap<String, Token>,
     usages: &HashMap<String, UsageSnapshotRecord>,
     window_costs: &HashMap<String, AccountWindowCost>,
+    primary_window_costs: &HashMap<String, AccountWindowCost>,
+    secondary_window_costs: &HashMap<String, AccountWindowCost>,
     metadata: &HashMap<String, AccountMetadata>,
     subscriptions: &HashMap<String, AccountSubscription>,
     now: i64,
@@ -460,21 +519,27 @@ fn map_account_summary(
     let plan = resolve_account_plan(tokens.get(&account_id), usages.get(&account_id));
     let account_metadata = metadata.get(&account_id);
     let subscription = subscriptions.get(&account_id);
+    let usage_forces_free = usages.get(&account_id).is_some_and(is_free_usage_snapshot);
     let subscription_expired = subscription
         .is_some_and(|value| value.expires_at.is_some_and(|expires_at| expires_at <= now));
-    let has_subscription = subscription.map(|value| {
-        value.has_subscription && value.expires_at.map_or(true, |expires_at| expires_at > now)
-    });
+    let has_subscription = if usage_forces_free {
+        Some(false)
+    } else {
+        subscription.map(|value| {
+            value.has_subscription
+                && value.expires_at.map_or(true, |expires_at| expires_at > now)
+        })
+    };
     let (fallback_plan_type, plan_type_raw) = match plan {
         Some(value) => (Some(value.normalized), value.raw),
         None => (None, None),
     };
-    let subscription_plan = if subscription_expired {
+    let subscription_plan = if usage_forces_free || subscription_expired {
         None
     } else {
         subscription.and_then(|value| value.plan_type.clone())
     };
-    let subscription_plan_type = if subscription_expired {
+    let subscription_plan_type = if usage_forces_free || subscription_expired {
         Some("free".to_string())
     } else {
         subscription.and_then(resolve_subscription_plan_type)
@@ -495,22 +560,65 @@ fn map_account_summary(
             subscription.and_then(|value| value.renews_at)
         },
         window_costs.get(&account_id).copied(),
+        primary_window_costs.get(&account_id).copied(),
+        secondary_window_costs.get(&account_id).copied(),
         account_metadata.and_then(|value| value.note.clone()),
         account_metadata.and_then(|value| value.tags.clone()),
     )
 }
 
-fn current_usage_cost_window(snapshot: Option<&UsageSnapshotRecord>, now: i64) -> (i64, i64) {
-    if let Some(resets_at) = find_five_hour_resets_at(snapshot) {
-        return normalize_window(resets_at, FIVE_HOUR_WINDOW_MINUTES, now);
+fn usage_cost_windows(
+    snapshot: Option<&UsageSnapshotRecord>,
+    now: i64,
+) -> (
+    (i64, i64),
+    Option<(i64, i64)>,
+    Option<(i64, i64)>,
+) {
+    let primary_window = find_five_hour_resets_at(snapshot)
+        .map(|resets_at| {
+            normalize_window(resets_at, FIVE_HOUR_WINDOW_MINUTES, now)
+        });
+    let secondary_window = find_long_window_resets_at(snapshot)
+        .map(|(resets_at, window_minutes)| normalize_window(resets_at, window_minutes, now));
+
+    if let Some(primary_window) = primary_window {
+        return (primary_window, Some(primary_window), secondary_window);
     }
 
-    if let Some((resets_at, window_minutes)) = find_long_window_resets_at(snapshot) {
-        return normalize_window(resets_at, window_minutes, now);
+    if let Some(secondary_window) = secondary_window {
+        return (secondary_window, None, Some(secondary_window));
     }
 
     let start_ts = (now / FIVE_HOUR_WINDOW_SECS) * FIVE_HOUR_WINDOW_SECS;
-    (start_ts, start_ts + FIVE_HOUR_WINDOW_SECS)
+    ((start_ts, start_ts + FIVE_HOUR_WINDOW_SECS), None, None)
+}
+
+fn load_account_window_cost(
+    storage: &codexmanager_core::storage::Storage,
+    account_id: &str,
+    window: (i64, i64),
+) -> Result<AccountWindowCost, String> {
+    let (started_at, resets_at) = window;
+    let cost_usd = storage
+        .summarize_request_token_stats_cost_for_account_between(account_id, started_at, resets_at)
+        .map_err(|err| err.to_string())?;
+    Ok(AccountWindowCost {
+        cost_usd,
+        started_at,
+        resets_at,
+    })
+}
+
+fn load_optional_account_window_cost(
+    storage: &codexmanager_core::storage::Storage,
+    account_id: &str,
+    window: Option<(i64, i64)>,
+) -> Result<Option<AccountWindowCost>, String> {
+    match window {
+        Some(window) => load_account_window_cost(storage, account_id, window).map(Some),
+        None => Ok(None),
+    }
 }
 
 fn normalize_window(resets_at: i64, window_minutes: i64, now: i64) -> (i64, i64) {

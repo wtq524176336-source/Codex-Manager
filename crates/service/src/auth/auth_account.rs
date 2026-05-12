@@ -10,6 +10,7 @@ use crate::account_identity::{
     build_account_storage_id, build_fallback_subject_key, clean_value,
     pick_existing_account_id_by_identity,
 };
+use crate::account_plan::is_free_usage_snapshot;
 use crate::account_status::mark_account_unavailable_for_auth_error;
 use crate::app_settings::{get_persisted_app_setting, save_persisted_app_setting};
 use crate::storage_helpers::open_storage;
@@ -592,21 +593,31 @@ fn current_account_payload(
         .find_account_subscription(&account.id)
         .ok()
         .flatten();
-    let plan_type = match subscription.as_ref() {
-        Some(value) if value.has_subscription => value
-            .plan_type
-            .clone()
-            .or_else(|| {
-                plan_type_resolution
-                    .as_ref()
-                    .map(|plan| plan.normalized.clone())
-            })
-            .unwrap_or_else(|| "unknown".to_string()),
-        Some(_) => "free".to_string(),
-        None => plan_type_resolution
-            .as_ref()
-            .map(|plan| plan.normalized.clone())
-            .unwrap_or_else(|| "unknown".to_string()),
+    let usage_forces_free = storage
+        .latest_usage_snapshot_for_account(&account.id)
+        .ok()
+        .flatten()
+        .as_ref()
+        .is_some_and(is_free_usage_snapshot);
+    let plan_type = if usage_forces_free {
+        "free".to_string()
+    } else {
+        match subscription.as_ref() {
+            Some(value) if value.has_subscription => value
+                .plan_type
+                .clone()
+                .or_else(|| {
+                    plan_type_resolution
+                        .as_ref()
+                        .map(|plan| plan.normalized.clone())
+                })
+                .unwrap_or_else(|| "unknown".to_string()),
+            Some(_) => "free".to_string(),
+            None => plan_type_resolution
+                .as_ref()
+                .map(|plan| plan.normalized.clone())
+                .unwrap_or_else(|| "unknown".to_string()),
+        }
     };
     CurrentAuthAccount {
         kind: auth_mode.to_string(),
@@ -617,9 +628,13 @@ fn current_account_payload(
             .unwrap_or_else(|| account.label.clone()),
         plan_type,
         plan_type_raw: plan_type_resolution.and_then(|plan| plan.raw),
-        has_subscription: subscription.as_ref().map(|value| value.has_subscription),
+        has_subscription: if usage_forces_free {
+            Some(false)
+        } else {
+            subscription.as_ref().map(|value| value.has_subscription)
+        },
         subscription_plan: subscription.as_ref().and_then(|value| {
-            if value.has_subscription {
+            if value.has_subscription && !usage_forces_free {
                 value.plan_type.clone()
             } else {
                 None
