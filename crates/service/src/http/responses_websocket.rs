@@ -1593,6 +1593,7 @@ fn parse_ws_usage(value: &Value) -> crate::gateway::RequestLogUsage {
                     .and_then(Value::as_i64)
             }),
         first_response_ms: None,
+        output_text: None,
     }
 }
 

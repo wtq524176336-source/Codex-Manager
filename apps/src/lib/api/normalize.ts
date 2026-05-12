@@ -1345,6 +1345,9 @@ export function normalizeRequestLog(item: unknown): RequestLog | null {
     ),
     durationMs,
     firstResponseMs,
+    compactOutputText: asString(
+      source.compactOutputText ?? source.compact_output_text
+    ),
     error: asString(source.error),
     createdAt,
   };

@@ -744,6 +744,7 @@ pub struct RequestLogSummary {
     pub status_code: Option<i64>,
     pub duration_ms: Option<i64>,
     pub first_response_ms: Option<i64>,
+    pub compact_output_text: Option<String>,
     pub input_tokens: Option<i64>,
     pub cached_input_tokens: Option<i64>,
     pub output_tokens: Option<i64>,

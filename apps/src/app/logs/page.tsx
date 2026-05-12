@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   Copy,
   Database,
+  FileText,
   RefreshCw,
   Shield,
   Trash2,
@@ -19,6 +20,13 @@ import { ConfirmDialog } from "@/components/modals/confirm-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -451,14 +459,32 @@ function resolveFriendlyRequestPathLabel(
   t: TranslateFn,
 ): string {
   const normalized = String(path || "").trim();
-  switch (normalized) {
-    case "/v1/responses/compact":
-      return t("上下文压缩");
-    case "/internal/account/warmup":
-      return t("账号预热");
-    default:
-      return normalized;
-  }
+  if (isCompactRequestPath(normalized)) return t("上下文压缩");
+  if (normalized === "/internal/account/warmup") return t("账号预热");
+  return normalized;
+}
+
+function isCompactRequestPath(path: string): boolean {
+  const normalized = String(path || "").trim();
+  return (
+    normalized === "/v1/responses/compact" ||
+    normalized.startsWith("/v1/responses/compact?") ||
+    normalized === "/responses/compact" ||
+    normalized.startsWith("/responses/compact?") ||
+    normalized === "/backend-api/codex/responses/compact" ||
+    normalized.startsWith("/backend-api/codex/responses/compact?")
+  );
+}
+
+function isCompactRequestLog(log: RequestLog): boolean {
+  const paths = [log.requestPath, log.path, log.originalPath, log.adaptedPath].map((value) =>
+    String(value || "").trim(),
+  );
+  return paths.some(isCompactRequestPath);
+}
+
+function getCompactOutputText(log: RequestLog | null): string {
+  return String(log?.compactOutputText || "").trim();
 }
 
 /**
@@ -1152,6 +1178,32 @@ function ErrorInfoCell({ error }: { error: string }) {
   );
 }
 
+function CompactDetailCell({
+  log,
+  onOpen,
+}: {
+  log: RequestLog;
+  onOpen: (log: RequestLog) => void;
+}) {
+  const { t } = useI18n();
+  if (!isCompactRequestLog(log)) {
+    return null;
+  }
+
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      className="h-7 gap-1.5 px-2 text-xs"
+      onClick={() => onOpen(log)}
+    >
+      <FileText className="h-3.5 w-3.5" />
+      {t("详情")}
+    </Button>
+  );
+}
+
 /**
  * 函数 `GatewayTooltipCell`
  *
@@ -1339,10 +1391,12 @@ function LogsPageContent() {
   const [gatewayPage, setGatewayPage] = useState(1);
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
   const [clearGatewayConfirmOpen, setClearGatewayConfirmOpen] = useState(false);
+  const [compactDetailLog, setCompactDetailLog] = useState<RequestLog | null>(null);
   const [activeTab, setActiveTab] = useState<LogsTab>("requests");
   const [gatewayStageFilter, setGatewayStageFilter] = useState("all");
   const pageSizeNumber = Number(pageSize) || 10;
   const gatewayPageSizeNumber = Number(gatewayPageSize) || 10;
+  const compactDetailText = getCompactOutputText(compactDetailLog);
   const startTs = useMemo(
     () => fromDateTimeLocalValue(startTimeInput),
     [startTimeInput],
@@ -1889,7 +1943,7 @@ function LogsPageContent() {
               </div>
             </CardHeader>
             <CardContent className="px-0">
-              <Table className="min-w-[1320px] table-fixed">
+              <Table className="min-w-[1440px] table-fixed">
             <TableHeader>
               <TableRow>
                 <TableHead className="h-12 w-[150px] px-4 text-[11px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
@@ -1915,6 +1969,9 @@ function LogsPageContent() {
                 </TableHead>
                 <TableHead className="w-[240px] px-4 text-[11px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
                   {t("错误")}
+                </TableHead>
+                <TableHead className="w-[120px] px-4 text-[11px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
+                  {t("详情")}
                 </TableHead>
               </TableRow>
             </TableHeader>
@@ -1946,12 +2003,15 @@ function LogsPageContent() {
                     <TableCell>
                       <Skeleton className="h-4 w-full" />
                     </TableCell>
+                    <TableCell>
+                      <Skeleton className="h-7 w-16" />
+                    </TableCell>
                   </TableRow>
                 ))
               ) : logs.length === 0 ? (
                 <TableRow>
                   <TableCell
-                    colSpan={8}
+                    colSpan={9}
                     className="h-52 px-4 text-center text-sm text-muted-foreground"
                   >
                     {!serviceStatus.connected
@@ -2020,6 +2080,9 @@ function LogsPageContent() {
                     </TableCell>
                     <TableCell className="px-4 py-3 text-left align-top">
                       <ErrorInfoCell error={log.error} />
+                    </TableCell>
+                    <TableCell className="px-4 py-3 text-left align-top">
+                      <CompactDetailCell log={log} onOpen={setCompactDetailLog} />
                     </TableCell>
                   </TableRow>
                 ))
@@ -2418,6 +2481,53 @@ function LogsPageContent() {
           </div>
         </TabsContent>
       </Tabs>
+
+      <Dialog
+        open={Boolean(compactDetailLog)}
+        onOpenChange={(open) => {
+          if (!open) setCompactDetailLog(null);
+        }}
+      >
+        <DialogContent className="glass-card w-[calc(100%-2rem)] max-w-[calc(100%-2rem)] border-none p-0 sm:max-w-[760px]">
+          <div className="flex max-h-[82vh] flex-col">
+            <DialogHeader className="border-b border-border/60 px-6 py-5">
+              <DialogTitle>{t("压缩后请求")}</DialogTitle>
+              <DialogDescription>
+                {compactDetailLog
+                  ? `${formatTsFromSeconds(compactDetailLog.createdAt, t("未知时间"))} · ${
+                      compactDetailLog.model || "-"
+                    }`
+                  : ""}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="min-h-0 flex-1 overflow-auto px-6 py-5">
+              <pre className="max-h-[56vh] whitespace-pre-wrap break-words rounded-md border border-border/70 bg-muted/40 p-4 font-mono text-xs leading-6 text-foreground">
+                {compactDetailText || t("暂无压缩内容")}
+              </pre>
+            </div>
+            <div className="flex items-center justify-end gap-2 border-t border-border/60 px-6 py-4">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                disabled={!compactDetailText}
+                onClick={async () => {
+                  try {
+                    await copyTextToClipboard(compactDetailText);
+                    toast.success(t("已复制"));
+                  } catch (error) {
+                    toast.error(error instanceof Error ? error.message : t("复制失败"));
+                  }
+                }}
+              >
+                <Copy className="h-4 w-4" />
+                {t("复制")}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <ConfirmDialog
         open={clearConfirmOpen}

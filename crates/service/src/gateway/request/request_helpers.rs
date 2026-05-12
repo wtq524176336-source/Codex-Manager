@@ -442,11 +442,45 @@ pub(crate) fn is_html_content_type(value: &str) -> bool {
 /// # 返回
 /// 返回函数执行结果
 pub(crate) fn normalize_models_path(path: &str) -> String {
-    let is_models_path = path == "/v1/models" || path.starts_with("/v1/models?");
-    if !is_models_path {
-        return path.to_string();
-    }
-    path.to_string()
+    let request_path = extract_request_path(path);
+    let (path_without_query, query) = split_query(request_path);
+    let lower_path = path_without_query.to_ascii_lowercase();
+    let codex_backend_prefix = "/backend-api/codex";
+    let path_for_match = lower_path
+        .find(codex_backend_prefix)
+        .map(|index| {
+            let start = index + codex_backend_prefix.len();
+            &lower_path[start..]
+        })
+        .unwrap_or(lower_path.as_str());
+    let normalized = match path_for_match {
+        "/responses" => Some("/v1/responses"),
+        "/responses/compact" => Some("/v1/responses/compact"),
+        "/v1/responses" => Some("/v1/responses"),
+        "/v1/responses/compact" => Some("/v1/responses/compact"),
+        _ => None,
+    };
+
+    normalized
+        .map(|value| format!("{value}{query}"))
+        .unwrap_or_else(|| path.to_string())
+}
+
+fn extract_request_path(value: &str) -> &str {
+    let Some(scheme_index) = value.find("://") else {
+        return value;
+    };
+    let after_scheme = &value[scheme_index + 3..];
+    after_scheme
+        .find('/')
+        .map(|path_index| &after_scheme[path_index..])
+        .unwrap_or("/")
+}
+
+fn split_query(path: &str) -> (&str, &str) {
+    path.find('?')
+        .map(|index| (&path[..index], &path[index..]))
+        .unwrap_or((path, ""))
 }
 
 #[cfg(test)]

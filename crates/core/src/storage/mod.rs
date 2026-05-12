@@ -142,6 +142,7 @@ pub struct RequestLog {
     pub status_code: Option<i64>,
     pub duration_ms: Option<i64>,
     pub first_response_ms: Option<i64>,
+    pub compact_output_text: Option<String>,
     pub input_tokens: Option<i64>,
     pub cached_input_tokens: Option<i64>,
     pub output_tokens: Option<i64>,
@@ -675,6 +676,11 @@ impl Storage {
             include_str!("../../migrations/053_aggregate_api_model_override.sql"),
             |s| s.ensure_aggregate_apis_table(),
         )?;
+        self.apply_sql_or_compat_migration(
+            "054_request_logs_compact_output_text",
+            include_str!("../../migrations/054_request_logs_compact_output_text.sql"),
+            |s| s.ensure_request_log_compact_output_text_column(),
+        )?;
         self.ensure_api_key_rotation_columns()?;
         self.ensure_aggregate_apis_table()?;
         self.ensure_aggregate_api_secrets_table()?;
@@ -684,6 +690,7 @@ impl Storage {
         self.ensure_request_log_request_type_and_service_tier_columns()?;
         self.ensure_request_log_effective_service_tier_column()?;
         self.ensure_request_log_first_response_column()?;
+        self.ensure_request_log_compact_output_text_column()?;
         self.ensure_model_catalog_models_table()?;
         self.ensure_account_subscriptions_table()?;
         Ok(())

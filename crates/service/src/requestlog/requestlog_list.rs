@@ -302,6 +302,7 @@ fn to_request_log_summary(item: RequestLog) -> RequestLogSummary {
         status_code: item.status_code,
         duration_ms: item.duration_ms,
         first_response_ms: item.first_response_ms,
+        compact_output_text: item.compact_output_text,
         input_tokens: item.input_tokens,
         cached_input_tokens: item.cached_input_tokens,
         output_tokens: item.output_tokens,

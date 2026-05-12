@@ -66,8 +66,8 @@ impl Storage {
             "INSERT INTO request_logs (
                 trace_id, key_id, account_id, initial_account_id, attempted_account_ids_json, initial_aggregate_api_id, attempted_aggregate_api_ids_json,
                 request_path, original_path, adapted_path,
-                method, request_type, gateway_mode, transparent_mode, enhanced_mode, model, reasoning_effort, service_tier, effective_service_tier, response_adapter, upstream_url, aggregate_api_supplier_name, aggregate_api_url, status_code, duration_ms, first_response_ms, error, created_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28)",
+                method, request_type, gateway_mode, transparent_mode, enhanced_mode, model, reasoning_effort, service_tier, effective_service_tier, response_adapter, upstream_url, aggregate_api_supplier_name, aggregate_api_url, status_code, duration_ms, first_response_ms, compact_output_text, error, created_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29)",
             params![
                 &log.trace_id,
                 &log.key_id,
@@ -95,6 +95,7 @@ impl Storage {
                 log.status_code,
                 log.duration_ms,
                 log.first_response_ms,
+                &log.compact_output_text,
                 &log.error,
                 log.created_at,
             ],
@@ -125,8 +126,8 @@ impl Storage {
             "INSERT INTO request_logs (
                 trace_id, key_id, account_id, initial_account_id, attempted_account_ids_json, initial_aggregate_api_id, attempted_aggregate_api_ids_json,
                 request_path, original_path, adapted_path,
-                method, request_type, gateway_mode, transparent_mode, enhanced_mode, model, reasoning_effort, service_tier, effective_service_tier, response_adapter, upstream_url, aggregate_api_supplier_name, aggregate_api_url, status_code, duration_ms, first_response_ms, error, created_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28)",
+                method, request_type, gateway_mode, transparent_mode, enhanced_mode, model, reasoning_effort, service_tier, effective_service_tier, response_adapter, upstream_url, aggregate_api_supplier_name, aggregate_api_url, status_code, duration_ms, first_response_ms, compact_output_text, error, created_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29)",
             params![
                 &log.trace_id,
                 &log.key_id,
@@ -154,6 +155,7 @@ impl Storage {
                 log.status_code,
                 log.duration_ms,
                 log.first_response_ms,
+                &log.compact_output_text,
                 &log.error,
                 log.created_at,
             ],
@@ -245,7 +247,7 @@ impl Storage {
             "SELECT
                 r.trace_id, r.key_id, r.account_id, r.initial_account_id, r.attempted_account_ids_json, r.initial_aggregate_api_id, r.attempted_aggregate_api_ids_json,
                 r.request_path, r.original_path, r.adapted_path,
-                r.method, r.request_type, r.gateway_mode, r.transparent_mode, r.enhanced_mode, r.model, r.reasoning_effort, r.service_tier, r.effective_service_tier, r.response_adapter, r.upstream_url, r.aggregate_api_supplier_name, r.aggregate_api_url, r.status_code, r.duration_ms, r.first_response_ms,
+                r.method, r.request_type, r.gateway_mode, r.transparent_mode, r.enhanced_mode, r.model, r.reasoning_effort, r.service_tier, r.effective_service_tier, r.response_adapter, r.upstream_url, r.aggregate_api_supplier_name, r.aggregate_api_url, r.status_code, r.duration_ms, r.first_response_ms, r.compact_output_text,
                 t.input_tokens, t.cached_input_tokens, t.output_tokens, t.total_tokens, t.reasoning_output_tokens, t.estimated_cost_usd,
                 r.error, r.created_at
              FROM request_logs r
@@ -457,6 +459,7 @@ impl Storage {
                 status_code INTEGER,
                 duration_ms INTEGER,
                 first_response_ms INTEGER,
+                compact_output_text TEXT,
                 error TEXT,
                 created_at INTEGER NOT NULL
             )",
@@ -616,6 +619,11 @@ impl Storage {
         Ok(())
     }
 
+    pub(super) fn ensure_request_log_compact_output_text_column(&self) -> Result<()> {
+        self.ensure_column("request_logs", "compact_output_text", "TEXT")?;
+        Ok(())
+    }
+
     pub(super) fn ensure_request_log_request_type_and_service_tier_columns(&self) -> Result<()> {
         self.ensure_column("request_logs", "request_type", "TEXT")?;
         self.ensure_column("request_logs", "gateway_mode", "TEXT")?;
@@ -756,14 +764,15 @@ fn map_request_log_row(row: &Row<'_>) -> Result<RequestLog> {
         status_code: row.get(23)?,
         duration_ms: row.get(24)?,
         first_response_ms: row.get(25)?,
-        input_tokens: row.get(26)?,
-        cached_input_tokens: row.get(27)?,
-        output_tokens: row.get(28)?,
-        total_tokens: row.get(29)?,
-        reasoning_output_tokens: row.get(30)?,
-        estimated_cost_usd: row.get(31)?,
-        error: row.get(32)?,
-        created_at: row.get(33)?,
+        compact_output_text: row.get(26)?,
+        input_tokens: row.get(27)?,
+        cached_input_tokens: row.get(28)?,
+        output_tokens: row.get(29)?,
+        total_tokens: row.get(30)?,
+        reasoning_output_tokens: row.get(31)?,
+        estimated_cost_usd: row.get(32)?,
+        error: row.get(33)?,
+        created_at: row.get(34)?,
     })
 }
 
@@ -911,6 +920,7 @@ fn append_request_log_query_clause(
                 "IFNULL(r.service_tier,'') LIKE ?",
                 "IFNULL(r.effective_service_tier,'') LIKE ?",
                 "IFNULL(r.response_adapter,'') LIKE ?",
+                "IFNULL(r.compact_output_text,'') LIKE ?",
                 "IFNULL(r.error,'') LIKE ?",
                 "IFNULL(r.key_id,'') LIKE ?",
                 "IFNULL(r.trace_id,'') LIKE ?",

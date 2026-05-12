@@ -176,6 +176,7 @@ pub(super) fn maybe_respond_local_count_tokens(
                     total_tokens: Some(input_tokens.min(i64::MAX as u64) as i64),
                     reasoning_output_tokens: Some(0),
                     first_response_ms: None,
+                    output_text: None,
                 },
             )?;
             Ok(None)

@@ -32,6 +32,7 @@ export interface RequestLog {
   estimatedCostUsd: number | null;
   durationMs: number | null;
   firstResponseMs: number | null;
+  compactOutputText: string;
   error: string;
   createdAt: number | null;
 }

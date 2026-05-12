@@ -1,7 +1,7 @@
 use crate::gateway::error_log::GatewayErrorLogInput;
 use codexmanager_core::storage::{now_ts, RequestLog, RequestTokenStat, Storage};
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct RequestLogUsage {
     pub input_tokens: Option<i64>,
     pub cached_input_tokens: Option<i64>,
@@ -9,6 +9,7 @@ pub(crate) struct RequestLogUsage {
     pub total_tokens: Option<i64>,
     pub reasoning_output_tokens: Option<i64>,
     pub first_response_ms: Option<i64>,
+    pub output_text: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -232,6 +233,10 @@ fn is_inference_path(path: &str) -> bool {
         || path.starts_with("/v1/messages")
 }
 
+fn is_compact_request_path(path: &str) -> bool {
+    path == "/v1/responses/compact" || path.starts_with("/v1/responses/compact?")
+}
+
 fn should_write_gateway_error_fallback(status_code: Option<u16>, error: Option<&str>) -> bool {
     let Some(status_code) = status_code else {
         return false;
@@ -371,6 +376,16 @@ pub(crate) fn write_request_log_with_attempts(
     let reasoning_output_tokens = normalize_token(usage.reasoning_output_tokens);
     let duration_ms = normalize_duration_ms(duration_ms);
     let first_response_ms = usage.first_response_ms.map(|value| value.max(0));
+    let compact_output_text = if is_compact_request_path(request_path) {
+        usage
+            .output_text
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    } else {
+        None
+    };
     let created_at = now_ts();
     let estimated_cost_usd =
         estimate_cost_usd(model, input_tokens, cached_input_tokens, output_tokens);
@@ -464,6 +479,7 @@ pub(crate) fn write_request_log_with_attempts(
             status_code: status_code.map(|v| i64::from(v)),
             duration_ms,
             first_response_ms,
+            compact_output_text,
             input_tokens: None,
             cached_input_tokens: None,
             output_tokens: None,

@@ -1,4 +1,33 @@
-use super::{validate_text_input_limit_for_path, MAX_TEXT_INPUT_CHARS};
+use super::{normalize_models_path, validate_text_input_limit_for_path, MAX_TEXT_INPUT_CHARS};
+
+#[test]
+fn normalize_models_path_maps_codex_responses_paths_without_v1() {
+    assert_eq!(normalize_models_path("/responses"), "/v1/responses");
+    assert_eq!(
+        normalize_models_path("/responses/compact"),
+        "/v1/responses/compact"
+    );
+    assert_eq!(
+        normalize_models_path("/responses/compact?foo=bar"),
+        "/v1/responses/compact?foo=bar"
+    );
+}
+
+#[test]
+fn normalize_models_path_maps_codex_backend_responses_paths() {
+    assert_eq!(
+        normalize_models_path("/backend-api/codex/responses/compact"),
+        "/v1/responses/compact"
+    );
+    assert_eq!(
+        normalize_models_path("https://chatgpt.com/backend-api/codex/responses/compact?foo=bar"),
+        "/v1/responses/compact?foo=bar"
+    );
+    assert_eq!(
+        normalize_models_path("/chatgpt.com/backend-api/codex/responses"),
+        "/v1/responses"
+    );
+}
 
 #[test]
 fn responses_text_limit_allows_small_payloads() {
