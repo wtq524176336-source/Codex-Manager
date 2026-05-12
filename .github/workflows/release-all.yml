@@ -83,9 +83,6 @@ jobs:
 
       - name: Setup release environment
         uses: ./.github/actions/setup-release-env
-        with:
-          enable-pnpm-cache: "false"
-          enable-rust-cache: "false"
 
       - name: Prepare frontend dist
         uses: ./.github/actions/prepare-frontend-dist
@@ -138,9 +135,7 @@ jobs:
       - name: Build service binaries
         shell: pwsh
         run: |
-          cargo build -p codexmanager-service --release
-          cargo build -p codexmanager-web --release --features embedded-ui
-          cargo build -p codexmanager-start --release
+          cargo build --release -p codexmanager-service -p codexmanager-web -p codexmanager-start
 
       - name: Stage service package
         uses: ./.github/actions/stage-service-package
@@ -190,8 +185,6 @@ jobs:
         uses: ./.github/actions/setup-release-env
         with:
           rust-target: ${{ matrix.rust_target }}
-          enable-pnpm-cache: "false"
-          enable-rust-cache: "false"
 
       - name: Prepare frontend dist
         uses: ./.github/actions/prepare-frontend-dist
@@ -284,9 +277,7 @@ jobs:
 
       - name: Build service binaries
         run: |
-          cargo build -p codexmanager-service --release --target ${{ matrix.rust_target }}
-          cargo build -p codexmanager-web --release --features embedded-ui --target ${{ matrix.rust_target }}
-          cargo build -p codexmanager-start --release --target ${{ matrix.rust_target }}
+          cargo build --release --target ${{ matrix.rust_target }} -p codexmanager-service -p codexmanager-web -p codexmanager-start
 
       - name: Stage service package
         uses: ./.github/actions/stage-service-package
@@ -327,9 +318,6 @@ jobs:
 
       - name: Setup release environment
         uses: ./.github/actions/setup-release-env
-        with:
-          enable-pnpm-cache: "false"
-          enable-rust-cache: "false"
 
       - name: Install Linux dependencies
         run: |
@@ -374,9 +362,7 @@ jobs:
 
       - name: Build service binaries
         run: |
-          cargo build -p codexmanager-service --release
-          cargo build -p codexmanager-web --release --features embedded-ui
-          cargo build -p codexmanager-start --release
+          cargo build --release -p codexmanager-service -p codexmanager-web -p codexmanager-start
 
       - name: Stage docker release package
         shell: bash
@@ -519,4 +505,3 @@ jobs:
           ref: ${{ github.event.inputs.ref || 'main' }}
           prerelease-input: ${{ github.event.inputs.prerelease || 'auto' }}
           assets-dir: release-assets
-

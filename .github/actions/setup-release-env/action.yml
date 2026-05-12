@@ -122,4 +122,4 @@ runs:
       uses: Swatinem/rust-cache@v2
       with:
         shared-key: ${{ inputs.rust-cache-shared-key }}
-        cache-targets: false
+        cache-targets: true
