@@ -81,6 +81,7 @@ import {
   formatPlanFilterLabel,
   formatStatusFilterLabel,
 } from "@/app/accounts/accounts-page-helpers";
+import { AccountTokenSummaryCards } from "@/components/accounts/account-token-summary-cards";
 
 interface PlanTypeOption {
   value: string;
@@ -97,6 +98,13 @@ interface CleanupStatusOption {
   label: string;
   description: string;
   count: number;
+}
+
+interface TokenSummaryStats {
+  todayTokens: number;
+  cachedTokens: number;
+  reasoningTokens: number;
+  todayCost: number;
 }
 
 export interface AccountsPageViewProps {
@@ -183,6 +191,8 @@ export interface AccountsPageViewProps {
   refreshAccount: (accountId: string) => void;
   clearPreferredAccount: (accountId: string) => void;
   setPreferredAccount: (accountId: string) => void;
+  usageStats: TokenSummaryStats;
+  isUsageStatsLoading: boolean;
 }
 
 export function AccountsPageView(props: AccountsPageViewProps) {
@@ -269,6 +279,8 @@ export function AccountsPageView(props: AccountsPageViewProps) {
     refreshAccount,
     clearPreferredAccount,
     setPreferredAccount,
+    usageStats,
+    isUsageStatsLoading,
   } = props;
   const cleanupSelectedCount = cleanupStatusOptions.reduce(
     (total, option) =>
@@ -287,6 +299,11 @@ export function AccountsPageView(props: AccountsPageViewProps) {
           </CardContent>
         </Card>
       ) : null}
+
+      <AccountTokenSummaryCards
+        stats={usageStats}
+        isLoading={isUsageStatsLoading}
+      />
 
       <Card className="glass-card border-none shadow-md backdrop-blur-md">
         <CardContent className="grid gap-3 pt-0 lg:grid-cols-[200px_auto_minmax(0,1fr)_auto] lg:items-center">

@@ -3,7 +3,6 @@
 import { normalizeRoutePath } from "@/lib/utils/static-routes";
 
 export const TOP_LEVEL_ROUTE_CONFIG = [
-  { path: "/", label: "仪表盘" },
   { path: "/accounts", label: "账号管理" },
   { path: "/aggregate-api", label: "聚合API" },
   { path: "/apikeys", label: "平台密钥" },
@@ -15,6 +14,7 @@ export const TOP_LEVEL_ROUTE_CONFIG = [
 ] as const;
 
 export type TopLevelRoutePath = (typeof TOP_LEVEL_ROUTE_CONFIG)[number]["path"];
+export const DEFAULT_TOP_LEVEL_ROUTE_PATH: TopLevelRoutePath = "/accounts";
 
 const TOP_LEVEL_ROUTE_SET = new Set<TopLevelRoutePath>(
   TOP_LEVEL_ROUTE_CONFIG.map((route) => route.path),
@@ -29,7 +29,7 @@ export function toTopLevelRoutePath(path: string): TopLevelRoutePath {
   if (isTopLevelRoutePath(normalizedPath)) {
     return normalizedPath;
   }
-  return "/";
+  return DEFAULT_TOP_LEVEL_ROUTE_PATH;
 }
 
 export function getTopLevelRouteLabel(path: string): string {

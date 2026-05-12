@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useAccounts } from "@/hooks/useAccounts";
+import { useDashboardStats } from "@/hooks/useDashboardStats";
 import { useDesktopPageActive } from "@/hooks/useDesktopPageActive";
 import { usePageTransitionReady } from "@/hooks/usePageTransitionReady";
 import { useRuntimeCapabilities } from "@/hooks/useRuntimeCapabilities";
@@ -68,6 +69,8 @@ export default function AccountsPage() {
     updateAccountProfile,
     isUpdatingProfileAccountId,
   } = useAccounts();
+  const { stats: usageStats, isLoading: isUsageStatsLoading } =
+    useDashboardStats("/accounts/");
   const isPageActive = useDesktopPageActive("/accounts/");
   usePageTransitionReady("/accounts/", !isServiceReady || !isLoading);
 
@@ -533,6 +536,8 @@ const toggleCleanupStatus = (rawStatus: string) => {
       refreshAccount={refreshAccount}
       clearPreferredAccount={clearPreferredAccount}
       setPreferredAccount={setPreferredAccount}
+      usageStats={usageStats}
+      isUsageStatsLoading={isUsageStatsLoading}
     />
   );
 }

@@ -12,6 +12,7 @@ import {
 import { Loader2 } from "lucide-react";
 import { usePathname } from "next/navigation";
 import {
+  DEFAULT_TOP_LEVEL_ROUTE_PATH,
   type TopLevelRoutePath,
   getTopLevelRouteLabel,
   toTopLevelRoutePath,
@@ -19,11 +20,10 @@ import {
 import { useI18n } from "@/lib/i18n/provider";
 import { useAppStore } from "@/lib/store/useAppStore";
 import { cn } from "@/lib/utils";
-
-const ROOT_ROUTE_PATH = "/";
+import { buildStaticRouteUrl } from "@/lib/utils/static-routes";
 
 const LAZY_PAGE_COMPONENTS: Record<
-  Exclude<TopLevelRoutePath, typeof ROOT_ROUTE_PATH>,
+  TopLevelRoutePath,
   LazyExoticComponent<ComponentType>
 > = {
   "/accounts": lazy(() => import("@/app/accounts/page")),
@@ -35,8 +35,6 @@ const LAZY_PAGE_COMPONENTS: Record<
   "/settings": lazy(() => import("@/app/settings/page")),
   "/author": lazy(() => import("@/app/author/page")),
 };
-
-const ROOT_PAGE_COMPONENT = lazy(() => import("@/app/page"));
 
 function PagePanelFallback({ title }: { title: string }) {
   const isSidebarOpen = useAppStore((state) => state.isSidebarOpen);
@@ -73,7 +71,7 @@ function PagePanelFallback({ title }: { title: string }) {
 }
 
 function LazyPagePanel({ path }: { path: TopLevelRoutePath }) {
-  const LazyPage = path === ROOT_ROUTE_PATH ? ROOT_PAGE_COMPONENT : LAZY_PAGE_COMPONENTS[path];
+  const LazyPage = LAZY_PAGE_COMPONENTS[path];
 
   return (
     <Suspense fallback={<PagePanelFallback title={getTopLevelRouteLabel(path)} />}>
@@ -101,6 +99,20 @@ export function PageKeepAliveViewport({
   useEffect(() => {
     syncShellPathFromLocation(normalizedInitialPath);
   }, [normalizedInitialPath, syncShellPathFromLocation]);
+
+  useEffect(() => {
+    if (
+      typeof window !== "undefined" &&
+      normalizedInitialPath === DEFAULT_TOP_LEVEL_ROUTE_PATH &&
+      window.location.pathname === "/"
+    ) {
+      window.history.replaceState(
+        window.history.state,
+        "",
+        buildStaticRouteUrl(DEFAULT_TOP_LEVEL_ROUTE_PATH),
+      );
+    }
+  }, [normalizedInitialPath]);
 
   useEffect(() => {
     const handlePopState = () => {

@@ -14,11 +14,6 @@ import {
 } from "@/lib/utils/usage";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import type { Account } from "@/types";
 
 export type StatusFilter = "all" | "available" | "low_quota" | "limited" | "banned";
@@ -119,67 +114,6 @@ export type DeleteDialogState =
   | { kind: "selected"; ids: string[]; count: number }
   | null;
 
-function QuotaProgress({
-  label,
-  remainPercent,
-  resetsAt,
-  icon: Icon,
-  tone,
-  caption,
-  emptyText = "--",
-  emptyResetText = "未知",
-}: QuotaProgressProps) {
-  const { t } = useI18n();
-  const value = remainPercent ?? 0;
-  const toneClasses = {
-    blue: {
-      track: "bg-blue-500/20",
-      indicator: "bg-blue-500",
-      icon: "text-blue-500",
-    },
-    green: {
-      track: "bg-green-500/20",
-      indicator: "bg-green-500",
-      icon: "text-green-500",
-    },
-    amber: {
-      track: "bg-amber-500/20",
-      indicator: "bg-amber-500",
-      icon: "text-amber-500",
-    },
-  } as const;
-  const palette = toneClasses[tone];
-
-  return (
-    <div className="flex min-w-[180px] flex-col gap-1.5">
-      <div className="flex items-center justify-between text-[10px]">
-        <div className="min-w-0">
-          <div className="flex items-center gap-1 text-muted-foreground">
-            <Icon className={cn("h-3 w-3", palette.icon)} />
-            <span>{label}</span>
-          </div>
-          {caption ? (
-            <div className="truncate text-[9px] text-muted-foreground/80">
-              {caption}
-            </div>
-          ) : null}
-        </div>
-        <span className="font-medium">
-          {remainPercent == null ? emptyText : `${value}%`}
-        </span>
-      </div>
-      <Progress
-        value={value}
-        trackClassName={palette.track}
-        indicatorClassName={palette.indicator}
-      />
-      <div className="text-[10px] text-muted-foreground">
-        {t("重置")}: {formatTsFromSeconds(resetsAt, emptyResetText)}
-      </div>
-    </div>
-  );
-}
-
 export function QuotaOverviewCell({
   items,
 }: {
@@ -189,89 +123,53 @@ export function QuotaOverviewCell({
   const summaryItems = items.slice(0, 2);
 
   return (
-    <Tooltip>
-      <TooltipTrigger render={<div />} className="block cursor-help">
-        <div className="rounded-xl border border-primary/5 bg-accent/10 px-3 py-2">
-          <div className="space-y-1.5">
-            {summaryItems.map((item) => (
-              <div
-                key={item.id}
-                className="grid grid-cols-[120px_minmax(120px,1fr)_44px_112px] items-center gap-2 text-xs"
-              >
-                <span className="truncate text-muted-foreground">
-                  {item.label}
-                  {item.costText ? `（${item.costText}）` : ""}
-                </span>
-                <Progress
-                  value={item.remainPercent ?? 0}
-                  trackClassName={
-                    item.tone === "blue"
-                      ? "bg-blue-500/20"
-                      : item.tone === "amber"
-                        ? "bg-amber-500/20"
-                        : "bg-green-500/20"
-                  }
-                  indicatorClassName={
-                    item.tone === "blue"
-                      ? "bg-blue-500"
-                      : item.tone === "amber"
-                        ? "bg-amber-500"
-                        : "bg-green-500"
-                  }
-                />
-                <div className="flex min-w-0 items-center justify-end gap-2 text-muted-foreground">
-                  <span className="w-9 shrink-0 text-right font-medium text-foreground/80">
-                    {item.remainPercent == null
-                      ? (item.emptyText ?? "--")
-                      : `${item.remainPercent}%`}
-                  </span>
-                </div>
-                <span className="shrink-0 text-right text-muted-foreground">
-                  {formatRemainingDurationFromSeconds(
-                    item.resetsAt,
-                    item.id.endsWith("-primary") ? "hours" : "days",
-                    item.emptyResetText ?? t("未知"),
-                  )}
-                  后刷新
-                </span>
-              </div>
-            ))}
+    <div className="rounded-xl border border-primary/5 bg-accent/10 px-3 py-2">
+      <div className="space-y-1.5">
+        {summaryItems.map((item) => (
+          <div
+            key={item.id}
+            className="grid grid-cols-[120px_minmax(120px,1fr)_44px_112px] items-center gap-2 text-xs"
+          >
+            <span className="truncate text-muted-foreground">
+              {item.label}
+              {item.costText ? `（${item.costText}）` : ""}
+            </span>
+            <Progress
+              value={item.remainPercent ?? 0}
+              trackClassName={
+                item.tone === "blue"
+                  ? "bg-blue-500/20"
+                  : item.tone === "amber"
+                    ? "bg-amber-500/20"
+                    : "bg-green-500/20"
+              }
+              indicatorClassName={
+                item.tone === "blue"
+                  ? "bg-blue-500"
+                  : item.tone === "amber"
+                    ? "bg-amber-500"
+                    : "bg-green-500"
+              }
+            />
+            <div className="flex min-w-0 items-center justify-end gap-2 text-muted-foreground">
+              <span className="w-9 shrink-0 text-right font-medium text-foreground/80">
+                {item.remainPercent == null
+                  ? (item.emptyText ?? "--")
+                  : `${item.remainPercent}%`}
+              </span>
+            </div>
+            <span className="shrink-0 text-right text-muted-foreground">
+              {formatRemainingDurationFromSeconds(
+                item.resetsAt,
+                item.id.endsWith("-primary") ? "hours" : "days",
+                item.emptyResetText ?? t("未知"),
+              )}
+              后刷新
+            </span>
           </div>
-        </div>
-      </TooltipTrigger>
-      <TooltipContent
-        side="right"
-        align="center"
-        sideOffset={10}
-        className="max-w-[340px] rounded-2xl bg-background p-3 text-foreground shadow-2xl"
-      >
-        <div className="space-y-3">
-          <div className="space-y-1">
-            <p className="text-sm font-semibold">
-              {t("额度详情（悬停查看所有额度）")}
-            </p>
-            <p className="text-[10px] text-muted-foreground">
-              {t("标准额度与专属额度统一在这里查看。")}
-            </p>
-          </div>
-          <div className="space-y-2">
-            {items.map((item) => (
-              <QuotaProgress
-                key={item.id}
-                label={item.label}
-                remainPercent={item.remainPercent}
-                resetsAt={item.resetsAt}
-                icon={item.icon}
-                tone={item.tone}
-                caption={item.caption}
-                emptyText={item.emptyText}
-                emptyResetText={item.emptyResetText}
-              />
-            ))}
-          </div>
-        </div>
-      </TooltipContent>
-    </Tooltip>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -356,27 +254,6 @@ function formatAccountWindowCostUsd(value: number): string {
   }).format(normalized);
 }
 
-function formatAccountWindowCostLabel(account: Account, t: TranslateFn): string {
-  const startedAt =
-    typeof account.currentWindowStartedAt === "number"
-      ? account.currentWindowStartedAt
-      : null;
-  const resetsAt =
-    typeof account.currentWindowResetsAt === "number"
-      ? account.currentWindowResetsAt
-      : null;
-  if (startedAt != null && resetsAt != null) {
-    const windowSeconds = Math.max(0, resetsAt - startedAt);
-    if (windowSeconds >= 6 * 24 * 60 * 60) {
-      return t("1周 API 费用");
-    }
-  }
-  if (isSecondaryWindowOnlyUsage(account.usage)) {
-    return t("1周 API 费用");
-  }
-  return t("5小时 API 费用");
-}
-
 export function normalizeTagsDraft(tagsDraft: string): string[] {
   return tagsDraft
     .split(",")
@@ -453,143 +330,49 @@ export function AccountInfoCell({
 }) {
   const { t } = useI18n();
   const accountPlanLabel = formatAccountPlanLabel(account, t);
-  const subscriptionStatusLabel = formatAccountSubscriptionStatusLabel(account, t);
-  const subscriptionPlanLabel = formatAccountSubscriptionPlanLabel(account, t);
   const subscriptionExpiryText =
     account.subscriptionExpiresAt != null
       ? formatTsFromSeconds(account.subscriptionExpiresAt, t("未知"))
       : account.hasSubscription === false
         ? t("未订阅")
         : t("未知");
-  const tagsText = formatAccountTags(account.tags);
-  const noteText = String(account.note || "").trim();
-  const currentWindowCostText = formatAccountWindowCostUsd(
-    account.currentWindowCostUsd,
-  );
-  const currentWindowCostLabel = formatAccountWindowCostLabel(account, t);
 
   return (
-    <Tooltip>
-      <TooltipTrigger render={<div />} className="block cursor-help text-left">
-        <div className="flex flex-col overflow-hidden">
-          <div className="flex items-center gap-2 overflow-hidden">
-            <span className="truncate text-base font-semibold">
-              {account.name}
-            </span>
-            {accountPlanLabel ? (
-              <Badge
-                variant="secondary"
-                className={cn(
-                  "h-5 shrink-0 px-1.5 text-[10px]",
-                  getAccountPlanBadgeClassName(accountPlanLabel),
-                )}
-              >
-                {accountPlanLabel}
-              </Badge>
-            ) : null}
-            {isPreferred ? (
-              <Badge
-                variant="secondary"
-                className="h-5 shrink-0 bg-emerald-500/15 px-1.5 text-[10px] text-emerald-700 dark:text-emerald-300"
-              >
-                {t("启用")}
-              </Badge>
-            ) : null}
-          </div>
-          <span className="truncate font-mono text-xs uppercase text-muted-foreground opacity-60">
-            {account.id.slice(0, 16)}...
-          </span>
-          <span className="mt-1 text-xs text-muted-foreground">
-            {t("最近刷新")}:{" "}
-            {formatTsFromSeconds(account.lastRefreshAt, t("从未刷新"))}
-          </span>
-          <span className="text-xs text-muted-foreground">
-            {t("订阅到期")}: {subscriptionExpiryText}
-          </span>
-        </div>
-      </TooltipTrigger>
-      <TooltipContent className="max-w-sm">
-        <div className="flex min-w-[260px] flex-col gap-2">
-          <div className="grid gap-2 sm:grid-cols-2">
-            <div className="space-y-0.5">
-              <div className="text-[10px] text-background/70">
-                {t("账号类型")}
-              </div>
-              <div className="font-medium">{accountPlanLabel || t("未知")}</div>
-            </div>
-            <div className="space-y-0.5">
-              <div className="text-[10px] text-background/70">
-                {t("当前状态")}
-              </div>
-              <div className="font-medium">
-                {t(account.availabilityText || "未知")}
-              </div>
-            </div>
-            <div className="space-y-0.5">
-              <div className="text-[10px] text-background/70">
-                {t("订阅状态")}
-              </div>
-              <div className="font-medium">{subscriptionStatusLabel}</div>
-            </div>
-            <div className="space-y-0.5">
-              <div className="text-[10px] text-background/70">
-                {t("订阅方案")}
-              </div>
-              <div className="font-medium">{subscriptionPlanLabel}</div>
-            </div>
-          </div>
-          <div className="grid gap-2 sm:grid-cols-2">
-            <div className="space-y-0.5">
-              <div className="text-[10px] text-background/70">
-                {t("到期时间")}
-              </div>
-              <div className="font-medium">
-                {formatTsFromSeconds(account.subscriptionExpiresAt, t("未知"))}
-              </div>
-            </div>
-            <div className="space-y-0.5">
-              <div className="text-[10px] text-background/70">
-                {t("续费时间")}
-              </div>
-              <div className="font-medium">
-                {formatTsFromSeconds(account.subscriptionRenewsAt, t("未知"))}
-              </div>
-            </div>
-          </div>
-          <div className="grid gap-2 sm:grid-cols-2">
-            <div className="space-y-0.5">
-              <div className="text-[10px] text-background/70">
-                {currentWindowCostLabel}
-              </div>
-              <div className="font-medium">{currentWindowCostText}</div>
-            </div>
-            <div className="space-y-0.5">
-              <div className="text-[10px] text-background/70">
-                {t("费用窗口")}
-              </div>
-              <div className="font-medium">
-                {formatTsFromSeconds(account.currentWindowStartedAt, t("未知"))}
-                {" - "}
-                {formatTsFromSeconds(account.currentWindowResetsAt, t("未知"))}
-              </div>
-            </div>
-          </div>
-          <div className="space-y-0.5">
-            <div className="text-[10px] text-background/70">{t("标签")}</div>
-            <div className="break-words">{tagsText || t("未设置")}</div>
-          </div>
-          <div className="space-y-0.5">
-            <div className="text-[10px] text-background/70">{t("备注")}</div>
-            <div className="whitespace-pre-wrap break-words">
-              {noteText || t("未设置")}
-            </div>
-          </div>
-          <div className="space-y-0.5">
-            <div className="text-[10px] text-background/70">{t("账号 ID")}</div>
-            <div className="break-all font-mono text-[11px]">{account.id}</div>
-          </div>
-        </div>
-      </TooltipContent>
-    </Tooltip>
+    <div className="flex flex-col overflow-hidden text-left">
+      <div className="flex items-center gap-2 overflow-hidden">
+        <span className="truncate text-base font-semibold">
+          {account.name}
+        </span>
+        {accountPlanLabel ? (
+          <Badge
+            variant="secondary"
+            className={cn(
+              "h-5 shrink-0 px-1.5 text-[10px]",
+              getAccountPlanBadgeClassName(accountPlanLabel),
+            )}
+          >
+            {accountPlanLabel}
+          </Badge>
+        ) : null}
+        {isPreferred ? (
+          <Badge
+            variant="secondary"
+            className="h-5 shrink-0 bg-emerald-500/15 px-1.5 text-[10px] text-emerald-700 dark:text-emerald-300"
+          >
+            {t("启用")}
+          </Badge>
+        ) : null}
+      </div>
+      <span className="truncate font-mono text-xs uppercase text-muted-foreground opacity-60">
+        {account.id.slice(0, 16)}...
+      </span>
+      <span className="mt-1 text-xs text-muted-foreground">
+        {t("最近刷新")}:{" "}
+        {formatTsFromSeconds(account.lastRefreshAt, t("从未刷新"))}
+      </span>
+      <span className="text-xs text-muted-foreground">
+        {t("订阅到期")}: {subscriptionExpiryText}
+      </span>
+    </div>
   );
 }

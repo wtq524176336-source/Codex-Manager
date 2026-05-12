@@ -9,6 +9,7 @@ import {
   DEFAULT_AUTHOR_SPONSORS,
 } from "../sponsor-links";
 import {
+  DEFAULT_TOP_LEVEL_ROUTE_PATH,
   type TopLevelRoutePath,
   toTopLevelRoutePath,
 } from "../app-shell/top-level-routes";
@@ -36,7 +37,9 @@ interface AppState {
 }
 
 const initialShellPath =
-  typeof window === "undefined" ? "/" : toTopLevelRoutePath(window.location.pathname);
+  typeof window === "undefined"
+    ? DEFAULT_TOP_LEVEL_ROUTE_PATH
+    : toTopLevelRoutePath(window.location.pathname);
 
 export const useAppStore = create<AppState>((set) => ({
   serviceStatus: {
@@ -172,7 +175,7 @@ export const useAppStore = create<AppState>((set) => ({
 
     set((state) => {
       const normalizedPath = toTopLevelRoutePath(path);
-      if (normalizedPath === "/") {
+      if (normalizedPath === DEFAULT_TOP_LEVEL_ROUTE_PATH) {
         return state;
       }
 
@@ -184,7 +187,9 @@ export const useAppStore = create<AppState>((set) => ({
       const nextTabs = state.openShellTabs.filter((tab) => tab !== normalizedPath);
       nextActivePath =
         state.currentShellPath === normalizedPath
-          ? nextTabs[targetIndex - 1] ?? nextTabs[targetIndex] ?? "/"
+          ? nextTabs[targetIndex - 1] ??
+            nextTabs[targetIndex] ??
+            DEFAULT_TOP_LEVEL_ROUTE_PATH
           : state.currentShellPath;
 
       if (

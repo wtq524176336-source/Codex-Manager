@@ -7,6 +7,7 @@ import { AlertCircle, Play, RefreshCw } from "lucide-react";
 import { useTheme } from "next-themes";
 import { toast } from "sonner";
 import { useAppStore } from "@/lib/store/useAppStore";
+import { DEFAULT_TOP_LEVEL_ROUTE_PATH } from "@/lib/app-shell/top-level-routes";
 import { serviceClient } from "@/lib/api/service-client";
 import {
   buildStartupSnapshotQueryKey,
@@ -205,11 +206,11 @@ export function AppBootstrap({ children }: { children: React.ReactNode }) {
     [localDayRange.dayEndTs, localDayRange.dayStartTs, queryClient]
   );
 
-  const shouldBlockOnInitialDashboardSnapshot = useCallback(
+  const shouldBlockOnInitialAccountSnapshot = useCallback(
     (desktopRuntime: boolean) =>
       desktopRuntime &&
       !hasInitializedOnce.current &&
-      normalizeRoutePath(pathname) === "/",
+      ["/", DEFAULT_TOP_LEVEL_ROUTE_PATH].includes(normalizeRoutePath(pathname)),
     [pathname],
   );
 
@@ -218,14 +219,14 @@ export function AppBootstrap({ children }: { children: React.ReactNode }) {
       addr: string,
       version: string,
       lowTransparency: boolean,
-      options?: { blockOnDashboardSnapshot?: boolean },
+      options?: { blockOnAccountSnapshot?: boolean },
     ) => {
-      if (options?.blockOnDashboardSnapshot) {
+      if (options?.blockOnAccountSnapshot) {
         try {
           await prefetchStartupSnapshot(addr);
         } catch (warmupError) {
           console.warn(
-            `${STARTUP_WARMUP_LABEL} initial dashboard snapshot prefetch failed`,
+            `${STARTUP_WARMUP_LABEL} initial account snapshot prefetch failed`,
             warmupError,
           );
         }
@@ -255,8 +256,8 @@ export function AppBootstrap({ children }: { children: React.ReactNode }) {
       );
       setRuntimeCapabilities(detectedRuntimeCapabilities);
       const desktopRuntime = detectedRuntimeCapabilities.mode === "desktop-tauri";
-      const shouldBlockOnDashboardSnapshot =
-        shouldBlockOnInitialDashboardSnapshot(desktopRuntime);
+      const shouldBlockOnAccountSnapshot =
+        shouldBlockOnInitialAccountSnapshot(desktopRuntime);
 
       if (detectedRuntimeCapabilities.mode === "unsupported-web") {
         if (!hasInitializedOnce.current) {
@@ -301,7 +302,7 @@ export function AppBootstrap({ children }: { children: React.ReactNode }) {
           addr,
           "",
           settings.lowTransparency,
-          { blockOnDashboardSnapshot: shouldBlockOnDashboardSnapshot },
+          { blockOnAccountSnapshot: shouldBlockOnAccountSnapshot },
         );
       } catch (serviceError: unknown) {
         if (!hasInitializedOnce.current) {
@@ -325,7 +326,7 @@ export function AppBootstrap({ children }: { children: React.ReactNode }) {
     setServiceStatus,
     setTheme,
     startAndInitializeService,
-    shouldBlockOnInitialDashboardSnapshot,
+    shouldBlockOnInitialAccountSnapshot,
     t,
   ]);
 
@@ -367,8 +368,8 @@ export function AppBootstrap({ children }: { children: React.ReactNode }) {
         "",
         settings.lowTransparency,
         {
-          blockOnDashboardSnapshot:
-            shouldBlockOnInitialDashboardSnapshot(true),
+          blockOnAccountSnapshot:
+            shouldBlockOnInitialAccountSnapshot(true),
         },
       );
       toast.success(t("服务已连接"));

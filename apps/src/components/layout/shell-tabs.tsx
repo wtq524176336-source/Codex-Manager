@@ -1,12 +1,13 @@
 "use client";
 
 import { X } from "lucide-react";
-import { getTopLevelRouteLabel } from "@/lib/app-shell/top-level-routes";
+import {
+  DEFAULT_TOP_LEVEL_ROUTE_PATH,
+  getTopLevelRouteLabel,
+} from "@/lib/app-shell/top-level-routes";
 import { useAppStore } from "@/lib/store/useAppStore";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n/provider";
-
-const ROOT_ROUTE_PATH = "/";
 
 export function ShellTabs() {
   const { t } = useI18n();
@@ -25,7 +26,7 @@ export function ShellTabs() {
         {openShellTabs.map((path) => {
           const isActive = path === currentShellPath;
           const label = t(getTopLevelRouteLabel(path));
-          const canClose = path !== ROOT_ROUTE_PATH;
+          const canClose = path !== DEFAULT_TOP_LEVEL_ROUTE_PATH;
 
           return (
             <div

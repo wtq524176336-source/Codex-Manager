@@ -30,11 +30,11 @@ import { pickBestRecommendations, pickCurrentAccount } from "@/lib/utils/usage";
  * # 返回
  * 返回函数执行结果
  */
-export function useDashboardStats() {
+export function useDashboardStats(activePath = "/") {
   const serviceStatus = useAppStore((state) => state.serviceStatus);
   const localDayRange = useLocalDayRange();
   const isServiceReady = serviceStatus.connected;
-  const isPageActive = useDesktopPageActive("/");
+  const isPageActive = useDesktopPageActive(activePath);
   const isSnapshotQueryEnabled = useDeferredDesktopActivation(
     isServiceReady && isPageActive,
   );

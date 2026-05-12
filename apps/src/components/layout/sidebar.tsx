@@ -1,7 +1,6 @@
 "use client";
 
 import { 
-  LayoutDashboard, 
   Users, 
   Key, 
   Boxes,
@@ -24,7 +23,6 @@ import {
 } from "react";
 
 const NAV_ITEMS = [
-  { label: "仪表盘", href: "/", icon: LayoutDashboard },
   { label: "账号管理", href: "/accounts", icon: Users },
   { label: "聚合API", href: "/aggregate-api", icon: Database },
   { label: "平台密钥", href: "/apikeys", icon: Key },
