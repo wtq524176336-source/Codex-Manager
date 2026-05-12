@@ -22,14 +22,10 @@ const I18nContext = createContext<I18nContextValue | null>(null);
 
 export function I18nProvider({ children }: { children: React.ReactNode }) {
   const storedLocale = useAppStore((state) => state.appSettings.locale);
-  const storedLocaleOptions = useAppStore((state) => state.appSettings.localeOptions);
   const setAppSettings = useAppStore((state) => state.setAppSettings);
   const [isSwitchingLocale, setIsSwitchingLocale] = useState(false);
   const locale = normalizeLocale(storedLocale);
-  const localeOptions = useMemo(
-    () => (storedLocaleOptions?.length ? storedLocaleOptions : SUPPORTED_LOCALES).map(normalizeLocale),
-    [storedLocaleOptions],
-  );
+  const localeOptions = useMemo(() => SUPPORTED_LOCALES.slice(), []);
 
   useEffect(() => {
     if (typeof document === "undefined") {

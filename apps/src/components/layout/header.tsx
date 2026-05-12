@@ -8,8 +8,6 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { DisclaimerTicker } from "@/components/layout/disclaimer-ticker";
-import { LanguageSwitcher } from "@/components/layout/language-switcher";
 import { WebPasswordModal } from "../modals/web-password-modal";
 import { serviceClient } from "@/lib/api/service-client";
 import { appClient } from "@/lib/api/app-client";
@@ -169,13 +167,7 @@ export function Header() {
           ) : null}
         </div>
 
-        <div className="hidden min-w-0 items-center justify-center px-2 lg:flex">
-          <DisclaimerTicker />
-        </div>
-
         <div className="ml-auto flex shrink-0 items-center gap-2 xl:gap-3">
-          <LanguageSwitcher compact triggerClassName="w-[124px] xl:w-[132px]" />
-
           {canManageService ? (
             <div className="flex items-center gap-2 rounded-lg border bg-card/30 px-2.5 py-1.5 shadow-sm">
               <span className="text-xs font-medium text-muted-foreground">{t("监听端口")}</span>

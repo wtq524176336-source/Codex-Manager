@@ -207,7 +207,7 @@ pub(super) fn current_app_settings_value(
         "theme": theme,
         "appearancePreset": appearance_preset,
         "locale": locale,
-        "localeOptions": ["zh-CN", "en", "ru", "ko"],
+        "localeOptions": ["zh-CN"],
         "serviceAddr": service_addr,
         "serviceListenMode": service_listen_mode,
         "serviceListenModeOptions": [

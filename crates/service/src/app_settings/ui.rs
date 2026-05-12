@@ -15,7 +15,7 @@ const VALID_UI_THEMES: &[&str] = &[
     "slate", "aurora",
 ];
 const VALID_UI_APPEARANCE_PRESETS: &[&str] = &["modern", "classic"];
-const VALID_UI_LOCALES: &[&str] = &["zh-CN", "en", "ru", "ko"];
+const VALID_UI_LOCALES: &[&str] = &["zh-CN"];
 
 /// 函数 `normalize_ui_theme`
 ///
@@ -68,9 +68,6 @@ fn normalize_ui_locale(raw: Option<&str>) -> String {
     let normalized = candidate.to_ascii_lowercase();
     let next_value = match normalized.as_str() {
         "zh" | "zh-cn" | "zh_hans" | "zh-hans" => "zh-CN",
-        "en" | "en-us" | "en-gb" => "en",
-        "ru" | "ru-ru" => "ru",
-        "ko" | "ko-kr" => "ko",
         _ => DEFAULT_UI_LOCALE,
     };
     if VALID_UI_LOCALES.iter().any(|locale| *locale == next_value) {
@@ -313,8 +310,8 @@ mod tests {
     #[test]
     fn ui_locale_normalization_accepts_supported_aliases() {
         assert_eq!(normalize_ui_locale(Some("zh-cn")), "zh-CN");
-        assert_eq!(normalize_ui_locale(Some("EN-US")), "en");
-        assert_eq!(normalize_ui_locale(Some("ru-RU")), "ru");
-        assert_eq!(normalize_ui_locale(Some("ko-kr")), "ko");
+        assert_eq!(normalize_ui_locale(Some("EN-US")), DEFAULT_UI_LOCALE);
+        assert_eq!(normalize_ui_locale(Some("ru-RU")), DEFAULT_UI_LOCALE);
+        assert_eq!(normalize_ui_locale(Some("ko-kr")), DEFAULT_UI_LOCALE);
     }
 }

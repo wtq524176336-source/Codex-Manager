@@ -324,6 +324,34 @@ function formatTableTokenAmount(value: number | null | undefined): string {
   return Math.round(normalized).toLocaleString("zh-CN");
 }
 
+function formatOutputTokenRate(log: RequestLog): string {
+  if (typeof log.outputTokens !== "number" || !Number.isFinite(log.outputTokens)) {
+    return "-";
+  }
+  if (typeof log.durationMs !== "number" || !Number.isFinite(log.durationMs)) {
+    return "-";
+  }
+  const outputTokens = Math.max(0, log.outputTokens);
+  const durationMs = Math.max(0, log.durationMs);
+  const firstResponseMs =
+    typeof log.firstResponseMs === "number" && Number.isFinite(log.firstResponseMs)
+      ? Math.max(0, log.firstResponseMs)
+      : 0;
+  const outputDurationMs =
+    firstResponseMs > 0 && durationMs > firstResponseMs
+      ? durationMs - firstResponseMs
+      : durationMs;
+  if (outputDurationMs <= 0) {
+    return "-";
+  }
+  const rate = outputTokens / (outputDurationMs / 1000);
+  const formatted =
+    rate > 0 && rate < 100
+      ? rate.toFixed(1).replace(/\.0$/, "")
+      : Math.round(rate).toLocaleString("zh-CN");
+  return `${formatted}/s`;
+}
+
 /**
  * 函数 `fallbackAccountNameFromId`
  *
@@ -1882,7 +1910,7 @@ function LogsPageContent() {
                 <TableHead className="w-[128px] px-4 text-[11px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
                   {t("用时 / 首响")}
                 </TableHead>
-                <TableHead className="w-[148px] px-4 text-[11px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
+                <TableHead className="w-[168px] px-4 text-[11px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
                   {t("Token")}
                 </TableHead>
                 <TableHead className="w-[240px] px-4 text-[11px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
@@ -1976,8 +2004,17 @@ function LogsPageContent() {
                         <span>
                           {t("输入")} {formatTableTokenAmount(log.inputTokens)}
                         </span>
+                        <span>
+                          {t("输出")} {formatTableTokenAmount(log.outputTokens)}
+                        </span>
                         <span className="opacity-60">
                           {t("缓存")} {formatTableTokenAmount(log.cachedInputTokens)}
+                        </span>
+                        <span
+                          className="font-medium text-primary"
+                          title={t("输出速度按输出 Token 除以输出阶段耗时计算")}
+                        >
+                          {t("速度")} {formatOutputTokenRate(log)}
                         </span>
                       </div>
                     </TableCell>

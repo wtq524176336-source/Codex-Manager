@@ -1607,8 +1607,8 @@ export function normalizeAppSettings(payload: unknown): AppSettings {
       source.webAccessPasswordConfigured,
       false
     ),
-    locale: asString(source.locale) || "zh-CN",
-    localeOptions: asArray(source.localeOptions).map((item) => asString(item)).filter(Boolean),
+    locale: "zh-CN",
+    localeOptions: ["zh-CN"],
     serviceAddr: asString(source.serviceAddr) || "localhost:48760",
     serviceListenMode: asString(source.serviceListenMode) || "loopback",
     serviceListenModeOptions: asArray(source.serviceListenModeOptions).map((item) =>

@@ -1,16 +1,11 @@
 "use client";
 
 import { DEFAULT_LOCALE, type AppLocale } from "../config";
-import { EN_MESSAGES } from "./en";
-import { KO_MESSAGES } from "./ko";
-import { RU_MESSAGES } from "./ru";
+import { ZH_CN_MESSAGES } from "./zh";
 import type { MessageCatalog, TranslationValues } from "./types";
 
 const MESSAGE_CATALOG: Record<AppLocale, MessageCatalog> = {
-  "zh-CN": {},
-  en: EN_MESSAGES,
-  ru: RU_MESSAGES,
-  ko: KO_MESSAGES,
+  "zh-CN": ZH_CN_MESSAGES,
 };
 
 function interpolate(template: string, values?: TranslationValues): string {

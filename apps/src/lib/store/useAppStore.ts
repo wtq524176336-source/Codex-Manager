@@ -54,7 +54,7 @@ export const useAppStore = create<AppState>((set) => ({
     codexCliGuideDismissed: false,
     webAccessPasswordConfigured: false,
     locale: "zh-CN",
-    localeOptions: ["zh-CN", "en", "ru", "ko"],
+    localeOptions: ["zh-CN"],
     serviceAddr: "localhost:48760",
     serviceListenMode: "loopback",
     serviceListenModeOptions: ["loopback", "all_interfaces"],
