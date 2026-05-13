@@ -184,6 +184,7 @@ mod tests {
         let request_ctx = UpstreamRequestContext {
             request_path: "/v1/responses",
             protocol_type: crate::apikey_profile::PROTOCOL_OPENAI_COMPAT,
+            transparent_mode: false,
         };
         let incoming_headers = headers(Some("CherryStudio/1.0"), None);
 
@@ -199,6 +200,7 @@ mod tests {
         let request_ctx = UpstreamRequestContext {
             request_path: "/v1/responses",
             protocol_type: crate::apikey_profile::PROTOCOL_OPENAI_COMPAT,
+            transparent_mode: false,
         };
         let incoming_headers = headers(Some("codex-cli/0.1.0"), Some("codex_cli_rs"));
 

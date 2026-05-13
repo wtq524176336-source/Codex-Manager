@@ -17,6 +17,7 @@ pub(in super::super) struct GatewayUpstreamExecutionContext<'a> {
     effective_service_tier_for_log: Option<&'a str>,
     candidate_count: usize,
     account_max_inflight: usize,
+    transparent_mode: bool,
 }
 
 impl<'a> GatewayUpstreamExecutionContext<'a> {
@@ -48,6 +49,7 @@ impl<'a> GatewayUpstreamExecutionContext<'a> {
         effective_service_tier_for_log: Option<&'a str>,
         candidate_count: usize,
         account_max_inflight: usize,
+        transparent_mode: bool,
     ) -> Self {
         Self {
             trace_id,
@@ -65,6 +67,7 @@ impl<'a> GatewayUpstreamExecutionContext<'a> {
             effective_service_tier_for_log,
             candidate_count,
             account_max_inflight,
+            transparent_mode,
         }
     }
 
@@ -85,6 +88,10 @@ impl<'a> GatewayUpstreamExecutionContext<'a> {
 
     pub(in super::super) fn protocol_type(&self) -> &str {
         self.protocol_type
+    }
+
+    pub(in super::super) fn transparent_mode(&self) -> bool {
+        self.transparent_mode
     }
 
     /// 函数 `should_skip_candidate`
@@ -302,6 +309,7 @@ impl<'a> GatewayUpstreamExecutionContext<'a> {
                 request_type: Some(self.request_type_for_log),
                 service_tier: self.service_tier_for_log,
                 effective_service_tier: self.effective_service_tier_for_log,
+                transparent_mode: Some(self.transparent_mode),
                 ..Default::default()
             },
             Some(self.key_id),

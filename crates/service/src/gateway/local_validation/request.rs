@@ -1016,34 +1016,15 @@ fn should_derive_compat_conversation_anchor(protocol_type: &str, normalized_path
 /// # 返回
 /// 返回函数执行结果
 fn is_native_codex_client_request(incoming_headers: &super::super::IncomingHeaderSnapshot) -> bool {
-    let user_agent = incoming_headers
-        .user_agent()
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    let originator = incoming_headers
-        .originator()
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-
-    let has_codex_header_signals = incoming_headers.client_request_id().is_some()
-        || incoming_headers.subagent().is_some()
-        || incoming_headers.beta_features().is_some()
-        || incoming_headers.window_id().is_some()
-        || incoming_headers.turn_metadata().is_some()
-        || incoming_headers.turn_state().is_some()
-        || incoming_headers.parent_thread_id().is_some();
-
-    user_agent.contains("codex_cli_rs")
-        || originator.contains("codex_cli_rs")
-        || user_agent.contains("codex_exec")
-        || originator.contains("codex_exec")
-        || has_codex_header_signals
+    incoming_headers.is_native_codex_client()
 }
 
 fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
     !needle.is_empty()
         && haystack.len() >= needle.len()
-        && haystack.windows(needle.len()).any(|window| window == needle)
+        && haystack
+            .windows(needle.len())
+            .any(|window| window == needle)
 }
 
 fn is_codex_compact_request_for_log(
@@ -1281,6 +1262,7 @@ pub(super) fn build_local_validation_result(
     );
     let initial_request_meta = super::super::parse_request_metadata(&body);
     let native_codex_client = is_native_codex_client_request(&incoming_headers);
+    let transparent_mode = native_codex_client;
     log::debug!(
         "event=gateway_client_profile trace_id={} path={} originator={} user_agent={} session_affinity={} native_codex={}",
         trace_id.as_str(),
@@ -1294,6 +1276,56 @@ pub(super) fn build_local_validation_result(
             "false"
         }
     );
+    if transparent_mode {
+        super::super::validate_text_input_limit_for_path(&normalized_path, &body)
+            .map_err(|err| LocalValidationError::new(400, err.message()))?;
+        let is_stream = resolve_client_is_stream(
+            effective_protocol_type,
+            normalized_path.as_str(),
+            initial_request_meta.is_stream,
+            initial_request_meta.stream_specified,
+            native_codex_client,
+        );
+        let request_type_for_log = request_type_for_log(&incoming_headers, &body);
+        let model_for_log = initial_request_meta.model;
+        let reasoning_for_log = initial_request_meta.reasoning_effort;
+        let service_tier_for_log = initial_request_meta.service_tier.clone();
+        let effective_service_tier_for_log = initial_request_meta.service_tier;
+        let has_prompt_cache_key = initial_request_meta.has_prompt_cache_key;
+        let request_shape = initial_request_meta.request_shape;
+        return Ok(LocalValidationResult {
+            trace_id,
+            incoming_headers,
+            storage,
+            original_path: normalized_path.clone(),
+            passthrough_path: normalized_path.clone(),
+            path: normalized_path,
+            passthrough_body: Bytes::from(body.clone()),
+            body: Bytes::from(body),
+            is_stream,
+            has_prompt_cache_key,
+            request_shape,
+            protocol_type: effective_protocol_type.to_string(),
+            rotation_strategy: api_key.rotation_strategy,
+            aggregate_api_id: api_key.aggregate_api_id,
+            account_plan_filter: api_key.account_plan_filter,
+            response_adapter: super::super::ResponseAdapter::Passthrough,
+            gemini_stream_output_mode: None,
+            tool_name_restore_map: super::super::ToolNameRestoreMap::default(),
+            request_type_for_log,
+            request_method,
+            key_id: api_key.id,
+            platform_key_hash: api_key.key_hash,
+            local_conversation_id: None,
+            conversation_binding: None,
+            model_for_log,
+            reasoning_for_log,
+            service_tier_for_log,
+            effective_service_tier_for_log,
+            method,
+            transparent_mode,
+        });
+    }
     let initial_local_conversation_id = resolve_local_conversation_id(
         effective_protocol_type,
         normalized_path.as_str(),
@@ -1372,6 +1404,7 @@ pub(super) fn build_local_validation_result(
             service_tier_for_log,
             effective_service_tier_for_log,
             method,
+            transparent_mode: false,
         });
     }
 
@@ -1639,6 +1672,7 @@ pub(super) fn build_local_validation_result(
         service_tier_for_log,
         effective_service_tier_for_log,
         method,
+        transparent_mode: false,
     })
 }
 

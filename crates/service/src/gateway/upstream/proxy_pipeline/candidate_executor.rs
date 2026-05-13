@@ -180,6 +180,7 @@ pub(in super::super) fn execute_candidate_sequence(
         allow_openai_fallback,
         disable_challenge_stateless_retry,
     } = params;
+    let transparent_mode = context.transparent_mode();
     let mut request = Some(request);
     let mut state = CandidateExecutionState::default();
     let mut attempted_account_ids = Vec::new();
@@ -203,12 +204,19 @@ pub(in super::super) fn execute_candidate_sequence(
             return Ok(CandidateExecutionResult::Handled);
         }
 
-        let strip_session_affinity =
-            state.strip_session_affinity(&account, idx, setup.anthropic_has_thread_anchor);
-        let attempt_thread = super::super::super::conversation_binding::resolve_attempt_thread(
-            setup.conversation_routing.as_ref(),
-            &account,
-        );
+        let strip_session_affinity = if transparent_mode {
+            false
+        } else {
+            state.strip_session_affinity(&account, idx, setup.anthropic_has_thread_anchor)
+        };
+        let attempt_thread = if transparent_mode {
+            None
+        } else {
+            super::super::super::conversation_binding::resolve_attempt_thread(
+                setup.conversation_routing.as_ref(),
+                &account,
+            )
+        };
         let attempt_headers = attempt_thread
             .as_ref()
             .map(|thread| {
@@ -218,26 +226,35 @@ pub(in super::super) fn execute_candidate_sequence(
                 )
             })
             .unwrap_or_else(|| incoming_headers.clone());
-        let attempt_model_override = free_account_model_override(storage, &account, &token);
+        let attempt_model_override = if transparent_mode {
+            None
+        } else {
+            free_account_model_override(storage, &account, &token)
+        };
         let attempt_allow_openai_fallback =
             allow_openai_fallback && allow_openai_fallback_for_account(storage, &account, &token);
         let attempt_model_for_log = attempt_model_override.as_deref().or(model_for_log);
-        let attempt_prompt_cache_key =
-            if should_forward_thread_anchor_as_prompt_cache_key(context.protocol_type()) {
-                attempt_thread
-                    .as_ref()
-                    .map(|thread| thread.thread_anchor.as_str())
-            } else {
-                None
-            };
-        let body_for_attempt = state.body_for_attempt(
-            path,
-            body,
-            strip_session_affinity,
-            setup,
-            attempt_model_override.as_deref(),
-            attempt_prompt_cache_key,
-        );
+        let attempt_prompt_cache_key = if !transparent_mode
+            && should_forward_thread_anchor_as_prompt_cache_key(context.protocol_type())
+        {
+            attempt_thread
+                .as_ref()
+                .map(|thread| thread.thread_anchor.as_str())
+        } else {
+            None
+        };
+        let body_for_attempt = if transparent_mode {
+            body.clone()
+        } else {
+            state.body_for_attempt(
+                path,
+                body,
+                strip_session_affinity,
+                setup,
+                attempt_model_override.as_deref(),
+                attempt_prompt_cache_key,
+            )
+        };
         context.log_candidate_start(&account.id, idx, strip_session_affinity);
         if let Some(skip_reason) = context.should_skip_candidate(&account.id, idx) {
             context.log_candidate_skip(&account.id, idx, skip_reason);
@@ -256,8 +273,11 @@ pub(in super::super) fn execute_candidate_sequence(
         let request_ref = request
             .as_ref()
             .ok_or_else(|| "request already consumed".to_string())?;
-        let request_ctx =
-            UpstreamRequestContext::from_request(request_ref, context.protocol_type());
+        let request_ctx = UpstreamRequestContext::from_request(
+            request_ref,
+            context.protocol_type(),
+            transparent_mode,
+        );
         let incoming_session_id = attempt_headers.session_id();
         let incoming_turn_state = attempt_headers.turn_state();
         let incoming_conversation_id = attempt_headers.conversation_id();
@@ -346,7 +366,8 @@ pub(in super::super) fn execute_candidate_sequence(
                 );
             }
             CandidateUpstreamDecision::RespondUpstream(mut resp) => {
-                if resp.status().as_u16() == 400
+                if !transparent_mode
+                    && resp.status().as_u16() == 400
                     && !strip_session_affinity
                     && (incoming_turn_state.is_some() || setup.has_body_encrypted_content)
                 {

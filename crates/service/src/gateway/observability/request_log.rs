@@ -24,6 +24,7 @@ pub(crate) struct RequestLogTraceContext<'a> {
     pub aggregate_api_supplier_name: Option<&'a str>,
     pub aggregate_api_url: Option<&'a str>,
     pub attempted_aggregate_api_ids: Option<&'a [String]>,
+    pub transparent_mode: Option<bool>,
 }
 
 const MODEL_PRICE_PER_1K_TOKENS: &[(&str, f64, f64, f64)] = &[
@@ -381,18 +382,17 @@ pub(crate) fn write_request_log_with_attempts(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or("http");
-    let compact_output_text = if is_compact_request_path(request_path)
-        || request_type.eq_ignore_ascii_case("compact")
-    {
-        usage
-            .output_text
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string)
-    } else {
-        None
-    };
+    let compact_output_text =
+        if is_compact_request_path(request_path) || request_type.eq_ignore_ascii_case("compact") {
+            usage
+                .output_text
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+        } else {
+            None
+        };
     let created_at = now_ts();
     let estimated_cost_usd =
         estimate_cost_usd(model, input_tokens, cached_input_tokens, output_tokens);
@@ -463,7 +463,7 @@ pub(crate) fn write_request_log_with_attempts(
             method: method.to_string(),
             request_type: Some(request_type.to_string()),
             gateway_mode: None,
-            transparent_mode: None,
+            transparent_mode: trace_context.transparent_mode,
             enhanced_mode: None,
             model: model.map(|v| v.to_string()),
             reasoning_effort: reasoning_effort.map(|v| v.to_string()),

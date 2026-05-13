@@ -37,6 +37,7 @@ pub(super) struct LocalValidationResult {
     pub(super) service_tier_for_log: Option<String>,
     pub(super) effective_service_tier_for_log: Option<String>,
     pub(super) method: Method,
+    pub(super) transparent_mode: bool,
 }
 
 pub(super) struct LocalValidationError {

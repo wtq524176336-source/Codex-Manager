@@ -20,6 +20,7 @@ enum RequestCompression {
 pub(in super::super) struct UpstreamRequestContext<'a> {
     pub(in super::super) request_path: &'a str,
     pub(in super::super) protocol_type: &'a str,
+    pub(in super::super) transparent_mode: bool,
 }
 
 impl<'a> UpstreamRequestContext<'a> {
@@ -34,10 +35,15 @@ impl<'a> UpstreamRequestContext<'a> {
     ///
     /// # 返回
     /// 返回函数执行结果
-    pub(in super::super) fn from_request(request: &'a Request, protocol_type: &'a str) -> Self {
+    pub(in super::super) fn from_request(
+        request: &'a Request,
+        protocol_type: &'a str,
+        transparent_mode: bool,
+    ) -> Self {
         Self {
             request_path: request.url(),
             protocol_type,
+            transparent_mode,
         }
     }
 }
@@ -108,10 +114,7 @@ fn extract_prompt_cache_key(body: &[u8]) -> Option<String> {
         .map(str::to_string)
 }
 
-fn strip_compact_service_tier_for_transport(
-    body: &Bytes,
-    preserve_service_tier: bool,
-) -> Bytes {
+fn strip_compact_service_tier_for_transport(body: &Bytes, preserve_service_tier: bool) -> Bytes {
     if preserve_service_tier || body.is_empty() {
         return body.clone();
     }
@@ -253,6 +256,14 @@ fn resolve_chatgpt_account_header<'a>(account: &'a Account, target_url: &str) ->
         .chatgpt_account_id
         .as_deref()
         .or(account.workspace_id.as_deref())
+}
+
+fn build_transparent_upstream_headers(
+    incoming_headers: &super::super::super::IncomingHeaderSnapshot,
+    auth_token: &str,
+    chatgpt_account_header: Option<&str>,
+) -> Vec<(String, String)> {
+    incoming_headers.transparent_upstream_headers(auth_token, chatgpt_account_header)
 }
 
 /// 函数 `resolve_request_compression_with_flag`
@@ -585,7 +596,9 @@ fn send_upstream_request_with_compression_override(
     let attempt_started_at = Instant::now();
     let is_compact_request = is_compact_request_path(request_ctx.request_path);
     let chatgpt_account_header = resolve_chatgpt_account_header(account, target_url);
-    let body_for_transport = if is_compact_request {
+    let body_for_transport = if request_ctx.transparent_mode {
+        body.clone()
+    } else if is_compact_request {
         strip_compact_service_tier_for_transport(body, chatgpt_account_header.is_some())
     } else {
         body.clone()
@@ -624,7 +637,9 @@ fn send_upstream_request_with_compression_override(
         request_affinity,
         strip_session_affinity,
     );
-    let mut upstream_headers = if is_compact_request {
+    let mut upstream_headers = if request_ctx.transparent_mode {
+        build_transparent_upstream_headers(incoming_headers, auth_token, chatgpt_account_header)
+    } else if is_compact_request {
         let installation_id = if gemini_codex_compat {
             None
         } else {
@@ -727,26 +742,30 @@ fn send_upstream_request_with_compression_override(
         };
         super::super::header_profile::build_codex_upstream_headers(header_input)
     };
-    if gemini_codex_compat {
+    if !request_ctx.transparent_mode && gemini_codex_compat {
         apply_gemini_codex_compat_header_profile(
             &mut upstream_headers,
             incoming_headers.originator(),
         );
     }
-    if should_force_connection_close(target_url) {
+    if !request_ctx.transparent_mode && should_force_connection_close(target_url) {
         // 中文注释：本地 loopback mock/代理更容易复用到脏 keep-alive 连接；
         // 对 localhost/127.0.0.1 强制 close，避免请求落到已失效连接。
         force_connection_close(&mut upstream_headers);
     }
     let upstream_headers_uncompressed = upstream_headers.clone();
-    let request_compression = compression_override.unwrap_or_else(|| {
-        resolve_request_compression(
-            request_ctx.protocol_type,
-            target_url,
-            request_ctx.request_path,
-            is_stream,
-        )
-    });
+    let request_compression = if request_ctx.transparent_mode {
+        RequestCompression::None
+    } else {
+        compression_override.unwrap_or_else(|| {
+            resolve_request_compression(
+                request_ctx.protocol_type,
+                target_url,
+                request_ctx.request_path,
+                is_stream,
+            )
+        })
+    };
     let body_for_request = encode_request_body(
         request_ctx.request_path,
         &body_for_transport,
@@ -947,11 +966,13 @@ fn send_upstream_request_with_compression_override(
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_gemini_codex_compat_header_profile, encode_request_body, resolve_request_compression,
-        resolve_request_compression_with_flag, should_retry_transport_without_compression,
-        should_wrap_upstream_as_stream_response, strip_compact_service_tier_for_transport,
-        RequestCompression, CPA_GEMINI_CODEX_USER_AGENT,
+        apply_gemini_codex_compat_header_profile, build_transparent_upstream_headers,
+        encode_request_body, resolve_request_compression, resolve_request_compression_with_flag,
+        should_retry_transport_without_compression, should_wrap_upstream_as_stream_response,
+        strip_compact_service_tier_for_transport, RequestCompression, CPA_GEMINI_CODEX_USER_AGENT,
     };
+    use crate::gateway::IncomingHeaderSnapshot;
+    use axum::http::{HeaderMap, HeaderValue};
     use bytes::Bytes;
 
     fn header_value<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
@@ -1071,6 +1092,43 @@ mod tests {
         assert_eq!(header_value(&headers, "x-codex-parent-thread-id"), None);
         assert_eq!(header_value(&headers, "x-openai-subagent"), None);
         assert_eq!(header_value(&headers, "session_id").map(str::len), Some(36));
+    }
+
+    #[test]
+    fn transparent_headers_replace_auth_without_codex_profile_injection() {
+        let mut headers = HeaderMap::new();
+        headers.insert("Authorization", HeaderValue::from_static("Bearer platform"));
+        headers.insert("User-Agent", HeaderValue::from_static("codex_cli_rs/1.0"));
+        headers.insert("originator", HeaderValue::from_static("codex_cli_rs"));
+        headers.insert("x-codex-window-id", HeaderValue::from_static("thread-1:0"));
+        headers.insert("connection", HeaderValue::from_static("keep-alive"));
+        let incoming = IncomingHeaderSnapshot::from_http_headers(&headers);
+
+        let actual =
+            build_transparent_upstream_headers(&incoming, "upstream-token", Some("acct_123"));
+
+        assert_eq!(
+            header_value(&actual, "Authorization"),
+            Some("Bearer upstream-token")
+        );
+        assert_eq!(
+            header_value(&actual, "ChatGPT-Account-ID"),
+            Some("acct_123")
+        );
+        assert_eq!(
+            header_value(&actual, "User-Agent"),
+            Some("codex_cli_rs/1.0")
+        );
+        assert_eq!(header_value(&actual, "originator"), Some("codex_cli_rs"));
+        assert_eq!(
+            header_value(&actual, "x-codex-window-id"),
+            Some("thread-1:0")
+        );
+        assert_eq!(header_value(&actual, "Connection"), None);
+        assert_eq!(
+            header_value(&actual, "x-openai-internal-codex-residency"),
+            None
+        );
     }
 
     /// 函数 `encode_request_body_adds_zstd_content_encoding`

@@ -734,6 +734,7 @@ pub(in super::super) struct AggregateProxyRequest<'a> {
     pub aggregate_api_candidates: Vec<AggregateApi>,
     pub request_deadline: Option<Instant>,
     pub started_at: Instant,
+    pub transparent_mode: bool,
 }
 
 pub(in super::super) fn proxy_aggregate_request(
@@ -757,6 +758,7 @@ pub(in super::super) fn proxy_aggregate_request(
         aggregate_api_candidates,
         request_deadline,
         started_at,
+        transparent_mode,
     } = params;
     if aggregate_api_candidates.is_empty() {
         let message = "aggregate api not found".to_string();
@@ -841,6 +843,7 @@ pub(in super::super) fn proxy_aggregate_request(
                         aggregate_api_supplier_name: candidate_supplier_name.as_deref(),
                         aggregate_api_url: Some(candidate_url.as_str()),
                         attempted_aggregate_api_ids: Some(attempted_aggregate_api_ids.as_slice()),
+                        transparent_mode: Some(transparent_mode),
                         ..Default::default()
                     },
                     Some(key_id),
@@ -1055,6 +1058,7 @@ pub(in super::super) fn proxy_aggregate_request(
                     aggregate_api_supplier_name: candidate_supplier_name.as_deref(),
                     aggregate_api_url: Some(candidate_url.as_str()),
                     attempted_aggregate_api_ids: Some(attempted_aggregate_api_ids.as_slice()),
+                    transparent_mode: Some(transparent_mode),
                     ..Default::default()
                 },
                 Some(key_id),
@@ -1116,6 +1120,7 @@ pub(in super::super) fn proxy_aggregate_request(
             aggregate_api_supplier_name: last_attempt_supplier_name.as_deref(),
             aggregate_api_url: last_attempt_url.as_deref(),
             attempted_aggregate_api_ids: Some(attempted_aggregate_api_ids.as_slice()),
+            transparent_mode: Some(transparent_mode),
             ..Default::default()
         },
         Some(key_id),

@@ -2,6 +2,7 @@ use tiny_http::Request;
 
 #[derive(Clone, Default)]
 pub(crate) struct IncomingHeaderSnapshot {
+    raw_headers: Vec<(String, String)>,
     authorization_present: bool,
     x_api_key_present: bool,
     authorization_bearer_strict: Option<String>,
@@ -42,7 +43,11 @@ impl IncomingHeaderSnapshot {
             let Ok(raw_value) = value.to_str() else {
                 continue;
             };
-            let name = name.as_str();
+            let header_name = name.as_str().to_string();
+            snapshot
+                .raw_headers
+                .push((header_name.clone(), raw_value.to_string()));
+            let name = header_name.as_str();
             let value = raw_value.trim();
             if name.eq_ignore_ascii_case("Authorization") {
                 snapshot.authorization_present = true;
@@ -182,6 +187,11 @@ impl IncomingHeaderSnapshot {
     pub(crate) fn from_request(request: &Request) -> Self {
         let mut snapshot = IncomingHeaderSnapshot::default();
         for header in request.headers() {
+            let header_name = header.field.to_string();
+            let raw_value = header.value.as_str();
+            snapshot
+                .raw_headers
+                .push((header_name.clone(), raw_value.to_string()));
             if header.field.equiv("Authorization") {
                 snapshot.authorization_present = true;
                 let value = header.value.as_str().trim();
@@ -300,7 +310,6 @@ impl IncomingHeaderSnapshot {
                 }
                 continue;
             }
-            let header_name = header.field.to_string();
             if should_capture_passthrough_codex_header(header_name.as_str()) {
                 let value = header.value.as_str().trim();
                 if !value.is_empty() {
@@ -354,6 +363,94 @@ impl IncomingHeaderSnapshot {
         self.x_api_key
             .as_deref()
             .or(self.authorization_bearer_case_insensitive.as_deref())
+    }
+
+    /// 函数 `raw_headers`
+    ///
+    /// 作者: gaohongshun
+    ///
+    /// 时间: 2026-05-13
+    ///
+    /// # 参数
+    /// 无
+    ///
+    /// # 返回
+    /// 返回函数执行结果
+    pub(crate) fn raw_headers(&self) -> &[(String, String)] {
+        self.raw_headers.as_slice()
+    }
+
+    /// 函数 `is_native_codex_client`
+    ///
+    /// 作者: gaohongshun
+    ///
+    /// 时间: 2026-05-13
+    ///
+    /// # 参数
+    /// 无
+    ///
+    /// # 返回
+    /// 返回函数执行结果
+    pub(crate) fn is_native_codex_client(&self) -> bool {
+        let user_agent = self.user_agent().unwrap_or_default().to_ascii_lowercase();
+        let originator = self.originator().unwrap_or_default().to_ascii_lowercase();
+
+        let has_codex_header_signals = self.client_request_id().is_some()
+            || self.subagent().is_some()
+            || self.beta_features().is_some()
+            || self.window_id().is_some()
+            || self.turn_metadata().is_some()
+            || self.turn_state().is_some()
+            || self.parent_thread_id().is_some()
+            || self.codex_installation_id().is_some()
+            || self.responsesapi_include_timing_metrics().is_some();
+
+        user_agent.contains("codex_cli_rs")
+            || originator.contains("codex_cli_rs")
+            || user_agent.contains("codex_exec")
+            || originator.contains("codex_exec")
+            || user_agent.contains("codex-cli")
+            || originator.contains("codex-cli")
+            || user_agent.contains("codex-tui")
+            || originator.contains("codex-tui")
+            || has_codex_header_signals
+    }
+
+    /// 函数 `transparent_upstream_headers`
+    ///
+    /// 作者: gaohongshun
+    ///
+    /// 时间: 2026-05-13
+    ///
+    /// # 参数
+    /// - auth_token: 参数 auth_token
+    /// - chatgpt_account_id: 参数 chatgpt_account_id
+    ///
+    /// # 返回
+    /// 返回函数执行结果
+    pub(crate) fn transparent_upstream_headers(
+        &self,
+        auth_token: &str,
+        chatgpt_account_id: Option<&str>,
+    ) -> Vec<(String, String)> {
+        let mut headers = Vec::new();
+        for (name, value) in self.raw_headers() {
+            if should_skip_transparent_upstream_header(name.as_str()) {
+                continue;
+            }
+            headers.push((name.clone(), value.clone()));
+        }
+        headers.push((
+            "Authorization".to_string(),
+            format!("Bearer {}", auth_token.trim()),
+        ));
+        if let Some(account_id) = chatgpt_account_id
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            headers.push(("ChatGPT-Account-ID".to_string(), account_id.to_string()));
+        }
+        headers
     }
 
     /// 函数 `user_agent`
@@ -661,6 +758,28 @@ fn should_capture_passthrough_codex_header(name: &str) -> bool {
     // 这里保留入口只是为了让调用点语义清晰，但当前实现不允许任何额外透传头。
     let _ = name;
     false
+}
+
+fn should_skip_transparent_upstream_header(name: &str) -> bool {
+    let normalized = name.trim().to_ascii_lowercase();
+    matches!(
+        normalized.as_str(),
+        "authorization"
+            | "x-api-key"
+            | "x-goog-api-key"
+            | "chatgpt-account-id"
+            | "host"
+            | "content-length"
+            | "connection"
+            | "transfer-encoding"
+            | "keep-alive"
+            | "proxy-authorization"
+            | "proxy-authenticate"
+            | "proxy-connection"
+            | "te"
+            | "trailer"
+            | "upgrade"
+    ) || normalized.starts_with("sec-websocket-")
 }
 
 fn remember_passthrough_header(headers: &mut Vec<(String, String)>, name: &str, value: &str) {

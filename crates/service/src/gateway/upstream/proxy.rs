@@ -175,6 +175,7 @@ fn respond_hybrid_route_error(
     started_at: Instant,
     account_error: Option<&str>,
     aggregate_error: String,
+    transparent_mode: bool,
 ) -> Result<(), String> {
     let message = hybrid_route_error_message(account_error, aggregate_error.as_str());
     respond_aggregate_route_error(
@@ -192,6 +193,7 @@ fn respond_hybrid_route_error(
         reasoning_for_log,
         started_at,
         message,
+        transparent_mode,
     )
 }
 
@@ -222,6 +224,7 @@ fn respond_aggregate_route_error(
     reasoning_for_log: Option<&str>,
     started_at: Instant,
     message: String,
+    transparent_mode: bool,
 ) -> Result<(), String> {
     super::super::record_gateway_request_outcome(path, 404, Some("aggregate_api"));
     super::super::trace_log::log_request_final(
@@ -241,6 +244,7 @@ fn respond_aggregate_route_error(
             response_adapter: Some(response_adapter),
             request_type: Some(request_type_for_log),
             effective_service_tier: effective_service_tier_for_log,
+            transparent_mode: Some(transparent_mode),
             ..Default::default()
         },
         Some(key_id),
@@ -286,6 +290,7 @@ fn proxy_with_aggregate_candidates(
     request_deadline: Option<Instant>,
     started_at: Instant,
     aggregate_api_candidates: Vec<codexmanager_core::storage::AggregateApi>,
+    transparent_mode: bool,
 ) -> Result<(), String> {
     let mut aggregate_api_candidates = aggregate_api_candidates;
     super::protocol::aggregate_api::apply_gateway_route_strategy_to_aggregate_candidates(
@@ -314,6 +319,7 @@ fn proxy_with_aggregate_candidates(
             aggregate_api_candidates,
             request_deadline,
             started_at,
+            transparent_mode,
         },
     )
 }
@@ -364,6 +370,7 @@ pub(in super::super) fn proxy_validated_request(
         service_tier_for_log,
         effective_service_tier_for_log,
         method,
+        transparent_mode,
     } = validated;
     let started_at = Instant::now();
     let client_is_stream = is_stream;
@@ -434,6 +441,7 @@ pub(in super::super) fn proxy_validated_request(
                     request_deadline,
                     started_at,
                     aggregate_api_candidates,
+                    transparent_mode,
                 );
             }
             Err(err) => {
@@ -452,6 +460,7 @@ pub(in super::super) fn proxy_validated_request(
                     reasoning_for_log.as_deref(),
                     started_at,
                     err,
+                    transparent_mode,
                 );
             }
         }
@@ -501,6 +510,7 @@ pub(in super::super) fn proxy_validated_request(
                         request_deadline,
                         started_at,
                         aggregate_api_candidates,
+                        transparent_mode,
                     );
                 }
                 Err(err) => {
@@ -520,6 +530,7 @@ pub(in super::super) fn proxy_validated_request(
                         started_at,
                         Some("无可用账号(no available account)"),
                         err,
+                        transparent_mode,
                     );
                 }
             }
@@ -558,6 +569,7 @@ pub(in super::super) fn proxy_validated_request(
         effective_service_tier_for_log.as_deref(),
         setup.candidate_count,
         setup.account_max_inflight,
+        transparent_mode,
     );
     let allow_openai_fallback = setup.upstream_fallback_base.is_some();
     let disable_challenge_stateless_retry = !(protocol_type == PROTOCOL_ANTHROPIC_NATIVE
@@ -652,6 +664,7 @@ pub(in super::super) fn proxy_validated_request(
                     request_deadline,
                     started_at,
                     aggregate_api_candidates,
+                    transparent_mode,
                 );
             }
             Err(err) => {
@@ -671,6 +684,7 @@ pub(in super::super) fn proxy_validated_request(
                     started_at,
                     Some(final_error.as_str()),
                     err,
+                    transparent_mode,
                 );
             }
         }

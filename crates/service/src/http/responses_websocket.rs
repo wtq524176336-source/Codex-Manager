@@ -35,6 +35,7 @@ struct WsRequestContext {
     prompt_cache_key: Option<String>,
     effective_upstream_base: String,
     prefer_raw_errors: bool,
+    transparent_mode: bool,
 }
 
 #[derive(Clone)]
@@ -440,6 +441,7 @@ async fn run_responses_websocket_session(mut socket: WebSocket, context: WsReque
 fn authorize_websocket_request(headers: &HeaderMap) -> Result<WsRequestContext, Response<Body>> {
     let prefer_raw_errors = crate::gateway::prefers_raw_errors_for_http_headers(headers);
     let incoming_headers = crate::gateway::IncomingHeaderSnapshot::from_http_headers(headers);
+    let transparent_mode = incoming_headers.is_native_codex_client();
     let Some(platform_key) = incoming_headers.platform_key() else {
         return Err(text_error_response(
             StatusCode::UNAUTHORIZED,
@@ -498,17 +500,20 @@ fn authorize_websocket_request(headers: &HeaderMap) -> Result<WsRequestContext, 
         ));
     }
 
-    let (incoming_headers, prompt_cache_key) =
+    let (incoming_headers, prompt_cache_key) = if transparent_mode {
+        (incoming_headers, None)
+    } else {
         crate::gateway::gateway_resolve_ws_prompt_cache_key(&storage, &api_key, &incoming_headers)
             .map_err(|err| {
-                text_error_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    crate::gateway::error_message_for_client(
-                        prefer_raw_errors,
-                        crate::gateway::bilingual_error("读取会话绑定失败", err),
-                    ),
-                )
-            })?;
+            text_error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                crate::gateway::error_message_for_client(
+                    prefer_raw_errors,
+                    crate::gateway::bilingual_error("读取会话绑定失败", err),
+                ),
+            )
+        })?
+    };
 
     Ok(WsRequestContext {
         effective_upstream_base: crate::gateway::gateway_resolve_effective_upstream_base(&api_key),
@@ -516,6 +521,7 @@ fn authorize_websocket_request(headers: &HeaderMap) -> Result<WsRequestContext, 
         incoming_headers,
         prompt_cache_key,
         prefer_raw_errors,
+        transparent_mode,
     })
 }
 
@@ -557,6 +563,46 @@ fn rewrite_client_frame(
             format!("invalid websocket json payload: {err}"),
         )
     })?;
+    if context.transparent_mode {
+        let Some(object) = payload.as_object() else {
+            return Err(WsSessionError::bad_request_bilingual(
+                "WebSocket 载荷必须是 JSON 对象",
+                "websocket payload must be a JSON object",
+            ));
+        };
+        let message_type = object.get("type").and_then(Value::as_str).ok_or_else(|| {
+            WsSessionError::bad_request_bilingual(
+                "WebSocket 载荷缺少 type=response.create",
+                "websocket payload missing type=response.create",
+            )
+        })?;
+        if message_type != "response.create" {
+            return Err(WsSessionError::bad_request_bilingual(
+                "不支持的 WebSocket 消息类型",
+                format!("unsupported websocket message type: {message_type}"),
+            ));
+        }
+        let service_tier_diagnostic =
+            crate::gateway::inspect_service_tier_value(object.get("service_tier"));
+        let reasoning_effort = object
+            .get("reasoning")
+            .and_then(|value| value.get("effort"))
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let effective_service_tier = service_tier_diagnostic.normalized_value.clone();
+        return Ok(PreparedClientFrame {
+            text: text.to_string(),
+            model: object
+                .get("model")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            reasoning_effort,
+            service_tier: service_tier_diagnostic.normalized_value,
+            effective_service_tier,
+            raw_service_tier: service_tier_diagnostic.raw_value,
+            has_service_tier_field: service_tier_diagnostic.has_field,
+        });
+    }
     let Some(object) = payload.as_object_mut() else {
         return Err(WsSessionError::bad_request_bilingual(
             "WebSocket 载荷必须是 JSON 对象",
@@ -1118,10 +1164,24 @@ fn build_upstream_websocket_request(
         )
     })?;
     let headers = request.headers_mut();
+    if context.transparent_mode {
+        let chatgpt_account_id = account
+            .chatgpt_account_id
+            .as_deref()
+            .or(account.workspace_id.as_deref());
+        for (name, value) in context
+            .incoming_headers
+            .transparent_upstream_headers(bearer_token, chatgpt_account_id)
+        {
+            append_header(headers, name.as_str(), value.as_str())?;
+        }
+        return Ok(request);
+    }
     insert_header(headers, "Authorization", &format!("Bearer {bearer_token}"))?;
     if let Some(account_id) = account
         .chatgpt_account_id
         .as_deref()
+        .or(account.workspace_id.as_deref())
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
@@ -1279,6 +1339,7 @@ fn finalize_ws_request_log(
             request_type: Some("ws"),
             service_tier: pending.service_tier.as_deref(),
             effective_service_tier: pending.effective_service_tier.as_deref(),
+            transparent_mode: Some(context.transparent_mode),
             ..Default::default()
         },
         Some(context.api_key.id.as_str()),
@@ -1324,6 +1385,9 @@ async fn try_retry_ws_request_after_terminal(
     }
     let mut retry_text = None;
     if is_previous_response_not_found_terminal(terminal) {
+        if context.transparent_mode {
+            return false;
+        }
         retry_text = strip_previous_response_id_from_ws_text(pending.prepared.text.as_str());
         if retry_text.is_none() {
             return false;
@@ -1340,7 +1404,7 @@ async fn try_retry_ws_request_after_terminal(
         {
             return false;
         }
-        if upstream.account_id != previous_account_id {
+        if upstream.account_id != previous_account_id && !context.transparent_mode {
             retry_text = strip_previous_response_id_from_ws_text(pending.prepared.text.as_str());
         }
     }
@@ -1632,6 +1696,23 @@ fn insert_header(headers: &mut HeaderMap, name: &str, value: &str) -> Result<(),
     Ok(())
 }
 
+fn append_header(headers: &mut HeaderMap, name: &str, value: &str) -> Result<(), WsSessionError> {
+    let header_name = header::HeaderName::from_bytes(name.as_bytes()).map_err(|err| {
+        WsSessionError::bad_gateway_bilingual(
+            "上游 WebSocket 请求头名称无效",
+            format!("invalid upstream websocket header name {name}: {err}"),
+        )
+    })?;
+    let header_value = HeaderValue::from_str(value).map_err(|err| {
+        WsSessionError::bad_gateway_bilingual(
+            "上游 WebSocket 请求头值无效",
+            format!("invalid upstream websocket header {name}: {err}"),
+        )
+    })?;
+    headers.append(header_name, header_value);
+    Ok(())
+}
+
 fn ensure_rustls_crypto_provider() {
     static RUSTLS_PROVIDER_READY: std::sync::OnceLock<()> = std::sync::OnceLock::new();
     let _ = RUSTLS_PROVIDER_READY.get_or_init(|| {
@@ -1814,6 +1895,7 @@ mod tests {
             prompt_cache_key: Some("sticky-thread".to_string()),
             effective_upstream_base: "https://chatgpt.com/backend-api/codex".to_string(),
             prefer_raw_errors: false,
+            transparent_mode: false,
         };
         let prepared = rewrite_client_frame(
             r#"{"type":"response.create","model":"gpt-5.4","input":"hello","prompt_cache_key":"client-thread"}"#,
@@ -1873,6 +1955,7 @@ mod tests {
             prompt_cache_key: None,
             effective_upstream_base: "https://chatgpt.com/backend-api/codex".to_string(),
             prefer_raw_errors: false,
+            transparent_mode: false,
         };
         let prepared = rewrite_client_frame(
             r#"{"type":"response.create","model":"gpt-5.4","input":"hello","client_metadata":{"source":"client"}}"#,
@@ -1896,6 +1979,33 @@ mod tests {
     }
 
     #[test]
+    fn websocket_transparent_frame_keeps_client_text_unchanged() {
+        let context = WsRequestContext {
+            api_key: sample_api_key(),
+            incoming_headers: sample_incoming_headers_with_metadata(),
+            prompt_cache_key: Some("sticky-thread".to_string()),
+            effective_upstream_base: "https://chatgpt.com/backend-api/codex".to_string(),
+            prefer_raw_errors: false,
+            transparent_mode: true,
+        };
+        let text = r#"{"type":"response.create","model":"gpt-5.4","input":"hello","reasoning":{"effort":"medium"},"service_tier":"priority","client_metadata":{"source":"client"},"unknown_field":true}"#;
+        let prepared = rewrite_client_frame(text, &context)
+            .unwrap_or_else(|_| panic!("rewrite websocket frame failed"));
+        let value: serde_json::Value =
+            serde_json::from_str(&prepared.text).expect("parse transparent frame");
+
+        assert_eq!(prepared.text, text);
+        assert_eq!(prepared.model.as_deref(), Some("gpt-5.4"));
+        assert_eq!(prepared.reasoning_effort.as_deref(), Some("medium"));
+        assert_eq!(prepared.service_tier.as_deref(), Some("fast"));
+        assert_eq!(value["unknown_field"], true);
+        assert!(value["client_metadata"]
+            .get("x-codex-turn-metadata")
+            .is_none());
+        assert!(value.get("prompt_cache_key").is_none());
+    }
+
+    #[test]
     fn websocket_response_create_keeps_codex_field_snapshot() {
         let _guard = crate::test_env_guard();
         let context = WsRequestContext {
@@ -1904,6 +2014,7 @@ mod tests {
             prompt_cache_key: None,
             effective_upstream_base: "https://chatgpt.com/backend-api/codex".to_string(),
             prefer_raw_errors: false,
+            transparent_mode: false,
         };
         let prepared = rewrite_client_frame(
             json!({
