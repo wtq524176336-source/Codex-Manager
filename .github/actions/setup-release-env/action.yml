@@ -117,6 +117,41 @@ runs:
         toolchain: ${{ inputs.rust-toolchain }}
         targets: ${{ inputs.rust-target }}
 
+    - name: Normalize Rust command paths
+      if: ${{ runner.os != 'Windows' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        cargo_path=""
+        if command -v rustup >/dev/null 2>&1; then
+          cargo_path="$(rustup which cargo 2>/dev/null || true)"
+        fi
+
+        if [ -z "$cargo_path" ]; then
+          cargo_path="$(command -v cargo 2>/dev/null || true)"
+        fi
+
+        if [ -z "$cargo_path" ] || [ ! -x "$cargo_path" ]; then
+          echo "usable cargo binary not found" >&2
+          exit 1
+        fi
+
+        cargo_dir="$(dirname "$cargo_path")"
+        cargo_version="$("$cargo_path" --version 2>&1)"
+        case "$cargo_version" in
+          cargo\ *) ;;
+          *)
+            echo "resolved cargo is not cargo: $cargo_path" >&2
+            echo "$cargo_version" >&2
+            exit 1
+            ;;
+        esac
+
+        echo "$cargo_dir" >> "$GITHUB_PATH"
+        echo "CARGO=$cargo_path" >> "$GITHUB_ENV"
+        echo "$cargo_version"
+
     - name: Cache Rust dependencies
       if: ${{ inputs.enable-rust-cache == 'true' }}
       uses: Swatinem/rust-cache@v2

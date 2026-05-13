@@ -63,6 +63,20 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       run: |
         set -euo pipefail
+        cargo_path="${CARGO:-}"
+        if [ -z "$cargo_path" ] && command -v rustup >/dev/null 2>&1; then
+          cargo_path="$(rustup which cargo 2>/dev/null || true)"
+        fi
+        if [ -n "$cargo_path" ] && [ -x "$cargo_path" ]; then
+          cargo_shim_dir="$(mktemp -d)"
+          printf '%s\n' '#!/usr/bin/env sh' 'exec "$CARGO" "$@"' > "$cargo_shim_dir/cargo"
+          chmod +x "$cargo_shim_dir/cargo"
+          export CARGO="$cargo_path"
+          export PATH="$cargo_shim_dir:$PATH"
+          echo "Using cargo: $cargo_path"
+          cargo --version
+        fi
+
         max_attempts="${{ inputs.max-attempts }}"
         attempt=1
         while [ "$attempt" -le "$max_attempts" ]; do
