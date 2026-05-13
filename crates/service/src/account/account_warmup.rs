@@ -1,6 +1,7 @@
 use codexmanager_core::storage::{now_ts, Account, Event, RequestLog, Storage, Token};
 use reqwest::blocking::Client;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+use reqwest::StatusCode;
 use serde::Serialize;
 use serde_json::json;
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -246,6 +247,9 @@ fn warmup_single_account(
                 }
             }
 
+            let outcome = outcome.and_then(|ok_message| {
+                refresh_usage_after_warmup(storage, &account.id, ok_message)
+            });
             match outcome {
                 Ok(ok_message) => {
                     persist_warmup_observability(
@@ -448,7 +452,7 @@ fn send_warmup_request(
         .map_err(|err| format!("warmup request failed: {err}"))?;
 
     if response.status().is_success() {
-        return Ok(());
+        return consume_successful_warmup_response(response.status(), response);
     }
 
     let status = response.status();
@@ -459,6 +463,38 @@ fn send_warmup_request(
         &headers,
         &body_text,
     ))
+}
+
+fn consume_successful_warmup_response(
+    status: StatusCode,
+    response: reqwest::blocking::Response,
+) -> Result<(), String> {
+    let body_text = response
+        .text()
+        .map_err(|err| format!("warmup response read failed: {err}"))?;
+    if let Some(reason) = crate::account_status::usage_limit_reason_from_message(&body_text) {
+        return Err(format!("status={} body={reason}", status.as_u16()));
+    }
+    Ok(())
+}
+
+fn refresh_usage_after_warmup(
+    storage: &Storage,
+    account_id: &str,
+    ok_message: String,
+) -> Result<String, String> {
+    match crate::usage_refresh::refresh_usage_for_account(account_id) {
+        Ok(()) => Ok(ok_message),
+        Err(err) => {
+            let _ = storage.insert_event(&Event {
+                account_id: Some(account_id.to_string()),
+                event_type: "account_warmup_usage_refresh_failed".to_string(),
+                message: format!("预热后刷新用量失败: {err}"),
+                created_at: now_ts(),
+            });
+            Err(format!("{ok_message}；用量刷新失败: {err}"))
+        }
+    }
 }
 
 #[cfg(test)]
