@@ -343,15 +343,13 @@ const toggleCleanupStatus = (rawStatus: string) => {
   };
 
   const handleWarmupAccounts = async () => {
-    const targetIds = effectiveSelectedIds.length > 0 ? effectiveSelectedIds : [];
-    const targetCount = targetIds.length > 0 ? targetIds.length : accounts.length;
-    if (targetCount <= 0) {
+    if (accounts.length <= 0) {
       toast.info(t("当前没有可预热的账号"));
       return;
     }
     try {
       await warmupAccounts({
-        accountIds: targetIds,
+        accountIds: [],
         message: "hi",
       });
     } catch {

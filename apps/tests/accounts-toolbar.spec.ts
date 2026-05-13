@@ -188,7 +188,7 @@ test("accounts toolbar shows warmup button and tooltip", async ({ page }) => {
   await warmupButton.hover();
   await expect(
     page.getByText(
-      "向选中账号发送 hi 进行预热；如果未选中账号，则默认预热全部账号。",
+      "向全部账号发送 hi 进行预热；单个账号失败不会中断其他账号。",
     ),
   ).toBeVisible();
 

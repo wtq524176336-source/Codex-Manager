@@ -3,6 +3,7 @@ use reqwest::blocking::Client;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use serde::Serialize;
 use serde_json::json;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::time::Duration;
 use std::time::Instant;
 
@@ -59,14 +60,45 @@ pub(crate) fn warmup_accounts(
         return Err("no account available for warmup".to_string());
     }
 
-    let client = build_warmup_client()?;
     let warmup_message = normalize_warmup_message(message);
     let warmup_model = resolve_warmup_model_slug(&storage);
+    let client = match build_warmup_client() {
+        Ok(client) => client,
+        Err(err) => {
+            let results = accounts
+                .drain(..)
+                .map(|account| {
+                    let account_name = account.label.clone();
+                    persist_warmup_observability(
+                        &storage,
+                        &account,
+                        500,
+                        Some(err.as_str()),
+                        warmup_model.as_str(),
+                        0,
+                        "预热失败",
+                    );
+                    AccountWarmupItemResult {
+                        account_id: account.id,
+                        account_name,
+                        ok: false,
+                        message: err.clone(),
+                    }
+                })
+                .collect::<Vec<_>>();
+            return Ok(AccountWarmupResult {
+                requested: results.len(),
+                succeeded: 0,
+                failed: results.len(),
+                results,
+            });
+        }
+    };
     let mut results = Vec::with_capacity(accounts.len());
     let mut succeeded = 0usize;
 
     for account in accounts.drain(..) {
-        let item = warmup_single_account(
+        let item = warmup_single_account_isolated(
             &storage,
             &client,
             account,
@@ -85,6 +117,49 @@ pub(crate) fn warmup_accounts(
         failed: results.len().saturating_sub(succeeded),
         results,
     })
+}
+
+fn warmup_single_account_isolated(
+    storage: &Storage,
+    client: &Client,
+    account: Account,
+    model_slug: &str,
+    message: &str,
+) -> AccountWarmupItemResult {
+    let account_for_panic = account.clone();
+    match catch_unwind(AssertUnwindSafe(|| {
+        warmup_single_account(storage, client, account, model_slug, message)
+    })) {
+        Ok(item) => item,
+        Err(payload) => {
+            let err = warmup_panic_message(payload.as_ref());
+            persist_warmup_observability(
+                storage,
+                &account_for_panic,
+                500,
+                Some(err.as_str()),
+                model_slug,
+                0,
+                "预热失败",
+            );
+            AccountWarmupItemResult {
+                account_id: account_for_panic.id,
+                account_name: account_for_panic.label,
+                ok: false,
+                message: err,
+            }
+        }
+    }
+}
+
+fn warmup_panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(value) = payload.downcast_ref::<&str>() {
+        format!("warmup task panicked: {value}")
+    } else if let Some(value) = payload.downcast_ref::<String>() {
+        format!("warmup task panicked: {value}")
+    } else {
+        "warmup task panicked".to_string()
+    }
 }
 
 fn resolve_target_accounts(

@@ -380,9 +380,7 @@ export function AccountsPageView(props: AccountsPageViewProps) {
                 </Button>
               </TooltipTrigger>
               <TooltipContent className="max-w-xs whitespace-pre-wrap break-words">
-                {t(
-                  "向选中账号发送 hi 进行预热；如果未选中账号，则默认预热全部账号。",
-                )}
+                {t("向全部账号发送 hi 进行预热；单个账号失败不会中断其他账号。")}
               </TooltipContent>
             </Tooltip>
             <DropdownMenu>
