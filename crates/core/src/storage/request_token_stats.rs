@@ -119,6 +119,42 @@ impl Storage {
         stmt.query_row((account_id, start_ts, end_ts), |row| row.get(0))
     }
 
+    pub fn summarize_request_token_stats_cost_for_aggregate_api_url(
+        &self,
+        aggregate_api_url: &str,
+    ) -> Result<f64> {
+        let normalized_url = aggregate_api_url.trim();
+        if normalized_url.is_empty() {
+            return Ok(0.0);
+        }
+        let mut stmt = self.conn.prepare(
+            "SELECT IFNULL(SUM(t.estimated_cost_usd), 0.0)
+             FROM request_token_stats t
+             INNER JOIN request_logs r ON r.id = t.request_log_id
+             WHERE TRIM(IFNULL(r.aggregate_api_url, '')) = ?1",
+        )?;
+        stmt.query_row([normalized_url], |row| row.get(0))
+    }
+
+    pub fn clear_request_token_stats_for_aggregate_api_url(
+        &self,
+        aggregate_api_url: &str,
+    ) -> Result<usize> {
+        let normalized_url = aggregate_api_url.trim();
+        if normalized_url.is_empty() {
+            return Ok(0);
+        }
+        self.conn.execute(
+            "DELETE FROM request_token_stats
+             WHERE request_log_id IN (
+                SELECT id
+                FROM request_logs
+                WHERE TRIM(IFNULL(aggregate_api_url, '')) = ?1
+             )",
+            [normalized_url],
+        )
+    }
+
     /// 函数 `summarize_request_token_stats_by_key`
     ///
     /// 作者: gaohongshun

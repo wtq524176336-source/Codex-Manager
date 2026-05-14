@@ -95,6 +95,24 @@ fn should_try_provider_executor_aggregate_route(
     )
 }
 
+fn is_models_request_path(path: &str) -> bool {
+    let normalized = path.split('?').next().unwrap_or(path);
+    matches!(
+        normalized,
+        "/models" | "/v1/models" | "/backend-api/codex/models"
+    )
+}
+
+fn should_route_aggregate_models_to_account(
+    execution_plan: super::executor::GatewayUpstreamExecutionPlan,
+    path: &str,
+) -> bool {
+    matches!(
+        execution_plan.route_kind,
+        GatewayUpstreamRouteKind::AggregateApi
+    ) && is_models_request_path(path)
+}
+
 fn is_hybrid_account_first_route(
     execution_plan: super::executor::GatewayUpstreamExecutionPlan,
 ) -> bool {
@@ -416,7 +434,19 @@ pub(in super::super) fn proxy_validated_request(
         route_kind_label(execution_plan.route_kind),
     );
 
-    if should_try_provider_executor_aggregate_route(execution_plan) {
+    let aggregate_models_account_route =
+        should_route_aggregate_models_to_account(execution_plan, path.as_str());
+    if aggregate_models_account_route {
+        log::info!(
+            "event=gateway_aggregate_models_use_account_route trace_id={} path={}",
+            trace_id,
+            path
+        );
+    }
+
+    if should_try_provider_executor_aggregate_route(execution_plan)
+        && !aggregate_models_account_route
+    {
         match resolve_aggregate_candidates_for_route(
             &storage,
             protocol_type.as_str(),
@@ -714,6 +744,7 @@ mod tests {
         request_deadline_for_path, resolve_upstream_is_stream,
         respond_when_account_candidates_empty,
         should_fallback_to_aggregate_after_account_exhaustion,
+        should_route_aggregate_models_to_account,
         should_try_provider_executor_aggregate_route,
     };
     use crate::gateway::upstream::executor::{
@@ -839,6 +870,30 @@ mod tests {
                 route_kind: GatewayUpstreamRouteKind::AccountRotation,
             }
         ));
+    }
+
+    #[test]
+    fn aggregate_models_requests_use_account_route() {
+        let aggregate = GatewayUpstreamExecutionPlan {
+            executor_kind: GatewayUpstreamExecutorKind::CodexResponses,
+            route_kind: GatewayUpstreamRouteKind::AggregateApi,
+        };
+        let account = GatewayUpstreamExecutionPlan {
+            executor_kind: GatewayUpstreamExecutorKind::CodexResponses,
+            route_kind: GatewayUpstreamRouteKind::AccountRotation,
+        };
+
+        assert!(should_route_aggregate_models_to_account(aggregate, "/v1/models"));
+        assert!(should_route_aggregate_models_to_account(
+            aggregate,
+            "/v1/models?limit=20"
+        ));
+        assert!(should_route_aggregate_models_to_account(aggregate, "/models"));
+        assert!(!should_route_aggregate_models_to_account(
+            aggregate,
+            "/v1/responses"
+        ));
+        assert!(!should_route_aggregate_models_to_account(account, "/v1/models"));
     }
 
     #[test]

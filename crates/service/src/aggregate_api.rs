@@ -1478,28 +1478,35 @@ pub(crate) fn list_aggregate_apis() -> Result<Vec<AggregateApiSummary>, String> 
         .map_err(|err| format!("list aggregate apis failed: {err}"))?;
     Ok(items
         .into_iter()
-        .map(|item| AggregateApiSummary {
-            id: item.id,
-            provider_type: item.provider_type,
-            protocol_mode: item.protocol_mode,
-            supplier_name: item.supplier_name,
-            sort: item.sort,
-            url: item.url,
-            auth_type: item.auth_type,
-            auth_params: item
-                .auth_params_json
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .and_then(|value| serde_json::from_str::<serde_json::Value>(value).ok()),
-            action: item.action,
-            model_override: item.model_override,
-            status: item.status,
-            created_at: item.created_at,
-            updated_at: item.updated_at,
-            last_test_at: item.last_test_at,
-            last_test_status: item.last_test_status,
-            last_test_error: item.last_test_error,
+        .map(|item| {
+            let estimated_cost_usd = storage
+                .summarize_request_token_stats_cost_for_aggregate_api_url(item.url.as_str())
+                .unwrap_or(0.0)
+                .max(0.0);
+            AggregateApiSummary {
+                id: item.id,
+                provider_type: item.provider_type,
+                protocol_mode: item.protocol_mode,
+                supplier_name: item.supplier_name,
+                sort: item.sort,
+                url: item.url,
+                auth_type: item.auth_type,
+                auth_params: item
+                    .auth_params_json
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .and_then(|value| serde_json::from_str::<serde_json::Value>(value).ok()),
+                action: item.action,
+                model_override: item.model_override,
+                status: item.status,
+                created_at: item.created_at,
+                updated_at: item.updated_at,
+                last_test_at: item.last_test_at,
+                last_test_status: item.last_test_status,
+                last_test_error: item.last_test_error,
+                estimated_cost_usd,
+            }
         })
         .collect())
 }
@@ -1797,6 +1804,21 @@ pub(crate) fn delete_aggregate_api(api_id: &str) -> Result<(), String> {
     let storage = open_storage().ok_or_else(|| "storage unavailable".to_string())?;
     storage
         .delete_aggregate_api(api_id)
+        .map_err(|err| err.to_string())
+}
+
+pub(crate) fn reset_aggregate_api_usage(api_id: &str) -> Result<(), String> {
+    if api_id.is_empty() {
+        return Err("aggregate api id required".to_string());
+    }
+    let storage = open_storage().ok_or_else(|| "storage unavailable".to_string())?;
+    let api = storage
+        .find_aggregate_api_by_id(api_id)
+        .map_err(|err| err.to_string())?
+        .ok_or_else(|| "aggregate api not found".to_string())?;
+    storage
+        .clear_request_token_stats_for_aggregate_api_url(api.url.as_str())
+        .map(|_| ())
         .map_err(|err| err.to_string())
 }
 

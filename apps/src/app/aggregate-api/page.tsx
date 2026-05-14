@@ -10,6 +10,7 @@ import {
   MoreVertical,
   Plus,
   RefreshCw,
+  RotateCcw,
   Settings2,
   ShieldCheck,
   Trash2,
@@ -77,6 +78,14 @@ const AGGREGATE_API_PROTOCOL_LABELS: Record<string, string> = {
   codex_cli: "Codex CLI 兼容",
 };
 
+function formatAggregateApiCost(value: number | null | undefined): string {
+  const cost = Math.max(0, Number(value) || 0);
+  if (cost >= 100) return `$${cost.toFixed(0)}`;
+  if (cost >= 10) return `$${cost.toFixed(1)}`;
+  if (cost >= 1) return `$${cost.toFixed(2)}`;
+  return `$${cost.toFixed(4)}`;
+}
+
 /**
  * 函数 `getTestBadge`
  *
@@ -121,6 +130,7 @@ export default function AggregateApiPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [resetUsageId, setResetUsageId] = useState<string | null>(null);
   const [providerFilter, setProviderFilter] = useState("all");
   const [revealedSecrets, setRevealedSecrets] = useState<
     Record<string, AggregateApiSecretResult>
@@ -147,6 +157,7 @@ export default function AggregateApiPage() {
     setModalOpen(false);
     setEditingId(null);
     setDeleteId(null);
+    setResetUsageId(null);
   }, [isPageActive]);
 
   useEffect(() => {
@@ -300,6 +311,24 @@ export default function AggregateApiPage() {
     },
     onError: (error: unknown) => {
       toast.error(`${t("删除")} ${t("失败")}: ${error instanceof Error ? error.message : String(error)}`);
+    },
+  });
+
+  const resetUsageMutation = useMutation({
+    mutationFn: (apiId: string) => accountClient.resetAggregateApiUsage(apiId),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["aggregate-apis"] }),
+        queryClient.invalidateQueries({ queryKey: ["request-logs"] }),
+        queryClient.invalidateQueries({ queryKey: ["request-log-summary"] }),
+        queryClient.invalidateQueries({ queryKey: ["startup-snapshot"] }),
+      ]);
+      toast.success(t("费用统计已重置"));
+    },
+    onError: (error: unknown) => {
+      toast.error(
+        `${t("重置失败")}: ${error instanceof Error ? error.message : String(error)}`,
+      );
     },
   });
 
@@ -657,6 +686,7 @@ export default function AggregateApiPage() {
                   <TableHead className="w-[84px] text-center">{t("类型")}</TableHead>
                   <TableHead className="w-[148px]">{t("密钥")}</TableHead>
                   <TableHead className="w-[64px] text-center">{t("顺序")}</TableHead>
+                  <TableHead className="w-[132px]">{t("费用统计")}</TableHead>
                   <TableHead className="w-[130px]">{t("测试连通性")}</TableHead>
                   <TableHead className="w-[112px] text-right pr-4">{t("状态")}</TableHead>
                   <TableHead className="table-sticky-action-head w-[112px] text-center">
@@ -681,6 +711,9 @@ export default function AggregateApiPage() {
                         <Skeleton className="mx-auto h-4 w-12" />
                       </TableCell>
                       <TableCell>
+                        <Skeleton className="h-7 w-24 rounded-md" />
+                      </TableCell>
+                      <TableCell>
                         <Skeleton className="h-6 w-20 rounded-full" />
                       </TableCell>
                       <TableCell>
@@ -693,7 +726,7 @@ export default function AggregateApiPage() {
                   ))
                 ) : filteredAggregateApis.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="h-48 text-center">
+                    <TableCell colSpan={8} className="h-48 text-center">
                       <div className="flex flex-col items-center justify-center gap-2 text-muted-foreground">
                         <ShieldCheck className="h-8 w-8 opacity-20" />
                         <p>
@@ -868,6 +901,26 @@ export default function AggregateApiPage() {
                         <TableCell className="text-center font-mono text-xs text-muted-foreground">
                           {api.sort}
                         </TableCell>
+                        <TableCell className="align-middle">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-xs font-medium text-foreground">
+                              {formatAggregateApiCost(api.estimatedCostUsd)}
+                            </span>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 gap-1.5 px-2 text-xs"
+                              disabled={
+                                !isServiceReady || resetUsageMutation.isPending
+                              }
+                              onClick={() => setResetUsageId(api.id)}
+                              title={t("重置费用统计")}
+                            >
+                              <RotateCcw className="h-3.5 w-3.5" />
+                              {t("重置")}
+                            </Button>
+                          </div>
+                        </TableCell>
                         <TableCell className="whitespace-nowrap align-middle">
                           <div className="flex flex-col items-start gap-1">
                             <div className="flex items-center gap-2">
@@ -1011,6 +1064,19 @@ export default function AggregateApiPage() {
           if (!deleteId) return;
           deleteMutation.mutate(deleteId);
           setDeleteId(null);
+        }}
+      />
+      <ConfirmDialog
+        open={Boolean(resetUsageId)}
+        onOpenChange={(open) => !open && setResetUsageId(null)}
+        title={t("重置费用统计")}
+        description={t("将清空该聚合 API 对应请求的 token 与费用统计，不会删除供应商配置或密钥。")}
+        confirmText={t("重置")}
+        cancelText={t("取消")}
+        onConfirm={() => {
+          if (!resetUsageId) return;
+          resetUsageMutation.mutate(resetUsageId);
+          setResetUsageId(null);
         }}
       />
     </div>

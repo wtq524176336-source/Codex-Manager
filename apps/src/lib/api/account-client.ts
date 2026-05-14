@@ -546,6 +546,8 @@ export const accountClient = {
     ),
   deleteAggregateApi: (apiId: string) =>
     invoke("service_aggregate_api_delete", withAddr({ id: apiId })),
+  resetAggregateApiUsage: (apiId: string) =>
+    invoke("service_aggregate_api_reset_usage", withAddr({ id: apiId })),
   async readAggregateApiSecret(apiId: string): Promise<AggregateApiSecretResult> {
     const result = await invoke<unknown>(
       "service_aggregate_api_read_secret",

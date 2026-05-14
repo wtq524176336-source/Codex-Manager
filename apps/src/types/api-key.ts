@@ -42,6 +42,7 @@ export interface AggregateApi {
   lastTestAt: number | null;
   lastTestStatus: string | null;
   lastTestError: string | null;
+  estimatedCostUsd: number;
 }
 
 export interface AggregateApiCreateResult {

@@ -820,6 +820,10 @@ export function normalizeAggregateApi(item: unknown): AggregateApi | null {
     lastTestAt: toNullableNumber(source.lastTestAt ?? source.last_test_at),
     lastTestStatus: asString(source.lastTestStatus ?? source.last_test_status) || null,
     lastTestError: asString(source.lastTestError ?? source.last_test_error) || null,
+    estimatedCostUsd: Math.max(
+      0,
+      toNullableNumber(source.estimatedCostUsd ?? source.estimated_cost_usd) ?? 0
+    ),
   };
 }
 

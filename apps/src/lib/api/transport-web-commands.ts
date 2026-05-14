@@ -261,6 +261,9 @@ export function createWebCommandMap(
     service_aggregate_api_create: { rpcMethod: "aggregateApi/create" },
     service_aggregate_api_update: { rpcMethod: "aggregateApi/update" },
     service_aggregate_api_delete: { rpcMethod: "aggregateApi/delete" },
+    service_aggregate_api_reset_usage: {
+      rpcMethod: "aggregateApi/resetUsage",
+    },
     service_aggregate_api_read_secret: { rpcMethod: "aggregateApi/readSecret" },
     service_aggregate_api_test_connection: {
       rpcMethod: "aggregateApi/testConnection",

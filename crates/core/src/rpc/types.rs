@@ -436,6 +436,7 @@ pub struct AggregateApiSummary {
     pub last_test_at: Option<i64>,
     pub last_test_status: Option<String>,
     pub last_test_error: Option<String>,
+    pub estimated_cost_usd: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
