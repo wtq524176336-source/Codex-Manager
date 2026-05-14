@@ -440,6 +440,15 @@ function resolveDisplayRequestPath(log: RequestLog): string {
   return String(log.path || log.requestPath || "").trim();
 }
 
+function resolveFullRequestPath(log: RequestLog): string {
+  return (
+    String(log.upstreamUrl || "").trim() ||
+    String(log.adaptedPath || "").trim() ||
+    String(log.originalPath || "").trim() ||
+    String(log.path || log.requestPath || "").trim()
+  );
+}
+
 /**
  * 函数 `resolveFriendlyRequestPathLabel`
  *
@@ -1048,6 +1057,7 @@ function RequestRouteInfoCell({ log }: { log: RequestLog }) {
   const adaptedPath = String(log.adaptedPath || "").trim();
   const upstreamUrl = String(log.upstreamUrl || "").trim();
   const upstreamDisplay = resolveUpstreamDisplay(upstreamUrl, t);
+  const fullRequestPath = resolveFullRequestPath(log);
   const requestType = normalizeRequestType(log.requestType);
   const canonicalSource = String(log.canonicalSource || "native_codex").trim();
   const sizeRejectStage = String(log.sizeRejectStage || "-").trim();
@@ -1065,8 +1075,8 @@ function RequestRouteInfoCell({ log }: { log: RequestLog }) {
           </span>
         </div>
       </TooltipTrigger>
-      <TooltipContent className="max-w-md">
-        <div className="flex min-w-[280px] flex-col gap-2">
+      <TooltipContent className="max-w-[min(680px,calc(100vw-2rem))]">
+        <div className="flex min-w-[280px] max-w-[640px] flex-col gap-2">
           <div className="space-y-0.5">
             <div className="text-[10px] text-background/70">{t("请求类型")}</div>
             <div className="font-mono text-[11px] uppercase">{requestType}</div>
@@ -1093,6 +1103,16 @@ function RequestRouteInfoCell({ log }: { log: RequestLog }) {
             <div className="text-[10px] text-background/70">{t("显示名称")}</div>
             <div className="break-all text-[11px]">{displayPathLabel}</div>
           </div>
+          {fullRequestPath ? (
+            <div className="space-y-0.5">
+              <div className="text-[10px] text-background/70">
+                {isCompactRequestLog(log) ? t("压缩路径") : t("完整路径")}
+              </div>
+              <div className="break-all font-mono text-[11px]">
+                {fullRequestPath}
+              </div>
+            </div>
+          ) : null}
           {displayPath && displayPathLabel !== displayPath ? (
             <div className="space-y-0.5">
               <div className="text-[10px] text-background/70">{t("原始路径")}</div>
@@ -2498,8 +2518,8 @@ function LogsPageContent() {
           if (!open) setCompactDetailLog(null);
         }}
       >
-        <DialogContent className="glass-card w-[calc(100%-2rem)] max-w-[calc(100%-2rem)] border-none p-0 sm:max-w-[760px]">
-          <div className="flex max-h-[82vh] flex-col">
+        <DialogContent className="glass-card w-[calc(100vw-2rem)] max-w-[calc(100vw-2rem)] border-none p-0 sm:max-w-[min(1200px,calc(100vw-3rem))] lg:max-w-[min(1320px,calc(100vw-4rem))]">
+          <div className="flex max-h-[88vh] flex-col">
             <DialogHeader className="border-b border-border/60 px-6 py-5">
               <DialogTitle>{t("压缩后请求")}</DialogTitle>
               <DialogDescription>
@@ -2511,7 +2531,7 @@ function LogsPageContent() {
               </DialogDescription>
             </DialogHeader>
             <div className="min-h-0 flex-1 overflow-auto px-6 py-5">
-              <pre className="max-h-[56vh] whitespace-pre-wrap break-words rounded-md border border-border/70 bg-muted/40 p-4 font-mono text-xs leading-6 text-foreground">
+              <pre className="max-h-[68vh] overflow-auto whitespace-pre rounded-md border border-border/70 bg-muted/40 p-4 font-mono text-xs leading-6 text-foreground">
                 {compactDetailText || t("暂无压缩内容")}
               </pre>
             </div>
