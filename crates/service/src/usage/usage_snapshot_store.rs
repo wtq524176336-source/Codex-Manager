@@ -110,5 +110,8 @@ pub(crate) fn store_usage_snapshot(
         let _ = storage.prune_usage_snapshots_for_account(account_id, retain);
     }
     let _ = apply_status_from_snapshot(storage, &record);
+    if let Err(err) = crate::account_auto_switch::switch_exhausted_free_preferred_account() {
+        log::warn!("auto switch exhausted free preferred account failed: {err}");
+    }
     Ok(())
 }

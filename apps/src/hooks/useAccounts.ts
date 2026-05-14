@@ -128,6 +128,52 @@ function buildUsageListFingerprint(usages: AccountUsage[]): string {
     .join("|");
 }
 
+function formatRefreshAllRtItem(item: RefreshAllRtResult["results"][number] | undefined): string {
+  if (!item) {
+    return "";
+  }
+  const accountName = String(item.accountName || item.accountId || "").trim();
+  const message = String(item.message || "").trim();
+  if (accountName && message) {
+    return `${accountName} - ${message}`;
+  }
+  return accountName || message;
+}
+
+function isSkippedRefreshAllRtItem(item: RefreshAllRtResult["results"][number]): boolean {
+  const message = String(item.message || "").trim().toLowerCase();
+  return message === "missing token" || message === "missing refresh_token";
+}
+
+function buildRefreshAllRtNotice(
+  result: RefreshAllRtResult,
+  t: (message: string, values?: Record<string, string | number>) => string,
+): { type: "success" | "warning"; message: string } {
+  const succeeded = Number(result?.succeeded || 0);
+  const failed = Number(result?.failed || 0);
+  const skipped = Number(result?.skipped || 0);
+  const results = result?.results || [];
+  const firstFailureText = formatRefreshAllRtItem(
+    results.find((item) => !item.ok && !isSkippedRefreshAllRtItem(item)),
+  );
+  const firstSkippedText = formatRefreshAllRtItem(
+    results.find((item) => !item.ok && isSkippedRefreshAllRtItem(item)),
+  );
+  const details = [
+    firstFailureText ? `${t("首个失败")}：${firstFailureText}` : "",
+    firstSkippedText ? `${t("首个跳过")}：${firstSkippedText}` : "",
+  ].filter(Boolean);
+  const summary = t("AT/RT 刷新完成：成功{success}个，失败{failed}个，跳过{skipped}个", {
+    success: succeeded,
+    failed,
+    skipped,
+  });
+  return {
+    type: failed > 0 || skipped > 0 ? "warning" : "success",
+    message: details.length ? `${summary}；${details.join("；")}` : summary,
+  };
+}
+
 /**
  * 函数 `useAccounts`
  *
@@ -412,33 +458,12 @@ export function useAccounts() {
   const refreshAllAccountRtMutation = useMutation({
     mutationFn: () => accountClient.refreshAllChatgptAuthTokens(),
     onSuccess: (result: RefreshAllRtResult) => {
-      const succeeded = Number(result?.succeeded || 0);
-      const failed = Number(result?.failed || 0);
-      const skipped = Number(result?.skipped || 0);
-      if (failed > 0) {
-        const firstFailure = (result?.results || []).find((item) => !item.ok);
-        toast.warning(
-          firstFailure?.message
-            ? t("AT/RT 刷新完成：成功{success}个，失败{failed}个，跳过{skipped}个；首个失败：{message}", {
-                success: succeeded,
-                failed,
-                skipped,
-                message: firstFailure.message,
-              })
-            : t("AT/RT 刷新完成：成功{success}个，失败{failed}个，跳过{skipped}个", {
-                success: succeeded,
-                failed,
-                skipped,
-              }),
-        );
+      const notice = buildRefreshAllRtNotice(result, t);
+      if (notice.type === "warning") {
+        toast.warning(notice.message);
         return;
       }
-      toast.success(
-        t("AT/RT 刷新完成：成功{success}个，跳过{skipped}个", {
-          success: succeeded,
-          skipped,
-        }),
-      );
+      toast.success(notice.message);
     },
     onError: (error: unknown) => {
       toast.error(`${t("批量刷新 AT/RT 失败")}: ${getAppErrorMessage(error)}`);

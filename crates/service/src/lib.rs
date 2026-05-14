@@ -19,6 +19,7 @@ mod storage;
 mod usage;
 
 pub(crate) use account::availability as account_availability;
+pub(crate) use account::auto_switch as account_auto_switch;
 pub(crate) use account::cleanup as account_cleanup;
 pub(crate) use account::delete as account_delete;
 pub(crate) use account::delete_many as account_delete_many;

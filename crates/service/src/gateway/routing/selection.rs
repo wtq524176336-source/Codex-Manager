@@ -60,6 +60,9 @@ pub(crate) fn collect_gateway_candidates(
 /// 返回函数执行结果
 fn collect_gateway_candidates_uncached(storage: &Storage) -> Result<Vec<(Account, Token)>, String> {
     // 选择可用账号作为网关上游候选
+    if let Err(err) = crate::account_auto_switch::switch_exhausted_free_preferred_account() {
+        log::warn!("auto switch exhausted free preferred account failed: {err}");
+    }
     let candidates = storage
         .list_gateway_candidates()
         .map_err(|e| e.to_string())?;

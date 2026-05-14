@@ -54,6 +54,7 @@ struct ImportAccountMeta {
     tags: Option<String>,
     workspace_id: Option<String>,
     chatgpt_account_id: Option<String>,
+    trusted_scope_hints: bool,
 }
 
 #[derive(Default)]
@@ -705,26 +706,36 @@ fn import_single_item(
         &payload.access_token,
         &payload.refresh_token,
     );
-    let chatgpt_account_id = clean_value(
+    let token_chatgpt_account_id = claims
+        .as_ref()
+        .and_then(|c| c.auth.as_ref()?.chatgpt_account_id.clone())
+        .or_else(|| extract_chatgpt_account_id(&payload.id_token))
+        .or_else(|| extract_chatgpt_account_id(&payload.access_token));
+    let meta_chatgpt_account_id = meta.trusted_scope_hints.then(|| {
         meta.chatgpt_account_id
             .clone()
             .or_else(|| payload.chatgpt_account_id_hint.clone())
-            .or_else(|| {
-                claims
-                    .as_ref()
-                    .and_then(|c| c.auth.as_ref()?.chatgpt_account_id.clone())
-            })
-            .or_else(|| extract_chatgpt_account_id(&payload.id_token))
-            .or_else(|| extract_chatgpt_account_id(&payload.access_token)),
+    });
+    let chatgpt_account_id = clean_value(
+        meta_chatgpt_account_id
+            .flatten()
+            .or(token_chatgpt_account_id),
     );
 
-    let workspace_id = clean_value(
+    let token_workspace_id = claims
+        .as_ref()
+        .and_then(|c| c.workspace_id.clone())
+        .or_else(|| extract_workspace_id(&payload.id_token))
+        .or_else(|| extract_workspace_id(&payload.access_token));
+    let meta_workspace_id = meta.trusted_scope_hints.then(|| {
         meta.workspace_id
             .clone()
-            .or_else(|| claims.as_ref().and_then(|c| c.workspace_id.clone()))
-            .or_else(|| extract_workspace_id(&payload.id_token))
-            .or_else(|| extract_workspace_id(&payload.access_token))
             .or_else(|| payload.account_id_hint.clone())
+    });
+    let workspace_id = clean_value(
+        meta_workspace_id
+            .flatten()
+            .or(token_workspace_id)
             .or_else(|| chatgpt_account_id.clone()),
     );
     let fallback_subject_key =
@@ -788,12 +799,22 @@ fn import_single_item(
     let now = now_ts();
     let (account_id, account, created) =
         if let Some(existing) = index.by_id.get(&account_id).cloned() {
-            let merged_chatgpt_account_id = chatgpt_account_id
-                .clone()
-                .or_else(|| clean_value(existing.chatgpt_account_id.clone()));
-            let merged_workspace_id = workspace_id
-                .clone()
-                .or_else(|| clean_value(existing.workspace_id.clone()));
+            let clear_untrusted_scope =
+                !meta.trusted_scope_hints && chatgpt_account_id.is_none() && workspace_id.is_none();
+            let merged_chatgpt_account_id = if clear_untrusted_scope {
+                None
+            } else {
+                chatgpt_account_id
+                    .clone()
+                    .or_else(|| clean_value(existing.chatgpt_account_id.clone()))
+            };
+            let merged_workspace_id = if clear_untrusted_scope {
+                None
+            } else {
+                workspace_id
+                    .clone()
+                    .or_else(|| clean_value(existing.workspace_id.clone()))
+            };
             let updated = Account {
                 id: existing.id.clone(),
                 label: if existing.label.trim().is_empty() {
@@ -1088,6 +1109,7 @@ fn token_fingerprint(refresh_token: &str) -> String {
 /// 返回函数执行结果
 fn extract_account_meta(item: &Value) -> ImportAccountMeta {
     let meta = item.get("meta").unwrap_or(item);
+    let trusted_scope_hints = item.get("meta").is_some() || item.get("tokens").is_some();
     ImportAccountMeta {
         label: optional_string_any(&[(meta, "label"), (item, "label")]),
         issuer: optional_string_any(&[(meta, "issuer"), (item, "issuer")]),
@@ -1111,6 +1133,7 @@ fn extract_account_meta(item: &Value) -> ImportAccountMeta {
             (item, "chatgpt_account_id"),
             (item, "chatgptAccountId"),
         ]),
+        trusted_scope_hints,
     }
 }
 

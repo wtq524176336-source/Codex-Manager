@@ -1,3 +1,4 @@
+mod autostart;
 mod env;
 mod lifecycle;
 mod prompts;
@@ -6,6 +7,7 @@ mod state;
 mod tray;
 mod window;
 
+pub(crate) use autostart::ensure_autostart_registered;
 pub(crate) use env::load_env_from_exe_dir;
 pub(crate) use lifecycle::{handle_main_window_event, handle_run_event};
 pub(crate) use startup::sync_startup_window_state;

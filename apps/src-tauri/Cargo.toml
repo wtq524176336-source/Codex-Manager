@@ -32,4 +32,5 @@ rfd = "0.15"
 rusqlite = { version = "0.31", features = ["bundled", "backup"] }
 
 [target.'cfg(windows)'.dependencies]
+winreg = "0.55"
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }

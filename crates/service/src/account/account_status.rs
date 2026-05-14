@@ -267,7 +267,11 @@ fn mark_account_unavailable_for_confirmed_usage_exhausted(
     storage: &Storage,
     account_id: &str,
 ) -> bool {
-    set_account_limited_with_reason(storage, account_id, "usage_limit_exhausted")
+    let changed = set_account_limited_with_reason(storage, account_id, "usage_limit_exhausted");
+    if let Err(err) = crate::account_auto_switch::switch_exhausted_free_preferred_account() {
+        log::warn!("auto switch exhausted free preferred account failed: {err}");
+    }
+    changed
 }
 
 /// 函数 `set_account_unavailable_with_reason`
