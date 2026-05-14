@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useAccounts } from "@/hooks/useAccounts";
 import { useDashboardStats } from "@/hooks/useDashboardStats";
@@ -16,6 +17,7 @@ import {
   type StatusFilter,
 } from "@/app/accounts/accounts-page-helpers";
 import { AccountsPageView } from "@/app/accounts/accounts-page-view";
+import { accountClient } from "@/lib/api/account-client";
 import { isBannedAccount, isLimitedAccount } from "@/lib/utils/usage";
 import type { Account } from "@/types";
 
@@ -36,6 +38,7 @@ function normalizeCleanupStatus(status: string): CleanupStatus | null {
 
 export default function AccountsPage() {
   const { t } = useI18n();
+  const queryClient = useQueryClient();
   const { isDesktopRuntime, canUseBrowserDownloadExport } =
     useRuntimeCapabilities();
   const {
@@ -73,6 +76,12 @@ export default function AccountsPage() {
     useDashboardStats("/accounts/");
   const isPageActive = useDesktopPageActive("/accounts/");
   usePageTransitionReady("/accounts/", !isServiceReady || !isLoading);
+  const { data: apiKeys = [] } = useQuery({
+    queryKey: ["apikeys"],
+    queryFn: () => accountClient.listApiKeys(),
+    enabled: isServiceReady && isPageActive,
+    retry: 1,
+  });
 
   const [search, setSearch] = useState("");
   const [planFilter, setPlanFilter] = useState("all");
@@ -99,6 +108,7 @@ export default function AccountsPage() {
     "unavailable",
     "banned",
   ]);
+  const [switchingApiKeyId, setSwitchingApiKeyId] = useState<string | null>(null);
 
   const importFileActionLabel = isDesktopRuntime
     ? t("按文件导入")
@@ -216,6 +226,67 @@ export default function AccountsPage() {
     exportSelectionCount > 0
       ? `${t("当前已选择")} ${exportSelectionCount} ${t("个账号，本次将只导出选中的账号。")}`
       : `${t("当前未选择账号，本次将导出全部")} ${accounts.length} ${t("个账号。")}`;
+  const enabledApiKeys = useMemo(
+    () =>
+      apiKeys.filter(
+        (key) => String(key.status || "").toLowerCase() !== "disabled",
+      ),
+    [apiKeys],
+  );
+  const activeApiKey = enabledApiKeys[0] || null;
+  const activeApiKeyMode = activeApiKey
+    ? activeApiKey.rotationStrategy === "aggregate_api_rotation"
+      ? "aggregate"
+      : activeApiKey.rotationStrategy === "hybrid_rotation"
+        ? "hybrid"
+        : "account"
+    : "none";
+
+  const handleToggleActiveApiKeyMode = async () => {
+    if (!activeApiKey) {
+      toast.info(t("当前没有启用的平台密钥"));
+      return;
+    }
+    const nextRotationStrategy =
+      activeApiKey.rotationStrategy === "aggregate_api_rotation"
+        ? "account_rotation"
+        : "aggregate_api_rotation";
+    setSwitchingApiKeyId(activeApiKey.id);
+    try {
+      await accountClient.updateApiKey(activeApiKey.id, {
+        name: activeApiKey.name || null,
+        modelSlug: activeApiKey.modelSlug || null,
+        reasoningEffort: activeApiKey.reasoningEffort || null,
+        serviceTier: activeApiKey.serviceTier || null,
+        protocolType: activeApiKey.protocol || null,
+        upstreamBaseUrl: activeApiKey.upstreamBaseUrl || null,
+        staticHeadersJson: activeApiKey.staticHeadersJson || null,
+        rotationStrategy: nextRotationStrategy,
+        aggregateApiId:
+          nextRotationStrategy === "aggregate_api_rotation"
+            ? activeApiKey.aggregateApiId || null
+            : null,
+        accountPlanFilter:
+          nextRotationStrategy === "account_rotation"
+            ? activeApiKey.accountPlanFilter || null
+            : null,
+        quotaLimitTokens: activeApiKey.quotaLimitTokens,
+      });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["apikeys"] }),
+        queryClient.invalidateQueries({ queryKey: ["startup-snapshot"] }),
+      ]);
+      toast.success(t("平台密钥模式已切换"));
+    } catch (error: unknown) {
+      toast.error(
+        `${t("切换失败")}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    } finally {
+      setSwitchingApiKeyId(null);
+    }
+  };
 
   const visibleAccounts = useMemo(() => {
     const offset = (safePage - 1) * pageSizeNumber;
@@ -471,6 +542,10 @@ const toggleCleanupStatus = (rawStatus: string) => {
       exportModeDraft={exportModeDraft}
       exportTargetCount={exportTargetCount}
       exportScopeText={exportScopeText}
+      activeApiKey={activeApiKey}
+      activeApiKeyMode={activeApiKeyMode}
+      enabledApiKeyCount={enabledApiKeys.length}
+      isSwitchingApiKeyMode={Boolean(switchingApiKeyId)}
       selectedAccount={selectedAccount}
       accountEditorState={accountEditorState}
       deleteDialogState={deleteDialogState}
@@ -521,6 +596,7 @@ const toggleCleanupStatus = (rawStatus: string) => {
       handleWarmupAccounts={handleWarmupAccounts}
       openExportDialog={openExportDialog}
       handleConfirmExport={handleConfirmExport}
+      handleToggleActiveApiKeyMode={handleToggleActiveApiKeyMode}
       handleDeleteSingle={handleDeleteSingle}
       openAccountEditor={openAccountEditor}
       handleConfirmAccountEditor={handleConfirmAccountEditor}

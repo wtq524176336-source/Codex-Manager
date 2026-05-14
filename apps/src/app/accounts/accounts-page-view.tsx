@@ -10,6 +10,7 @@ import {
   MoreVertical,
   Plus,
   RefreshCw,
+  Repeat2,
   Search,
   Trash2,
   Zap,
@@ -66,7 +67,7 @@ import {
 } from "@/components/ui/tooltip";
 import { useI18n } from "@/lib/i18n/provider";
 import { cn } from "@/lib/utils";
-import type { Account } from "@/types";
+import type { Account, ApiKey } from "@/types";
 import {
   type AccountEditorState,
   type AccountExportMode,
@@ -107,6 +108,8 @@ interface TokenSummaryStats {
   todayCost: number;
 }
 
+type ActiveApiKeyMode = "none" | "account" | "aggregate" | "hybrid";
+
 export interface AccountsPageViewProps {
   accounts: Account[];
   planTypes: PlanTypeOption[];
@@ -128,6 +131,10 @@ export interface AccountsPageViewProps {
   exportModeDraft: AccountExportMode;
   exportTargetCount: number;
   exportScopeText: string;
+  activeApiKey: ApiKey | null;
+  activeApiKeyMode: ActiveApiKeyMode;
+  enabledApiKeyCount: number;
+  isSwitchingApiKeyMode: boolean;
   cleanupDialogOpen: boolean;
   cleanupStatusDraft: string[];
   cleanupStatusOptions: CleanupStatusOption[];
@@ -178,6 +185,7 @@ export interface AccountsPageViewProps {
   handleWarmupAccounts: () => Promise<void>;
   openExportDialog: () => void;
   handleConfirmExport: () => Promise<void>;
+  handleToggleActiveApiKeyMode: () => Promise<void>;
   handleDeleteSingle: (account: Account) => void;
   openAccountEditor: (account: Account) => void;
   handleConfirmAccountEditor: () => Promise<void>;
@@ -218,6 +226,10 @@ export function AccountsPageView(props: AccountsPageViewProps) {
     exportModeDraft,
     exportTargetCount,
     exportScopeText,
+    activeApiKey,
+    activeApiKeyMode,
+    enabledApiKeyCount,
+    isSwitchingApiKeyMode,
     cleanupDialogOpen,
     cleanupStatusDraft,
     cleanupStatusOptions,
@@ -267,6 +279,7 @@ export function AccountsPageView(props: AccountsPageViewProps) {
     handleWarmupAccounts,
     openExportDialog,
     handleConfirmExport,
+    handleToggleActiveApiKeyMode,
     handleDeleteSingle,
     handleConfirmAccountEditor,
     handleConfirmDelete,
@@ -287,6 +300,18 @@ export function AccountsPageView(props: AccountsPageViewProps) {
       cleanupStatusDraft.includes(option.id) ? total + option.count : total,
     0,
   );
+  const activeApiKeyModeLabel =
+    activeApiKeyMode === "aggregate"
+      ? t("聚合API模式")
+      : activeApiKeyMode === "hybrid"
+        ? t("混合模式")
+        : activeApiKeyMode === "account"
+          ? t("账号模式")
+          : t("未启用密钥");
+  const activeApiKeyModeNextLabel =
+    activeApiKeyMode === "aggregate" ? t("账号模式") : t("聚合API模式");
+  const activeApiKeyName =
+    activeApiKey?.name || activeApiKey?.id || t("未启用密钥");
 
   return (
     <div className="space-y-6">
@@ -359,6 +384,43 @@ export function AccountsPageView(props: AccountsPageViewProps) {
           <div className="hidden min-w-0 lg:block" />
 
           <div className="ml-auto flex shrink-0 items-center gap-2 lg:ml-0 lg:justify-self-end">
+            <Tooltip>
+              <TooltipTrigger render={<span />} className="inline-flex">
+                <Button
+                  variant="outline"
+                  className="glass-card h-10 min-w-[178px] justify-between gap-2 rounded-xl px-3"
+                  disabled={
+                    !isServiceReady || !activeApiKey || isSwitchingApiKeyMode
+                  }
+                  onClick={() => void handleToggleActiveApiKeyMode()}
+                >
+                  <span className="flex min-w-0 flex-col items-start leading-none">
+                    <span className="text-[10px] text-muted-foreground">
+                      {t("当前")}
+                    </span>
+                    <span className="max-w-[118px] truncate text-sm font-semibold">
+                      {activeApiKeyModeLabel}
+                    </span>
+                  </span>
+                  {isSwitchingApiKeyMode ? (
+                    <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" />
+                  ) : (
+                    <Repeat2 className="h-4 w-4 shrink-0 text-primary" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-xs whitespace-pre-wrap break-words">
+                {activeApiKey
+                  ? enabledApiKeyCount > 1
+                    ? `${t("当前启用密钥")}：${activeApiKeyName}\n${t(
+                        "检测到多把启用密钥，将切换列表中的第一把启用密钥。",
+                      )}\n${t("点击切换到")}：${activeApiKeyModeNextLabel}`
+                    : `${t("当前启用密钥")}：${activeApiKeyName}\n${t(
+                        "点击切换到",
+                      )}：${activeApiKeyModeNextLabel}`
+                  : t("当前没有启用的平台密钥")}
+              </TooltipContent>
+            </Tooltip>
             <Tooltip>
               <TooltipTrigger render={<span />} className="inline-flex">
                 <Button
