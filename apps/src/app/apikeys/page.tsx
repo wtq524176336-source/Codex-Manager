@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   DollarSign,
   Copy,
@@ -11,6 +11,7 @@ import {
   Link2,
   MoreVertical,
   Plus,
+  Repeat2,
   Settings2,
   Zap,
   Trash2,
@@ -170,10 +171,12 @@ export default function ApiKeysPage() {
     isModelsLoading,
     isServiceReady,
     deleteApiKey,
+    updateApiKey,
     toggleApiKeyStatus,
     readApiKeySecret,
     isToggling,
   } = useApiKeys();
+  const queryClient = useQueryClient();
   const isPageActive = useDesktopPageActive("/apikeys/");
   const isUsageQueryEnabled = useDeferredDesktopActivation(isServiceReady);
   usePageTransitionReady(
@@ -186,6 +189,7 @@ export default function ApiKeysPage() {
   const [editingKeyId, setEditingKeyId] = useState<string | null>(null);
   const [deleteKeyId, setDeleteKeyId] = useState<string | null>(null);
   const [ccSwitchImportingId, setCcSwitchImportingId] = useState<string | null>(null);
+  const [switchingRotationKeyId, setSwitchingRotationKeyId] = useState<string | null>(null);
   const [browserOrigin, setBrowserOrigin] = useState("");
   const gatewayOrigin = useMemo(
     () =>
@@ -221,6 +225,7 @@ export default function ApiKeysPage() {
     setEditingKeyId(null);
     setDeleteKeyId(null);
     setCcSwitchImportingId(null);
+    setSwitchingRotationKeyId(null);
   }, [isPageActive]);
 
   const editingApiKey = useMemo(
@@ -449,6 +454,38 @@ export default function ApiKeysPage() {
     setDeleteKeyId(id);
   };
 
+  const toggleRotationStrategy = async (key: (typeof apiKeys)[number]) => {
+    const nextRotationStrategy =
+      key.rotationStrategy === "aggregate_api_rotation"
+        ? "account_rotation"
+        : "aggregate_api_rotation";
+    setSwitchingRotationKeyId(key.id);
+    try {
+      await updateApiKey(key.id, {
+        name: key.name || null,
+        modelSlug: key.modelSlug || null,
+        reasoningEffort: key.reasoningEffort || null,
+        serviceTier: key.serviceTier || null,
+        protocolType: key.protocol || null,
+        upstreamBaseUrl: key.upstreamBaseUrl || null,
+        staticHeadersJson: key.staticHeadersJson || null,
+        rotationStrategy: nextRotationStrategy,
+        aggregateApiId:
+          nextRotationStrategy === "aggregate_api_rotation"
+            ? key.aggregateApiId || null
+            : null,
+        accountPlanFilter:
+          nextRotationStrategy === "account_rotation"
+            ? key.accountPlanFilter || null
+            : null,
+        quotaLimitTokens: key.quotaLimitTokens,
+      });
+      await queryClient.invalidateQueries({ queryKey: ["apikeys"] });
+    } finally {
+      setSwitchingRotationKeyId(null);
+    }
+  };
+
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       {!isServiceReady ? (
@@ -613,6 +650,11 @@ export default function ApiKeysPage() {
                   const isEnabled = String(key.status).toLowerCase() !== "disabled";
                   const usedTokens = usageByKey[key.id] ?? 0;
                   const usedCostUsd = costByKey[key.id] ?? 0;
+                  const isAggregateRotation =
+                    key.rotationStrategy === "aggregate_api_rotation";
+                  const rotationSwitchLabel = isAggregateRotation
+                    ? t("切换为账号轮转")
+                    : t("切换为聚合API轮转");
                   const quotaLimitTokens =
                     typeof key.quotaLimitTokens === "number" &&
                     Number.isFinite(key.quotaLimitTokens) &&
@@ -746,6 +788,20 @@ export default function ApiKeysPage() {
                             variant="ghost"
                             size="icon"
                             className="h-8 w-8 text-muted-foreground transition-colors hover:text-primary"
+                            disabled={
+                              !isServiceReady ||
+                              switchingRotationKeyId === key.id
+                            }
+                            onClick={() => void toggleRotationStrategy(key)}
+                            title={rotationSwitchLabel}
+                            aria-label={rotationSwitchLabel}
+                          >
+                            <Repeat2 className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-muted-foreground transition-colors hover:text-primary"
                             disabled={!isServiceReady}
                             onClick={() => openEditModal(key.id)}
                             title={t("编辑配置")}
@@ -781,6 +837,16 @@ export default function ApiKeysPage() {
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
+                              <DropdownMenuItem
+                                className="gap-2"
+                                disabled={
+                                  !isServiceReady ||
+                                  switchingRotationKeyId === key.id
+                                }
+                                onClick={() => void toggleRotationStrategy(key)}
+                              >
+                                <Repeat2 className="h-4 w-4" /> {rotationSwitchLabel}
+                              </DropdownMenuItem>
                               <DropdownMenuItem
                                 className="gap-2"
                                 disabled={!isServiceReady}
