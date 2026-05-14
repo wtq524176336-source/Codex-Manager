@@ -28,6 +28,7 @@ export interface ApiKeyCreateResult {
 export interface AggregateApi {
   id: string;
   providerType: string;
+  protocolMode: string | null;
   supplierName: string | null;
   sort: number;
   url: string;

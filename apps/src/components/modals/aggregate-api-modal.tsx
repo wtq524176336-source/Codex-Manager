@@ -36,6 +36,11 @@ const AGGREGATE_API_PROVIDER_LABELS: Record<string, string> = {
   claude: "Claude",
 };
 
+const AGGREGATE_API_PROTOCOL_LABELS: Record<string, string> = {
+  openai_compat: "OpenAI 兼容",
+  codex_cli: "Codex CLI 兼容",
+};
+
 const AGGREGATE_API_URL_PLACEHOLDERS: Record<string, string> = {
   codex: "例如：https://api.openai.com/v1",
   claude: "例如：https://api.anthropic.com/v1",
@@ -71,6 +76,7 @@ export function AggregateApiModal({
   const serviceStatus = useAppStore((state) => state.serviceStatus);
   const { canAccessManagementRpc } = useRuntimeCapabilities();
   const [providerType, setProviderType] = useState("codex");
+  const [protocolMode, setProtocolMode] = useState("openai_compat");
   const [supplierName, setSupplierName] = useState("");
   const [sortDraft, setSortDraft] = useState("0");
   const [url, setUrl] = useState("");
@@ -106,6 +112,7 @@ export function AggregateApiModal({
     if (!open) return;
     const nextProviderType = aggregateApi?.providerType || "codex";
     setProviderType(nextProviderType);
+    setProtocolMode(aggregateApi?.protocolMode || "openai_compat");
     setSupplierName(aggregateApi?.supplierName || "");
     setSortDraft(String(aggregateApi?.sort ?? defaultSort));
     setUrl(aggregateApi?.url || "");
@@ -270,6 +277,7 @@ export function AggregateApiModal({
       if (aggregateApi?.id) {
         await accountClient.updateAggregateApi(aggregateApi.id, {
           providerType,
+          protocolMode: providerType === "codex" ? protocolMode : null,
           supplierName,
           sort: parsedSort,
           url,
@@ -295,6 +303,7 @@ export function AggregateApiModal({
 
       const result = await accountClient.createAggregateApi({
         providerType,
+        protocolMode: providerType === "codex" ? protocolMode : null,
         supplierName,
         sort: parsedSort,
         url,
@@ -411,6 +420,9 @@ export function AggregateApiModal({
                     onValueChange={(value) => {
                       if (!value) return;
                       setProviderType(value);
+                      if (value !== "codex") {
+                        setProtocolMode("openai_compat");
+                      }
                     }}
                   >
                     <SelectTrigger id="aggregate-api-provider" className="w-full">
@@ -427,6 +439,46 @@ export function AggregateApiModal({
                     </SelectContent>
                   </Select>
                 </div>
+
+                {providerType === "codex" ? (
+                  <div className="grid gap-2">
+                    <Label htmlFor="aggregate-api-protocol-mode">
+                      {t("协议模式")}
+                    </Label>
+                    <Select
+                      value={protocolMode}
+                      disabled={!isServiceReady}
+                      onValueChange={(value) =>
+                        setProtocolMode(
+                          value === "codex_cli" ? "codex_cli" : "openai_compat"
+                        )
+                      }
+                    >
+                      <SelectTrigger
+                        id="aggregate-api-protocol-mode"
+                        className="w-full"
+                      >
+                        <SelectValue>
+                          {(value) =>
+                            t(
+                              AGGREGATE_API_PROTOCOL_LABELS[
+                                String(value || "")
+                              ] || "OpenAI 兼容"
+                            )
+                          }
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="openai_compat">
+                          {t("OpenAI 兼容")}
+                        </SelectItem>
+                        <SelectItem value="codex_cli">
+                          {t("Codex CLI 兼容")}
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                ) : null}
 
                 <div className="grid gap-2">
                   <Label htmlFor="aggregate-api-auth-type">{t("认证类型")}</Label>

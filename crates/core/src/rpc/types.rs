@@ -422,6 +422,7 @@ pub struct ApiKeySecretResult {
 pub struct AggregateApiSummary {
     pub id: String,
     pub provider_type: String,
+    pub protocol_mode: Option<String>,
     pub supplier_name: Option<String>,
     pub sort: i64,
     pub url: String,

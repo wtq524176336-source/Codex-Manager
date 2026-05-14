@@ -237,6 +237,7 @@ pub struct ApiKey {
 pub struct AggregateApi {
     pub id: String,
     pub provider_type: String,
+    pub protocol_mode: Option<String>,
     pub supplier_name: Option<String>,
     pub sort: i64,
     pub url: String,
@@ -680,6 +681,11 @@ impl Storage {
             "054_request_logs_compact_output_text",
             include_str!("../../migrations/054_request_logs_compact_output_text.sql"),
             |s| s.ensure_request_log_compact_output_text_column(),
+        )?;
+        self.apply_sql_or_compat_migration(
+            "055_aggregate_api_protocol_mode",
+            include_str!("../../migrations/055_aggregate_api_protocol_mode.sql"),
+            |s| s.ensure_aggregate_apis_table(),
         )?;
         self.ensure_api_key_rotation_columns()?;
         self.ensure_aggregate_apis_table()?;

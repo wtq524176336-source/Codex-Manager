@@ -120,6 +120,7 @@ export interface ManagedModelPayload {
 
 interface AggregateApiPayload {
   providerType?: string | null;
+  protocolMode?: string | null;
   supplierName?: string | null;
   sort?: number | null;
   status?: string | null;
@@ -489,6 +490,7 @@ export const accountClient = {
       "service_aggregate_api_create",
       withAddr({
         providerType: params.providerType || null,
+        protocolMode: params.protocolMode || null,
         supplierName: params.supplierName || null,
         sort: typeof params.sort === "number" ? params.sort : null,
         status: params.status || null,
@@ -519,6 +521,7 @@ export const accountClient = {
       withAddr({
         id: apiId,
         providerType: params.providerType || null,
+        protocolMode: params.protocolMode || null,
         supplierName: params.supplierName || null,
         sort: typeof params.sort === "number" ? params.sort : null,
         status: params.status || null,

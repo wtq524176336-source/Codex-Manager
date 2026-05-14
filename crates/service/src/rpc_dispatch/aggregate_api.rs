@@ -38,6 +38,7 @@ pub(super) fn try_handle(req: &JsonRpcRequest) -> Option<JsonRpcResponse> {
         ),
         "aggregateApi/create" => {
             let provider_type = super::string_param(req, "providerType");
+            let protocol_mode = super::string_param(req, "protocolMode");
             let supplier_name = super::string_param(req, "supplierName");
             let sort = super::i64_param(req, "sort");
             let url = super::string_param(req, "url");
@@ -58,6 +59,7 @@ pub(super) fn try_handle(req: &JsonRpcRequest) -> Option<JsonRpcResponse> {
                 url,
                 key,
                 provider_type,
+                protocol_mode,
                 supplier_name,
                 sort,
                 auth_type,
@@ -73,6 +75,7 @@ pub(super) fn try_handle(req: &JsonRpcRequest) -> Option<JsonRpcResponse> {
         "aggregateApi/update" => {
             let api_id = api_id_param(req).unwrap_or("");
             let provider_type = super::string_param(req, "providerType");
+            let protocol_mode = super::string_param(req, "protocolMode");
             let supplier_name = super::string_param(req, "supplierName");
             let sort = super::i64_param(req, "sort");
             let status = super::string_param(req, "status");
@@ -95,6 +98,7 @@ pub(super) fn try_handle(req: &JsonRpcRequest) -> Option<JsonRpcResponse> {
                 url,
                 key,
                 provider_type,
+                protocol_mode,
                 supplier_name,
                 sort,
                 status,

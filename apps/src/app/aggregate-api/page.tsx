@@ -72,6 +72,11 @@ const AGGREGATE_API_PROVIDER_FILTER_LABELS: Record<string, string> = {
   claude: "Claude",
 };
 
+const AGGREGATE_API_PROTOCOL_LABELS: Record<string, string> = {
+  openai_compat: "OpenAI 兼容",
+  codex_cli: "Codex CLI 兼容",
+};
+
 /**
  * 函数 `getTestBadge`
  *
@@ -737,6 +742,13 @@ export default function AggregateApiPage() {
                                     model: {api.modelOverride}
                                   </span>
                                 ) : null}
+                                {api.providerType === "codex" && api.protocolMode ? (
+                                  <span className="block truncate text-[10px] text-muted-foreground/80">
+                                    {AGGREGATE_API_PROTOCOL_LABELS[
+                                      api.protocolMode
+                                    ] || api.protocolMode}
+                                  </span>
+                                ) : null}
                               </div>
                             </TooltipTrigger>
                             <TooltipContent className="max-w-sm whitespace-pre-wrap break-words">
@@ -750,6 +762,14 @@ export default function AggregateApiPage() {
                                 {api.modelOverride ? (
                                   <div className="break-all font-mono text-[11px] opacity-80">
                                     model: {api.modelOverride}
+                                  </div>
+                                ) : null}
+                                {api.providerType === "codex" && api.protocolMode ? (
+                                  <div className="text-[11px] opacity-80">
+                                    {t("协议模式")}:{" "}
+                                    {AGGREGATE_API_PROTOCOL_LABELS[
+                                      api.protocolMode
+                                    ] || api.protocolMode}
                                   </div>
                                 ) : null}
                                 <div className="text-[11px] opacity-80">

@@ -17,8 +17,11 @@ pub(crate) const AGGREGATE_API_PROVIDER_CLAUDE: &str = "claude";
 pub(crate) const AGGREGATE_API_PROVIDER_GEMINI: &str = "gemini";
 pub(crate) const AGGREGATE_API_AUTH_APIKEY: &str = "apikey";
 pub(crate) const AGGREGATE_API_AUTH_USERPASS: &str = "userpass";
+pub(crate) const AGGREGATE_API_PROTOCOL_OPENAI_COMPAT: &str = "openai_compat";
+pub(crate) const AGGREGATE_API_PROTOCOL_CODEX_CLI: &str = "codex_cli";
 const CLAUDE_DEFAULT_PROBE_MODEL: &str = "claude-haiku-4-5-20251001";
 const ALIBABA_CODING_PLAN_PROBE_MODEL: &str = "qwen3.5-plus";
+const CODEX_CLI_DEFAULT_PROBE_MODEL: &str = "gpt-5.5";
 const MAX_DISCOVERED_CLAUDE_PROBE_MODELS: usize = 8;
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -286,6 +289,7 @@ mod tests {
         AggregateApi {
             id: "agg-test".to_string(),
             provider_type: "claude".to_string(),
+            protocol_mode: None,
             supplier_name: Some("test".to_string()),
             sort: 0,
             url: "https://open.bigmodel.cn/api/anthropic".to_string(),
@@ -804,6 +808,29 @@ fn normalize_provider_type(value: Option<String>) -> Result<String, String> {
     }
 }
 
+fn normalize_protocol_mode(value: Option<String>) -> Result<String, String> {
+    match value {
+        Some(raw) => {
+            let normalized = raw.trim().to_ascii_lowercase().replace('-', "_");
+            match normalized.as_str() {
+                "openai_compat" | "openai" | "compatible" | "compat" => {
+                    Ok(AGGREGATE_API_PROTOCOL_OPENAI_COMPAT.to_string())
+                }
+                "codex_cli" | "codex" | "codex_responses" | "responses" => {
+                    Ok(AGGREGATE_API_PROTOCOL_CODEX_CLI.to_string())
+                }
+                other => Err(format!("unsupported aggregate api protocol mode: {other}")),
+            }
+        }
+        None => Ok(AGGREGATE_API_PROTOCOL_OPENAI_COMPAT.to_string()),
+    }
+}
+
+fn normalize_protocol_mode_value(value: Option<&str>) -> String {
+    normalize_protocol_mode(value.map(str::to_string))
+        .unwrap_or_else(|_| AGGREGATE_API_PROTOCOL_OPENAI_COMPAT.to_string())
+}
+
 /// 函数 `normalize_provider_type_value`
 ///
 /// 作者: gaohongshun
@@ -861,10 +888,15 @@ fn provider_default_url(provider_type: &str) -> &'static str {
 /// 返回函数执行结果
 fn normalize_probe_url(base_url: &str, suffix: &str) -> String {
     let base = base_url.trim().trim_end_matches('/');
-    if suffix.trim().is_empty() {
+    let suffix = suffix.trim();
+    if suffix.is_empty() {
         return base.to_string();
     }
-    if base.ends_with("/v1") {
+    if base.ends_with("/v1") && suffix.to_ascii_lowercase().starts_with("/v1/") {
+        format!("{base}{}", &suffix[3..])
+    } else if base.ends_with("/v1") {
+        format!("{base}{suffix}")
+    } else if suffix.to_ascii_lowercase().starts_with("/v1/") {
         format!("{base}{suffix}")
     } else {
         format!("{base}/v1{suffix}")
@@ -926,18 +958,20 @@ fn build_claude_probe_body(model: &str) -> serde_json::Value {
 ///
 /// # 返回
 /// 返回函数执行结果
-fn build_codex_probe_body() -> serde_json::Value {
+fn build_codex_probe_body(model: &str) -> serde_json::Value {
     json!({
-        "model": "gpt-5.1-codex",
-        "input": [{
-            "role": "user",
-            "content": [{
-                "type": "text",
-                "text": "Who are you?"
-            }]
-        }],
+        "model": model,
+        "input": "hi",
         "stream": true
     })
+}
+
+fn codex_probe_model<'a>(api: &'a AggregateApi, default_model: &'a str) -> &'a str {
+    api.model_override
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(default_model)
 }
 
 fn build_gemini_probe_body() -> serde_json::Value {
@@ -1240,14 +1274,9 @@ fn probe_codex_responses_endpoint(
             "messages": [{"role":"user","content":"hi"}],
             "stream": false
         })
-    } else if let Some(model_override) = api.model_override.as_deref() {
-        let mut body = build_codex_probe_body();
-        if let Some(obj) = body.as_object_mut() {
-            obj.insert("model".to_string(), json!(model_override));
-        }
-        body
     } else {
-        build_codex_probe_body()
+        let model = codex_probe_model(api, CODEX_CLI_DEFAULT_PROBE_MODEL);
+        build_codex_probe_body(model)
     };
     let response = add_codex_probe_headers(builder)?
         .header("content-type", "application/json")
@@ -1282,6 +1311,11 @@ fn probe_codex_endpoint(
     api: &AggregateApi,
     secret: &str,
 ) -> Result<i64, String> {
+    let protocol_mode = normalize_protocol_mode_value(api.protocol_mode.as_deref());
+    if protocol_mode == AGGREGATE_API_PROTOCOL_CODEX_CLI {
+        return probe_codex_responses_endpoint(client, api, secret);
+    }
+
     let has_model_override = api
         .model_override
         .as_deref()
@@ -1447,6 +1481,7 @@ pub(crate) fn list_aggregate_apis() -> Result<Vec<AggregateApiSummary>, String> 
         .map(|item| AggregateApiSummary {
             id: item.id,
             provider_type: item.provider_type,
+            protocol_mode: item.protocol_mode,
             supplier_name: item.supplier_name,
             sort: item.sort,
             url: item.url,
@@ -1484,6 +1519,7 @@ pub(crate) fn create_aggregate_api(
     url: Option<String>,
     key: Option<String>,
     provider_type: Option<String>,
+    protocol_mode: Option<String>,
     supplier_name: Option<String>,
     sort: Option<i64>,
     auth_type: Option<String>,
@@ -1497,6 +1533,11 @@ pub(crate) fn create_aggregate_api(
 ) -> Result<AggregateApiCreateResult, String> {
     let storage = open_storage().ok_or_else(|| "storage unavailable".to_string())?;
     let normalized_provider_type = normalize_provider_type(provider_type)?;
+    let normalized_protocol_mode = if normalized_provider_type == AGGREGATE_API_PROVIDER_CODEX {
+        Some(normalize_protocol_mode(protocol_mode)?)
+    } else {
+        None
+    };
     let normalized_supplier_name = normalize_supplier_name(supplier_name)?;
     let normalized_sort = normalize_sort(sort);
     let normalized_url = normalize_upstream_base_url(url)?
@@ -1530,6 +1571,7 @@ pub(crate) fn create_aggregate_api(
     let record = AggregateApi {
         id: id.clone(),
         provider_type: normalized_provider_type,
+        protocol_mode: normalized_protocol_mode,
         supplier_name: Some(normalized_supplier_name),
         sort: normalized_sort,
         url: normalized_url,
@@ -1579,6 +1621,7 @@ pub(crate) fn update_aggregate_api(
     url: Option<String>,
     key: Option<String>,
     provider_type: Option<String>,
+    protocol_mode: Option<String>,
     supplier_name: Option<String>,
     sort: Option<i64>,
     status: Option<String>,
@@ -1599,6 +1642,7 @@ pub(crate) fn update_aggregate_api(
         .find_aggregate_api_by_id(api_id)
         .map_err(|err| err.to_string())?
         .ok_or_else(|| "aggregate api not found".to_string())?;
+    let protocol_mode_provided = protocol_mode.is_some();
     let existing_auth_type = normalize_auth_type(Some(existing.auth_type.clone()))
         .unwrap_or_else(|_| AGGREGATE_API_AUTH_APIKEY.to_string());
     let normalized_auth_type = match auth_type {
@@ -1616,10 +1660,32 @@ pub(crate) fn update_aggregate_api(
             .update_aggregate_api_auth_type(api_id, next)
             .map_err(|err| err.to_string())?;
     }
-    if let Some(provider_type) = provider_type {
-        let normalized_provider_type = normalize_provider_type(Some(provider_type))?;
+    let normalized_provider_type = match provider_type {
+        Some(raw) => Some(normalize_provider_type(Some(raw))?),
+        None => None,
+    };
+    let existing_provider_type = normalize_provider_type_value(existing.provider_type.as_str());
+    let next_provider_type = normalized_provider_type
+        .as_deref()
+        .unwrap_or(existing_provider_type.as_str())
+        .to_string();
+    if let Some(normalized_provider_type) = normalized_provider_type.as_deref() {
         storage
-            .update_aggregate_api_type(api_id, normalized_provider_type.as_str())
+            .update_aggregate_api_type(api_id, normalized_provider_type)
+            .map_err(|err| err.to_string())?;
+    }
+    if next_provider_type == AGGREGATE_API_PROVIDER_CODEX
+        && (protocol_mode_provided || existing_provider_type != next_provider_type)
+    {
+        let normalized_protocol_mode = normalize_protocol_mode(protocol_mode)?;
+        storage
+            .update_aggregate_api_protocol_mode(api_id, Some(normalized_protocol_mode.as_str()))
+            .map_err(|err| err.to_string())?;
+    } else if next_provider_type != AGGREGATE_API_PROVIDER_CODEX
+        && existing.protocol_mode.is_some()
+    {
+        storage
+            .update_aggregate_api_protocol_mode(api_id, None)
             .map_err(|err| err.to_string())?;
     }
     let normalized_supplier_name = normalize_supplier_name(supplier_name)?;

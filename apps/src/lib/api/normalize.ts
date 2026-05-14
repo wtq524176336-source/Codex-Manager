@@ -796,6 +796,8 @@ export function normalizeAggregateApi(item: unknown): AggregateApi | null {
   return {
     id,
     providerType: asString(source.providerType ?? source.provider_type) || "codex",
+    protocolMode:
+      asString(source.protocolMode ?? source.protocol_mode) || null,
     supplierName: asString(source.supplierName ?? source.supplier_name) || null,
     sort: asInteger(source.sort ?? source.priority, 0, 0),
     url: asString(source.url),

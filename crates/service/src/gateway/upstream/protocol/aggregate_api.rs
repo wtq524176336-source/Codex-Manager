@@ -98,12 +98,25 @@ fn build_upstream_url(base_url: &str, effective_path: &str) -> Result<reqwest::U
         .map_or((trimmed_path, None), |(path, query)| (path, Some(query)));
     let suffix = path_part.trim_start_matches('/');
     let base_path = url.path().trim_end_matches('/').to_string();
+    let effective_suffix = if base_path.eq_ignore_ascii_case("/v1")
+        || base_path.to_ascii_lowercase().ends_with("/v1")
+    {
+        if suffix.eq_ignore_ascii_case("v1") {
+            ""
+        } else if suffix.to_ascii_lowercase().starts_with("v1/") {
+            &suffix[3..]
+        } else {
+            suffix
+        }
+    } else {
+        suffix
+    };
     let combined_path = if base_path.is_empty() || base_path == "/" {
-        format!("/{}", suffix)
-    } else if suffix.is_empty() {
+        format!("/{}", effective_suffix)
+    } else if effective_suffix.is_empty() {
         base_path
     } else {
-        format!("{}/{}", base_path, suffix)
+        format!("{}/{}", base_path, effective_suffix)
     };
     url.set_path(combined_path.as_str());
     url.set_query(query_part.filter(|query| !query.trim().is_empty()));
@@ -1159,6 +1172,7 @@ mod bridge_tests {
         AggregateApi {
             id: id.to_string(),
             provider_type: AGGREGATE_API_PROVIDER_CODEX.to_string(),
+            protocol_mode: None,
             supplier_name: None,
             sort,
             url: format!("https://{id}.example.com"),
@@ -1330,6 +1344,7 @@ mod tests {
         AggregateApi {
             id: "agg-path-test".to_string(),
             provider_type: "claude".to_string(),
+            protocol_mode: None,
             supplier_name: Some("test".to_string()),
             sort: 0,
             url: "https://open.bigmodel.cn/api/anthropic".to_string(),
@@ -1388,6 +1403,19 @@ mod tests {
     }
 
     #[test]
+    fn build_upstream_url_deduplicates_terminal_v1_prefix() {
+        let url = build_upstream_url(
+            "https://example.com/openai/v1",
+            "/v1/responses?client_version=1",
+        )
+        .expect("build upstream url");
+        assert_eq!(
+            url.as_str(),
+            "https://example.com/openai/v1/responses?client_version=1"
+        );
+    }
+
+    #[test]
     fn rewrite_body_model_override_replaces_json_model() {
         let body = Bytes::from_static(br#"{"model":"claude-sonnet","messages":[]}"#);
 
@@ -1413,6 +1441,7 @@ mod tests {
                 .insert_aggregate_api(&AggregateApi {
                     id: id.to_string(),
                     provider_type: provider_type.to_string(),
+                    protocol_mode: None,
                     supplier_name: Some(id.to_string()),
                     sort: 0,
                     url: format!("https://{id}.example.com"),

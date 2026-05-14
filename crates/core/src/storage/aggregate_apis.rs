@@ -5,6 +5,7 @@ use super::{now_ts, AggregateApi, Storage};
 const AGGREGATE_API_SELECT_SQL: &str = "SELECT
     id,
     provider_type,
+    protocol_mode,
     supplier_name,
     sort,
     url,
@@ -38,6 +39,7 @@ impl Storage {
             "INSERT OR REPLACE INTO aggregate_apis (
                 id,
                 provider_type,
+                protocol_mode,
                 supplier_name,
                 sort,
                 url,
@@ -51,10 +53,11 @@ impl Storage {
                 last_test_at,
                 last_test_status,
                 last_test_error
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
             (
                 &api.id,
                 &api.provider_type,
+                &api.protocol_mode,
                 &api.supplier_name,
                 api.sort,
                 &api.url,
@@ -214,6 +217,18 @@ impl Storage {
         self.conn.execute(
             "UPDATE aggregate_apis SET provider_type = ?1, updated_at = ?2 WHERE id = ?3",
             (provider_type, now_ts(), api_id),
+        )?;
+        Ok(())
+    }
+
+    pub fn update_aggregate_api_protocol_mode(
+        &self,
+        api_id: &str,
+        protocol_mode: Option<&str>,
+    ) -> Result<()> {
+        self.conn.execute(
+            "UPDATE aggregate_apis SET protocol_mode = ?1, updated_at = ?2 WHERE id = ?3",
+            (protocol_mode, now_ts(), api_id),
         )?;
         Ok(())
     }
@@ -391,6 +406,7 @@ impl Storage {
             "CREATE TABLE IF NOT EXISTS aggregate_apis (
                 id TEXT PRIMARY KEY,
                 provider_type TEXT NOT NULL DEFAULT 'codex',
+                protocol_mode TEXT,
                 supplier_name TEXT,
                 sort INTEGER NOT NULL DEFAULT 0,
                 url TEXT NOT NULL,
@@ -412,6 +428,7 @@ impl Storage {
             [],
         )?;
         self.ensure_column("aggregate_apis", "provider_type", "TEXT")?;
+        self.ensure_column("aggregate_apis", "protocol_mode", "TEXT")?;
         self.ensure_column("aggregate_apis", "supplier_name", "TEXT")?;
         self.ensure_column("aggregate_apis", "sort", "INTEGER DEFAULT 0")?;
         self.ensure_column(
@@ -487,18 +504,19 @@ fn map_aggregate_api_row(row: &Row<'_>) -> Result<AggregateApi> {
     Ok(AggregateApi {
         id: row.get(0)?,
         provider_type: row.get(1)?,
-        supplier_name: row.get(2)?,
-        sort: row.get(3)?,
-        url: row.get(4)?,
-        auth_type: row.get(5)?,
-        auth_params_json: row.get(6)?,
-        action: row.get(7)?,
-        model_override: row.get(8)?,
-        status: row.get(9)?,
-        created_at: row.get(10)?,
-        updated_at: row.get(11)?,
-        last_test_at: row.get(12)?,
-        last_test_status: row.get(13)?,
-        last_test_error: row.get(14)?,
+        protocol_mode: row.get(2)?,
+        supplier_name: row.get(3)?,
+        sort: row.get(4)?,
+        url: row.get(5)?,
+        auth_type: row.get(6)?,
+        auth_params_json: row.get(7)?,
+        action: row.get(8)?,
+        model_override: row.get(9)?,
+        status: row.get(10)?,
+        created_at: row.get(11)?,
+        updated_at: row.get(12)?,
+        last_test_at: row.get(13)?,
+        last_test_status: row.get(14)?,
+        last_test_error: row.get(15)?,
     })
 }
