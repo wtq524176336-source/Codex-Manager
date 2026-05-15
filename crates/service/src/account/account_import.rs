@@ -43,6 +43,8 @@ struct ImportTokenPayload {
     refresh_token: String,
     account_id_hint: Option<String>,
     chatgpt_account_id_hint: Option<String>,
+    chatgpt_user_id_hint: Option<String>,
+    organization_id_hint: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -665,15 +667,42 @@ fn parse_items_from_content(content: &str) -> Result<Vec<Value>, String> {
     if trimmed.starts_with('[') {
         let values: Vec<Value> =
             serde_json::from_str(trimmed).map_err(|err| format!("invalid JSON array: {err}"))?;
-        return Ok(values);
+        let mut out = Vec::new();
+        for value in values {
+            append_import_items(value, &mut out);
+        }
+        return Ok(out);
     }
 
     let mut out = Vec::new();
     let stream = serde_json::Deserializer::from_str(trimmed).into_iter::<Value>();
     for value in stream {
-        out.push(value.map_err(|err| format!("invalid JSON object stream: {err}"))?);
+        append_import_items(
+            value.map_err(|err| format!("invalid JSON object stream: {err}"))?,
+            &mut out,
+        );
     }
     Ok(out)
+}
+
+/// 函数 `append_import_items`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-05-15
+///
+/// # 参数
+/// - value: 参数 value
+/// - out: 参数 out
+///
+/// # 返回
+/// 无
+fn append_import_items(value: Value, out: &mut Vec<Value>) {
+    if let Some(accounts) = value.get("accounts").and_then(Value::as_array) {
+        out.extend(accounts.iter().cloned());
+    } else {
+        out.push(value);
+    }
 }
 
 /// 函数 `import_single_item`
@@ -701,12 +730,14 @@ fn import_single_item(
     let subscription_account_id_hint = extract_untrusted_subscription_account_id(&meta, &payload);
     let claims = parse_id_token_claims(&payload.id_token).ok();
     let token_fingerprint = token_fingerprint(&payload.refresh_token);
-    let subject_account_id = extract_import_subject_account_id(
-        claims.as_ref(),
-        &payload.id_token,
-        &payload.access_token,
-        &payload.refresh_token,
-    );
+    let subject_account_id = clean_value(payload.chatgpt_user_id_hint.clone()).or_else(|| {
+        extract_import_subject_account_id(
+            claims.as_ref(),
+            &payload.id_token,
+            &payload.access_token,
+            &payload.refresh_token,
+        )
+    });
     let token_chatgpt_account_id = claims
         .as_ref()
         .and_then(|c| c.auth.as_ref()?.chatgpt_account_id.clone())
@@ -737,6 +768,7 @@ fn import_single_item(
         meta_workspace_id
             .flatten()
             .or(token_workspace_id)
+            .or_else(|| payload.organization_id_hint.clone())
             .or_else(|| chatgpt_account_id.clone()),
     );
     let fallback_subject_key =
@@ -955,7 +987,10 @@ fn extract_import_subject_account_id(
 /// # 返回
 /// 返回函数执行结果
 fn extract_token_payload(item: &Value) -> Result<ImportTokenPayload, String> {
-    let tokens = item.get("tokens").unwrap_or(item);
+    let tokens = item
+        .get("tokens")
+        .or_else(|| item.get("credentials"))
+        .unwrap_or(item);
     let access_token = required_string_any(
         &[
             (tokens, "access_token"),
@@ -991,12 +1026,34 @@ fn extract_token_payload(item: &Value) -> Result<ImportTokenPayload, String> {
         (item, "chatgpt_account_id"),
         (item, "chatgptAccountId"),
     ]);
+    let chatgpt_user_id_hint = optional_string_any(&[
+        (tokens, "chatgpt_user_id"),
+        (tokens, "chatgptUserId"),
+        (tokens, "user_id"),
+        (tokens, "userId"),
+        (item, "chatgpt_user_id"),
+        (item, "chatgptUserId"),
+        (item, "user_id"),
+        (item, "userId"),
+    ]);
+    let organization_id_hint = optional_string_any(&[
+        (tokens, "organization_id"),
+        (tokens, "organizationId"),
+        (tokens, "org_id"),
+        (tokens, "orgId"),
+        (item, "organization_id"),
+        (item, "organizationId"),
+        (item, "org_id"),
+        (item, "orgId"),
+    ]);
     Ok(ImportTokenPayload {
         access_token,
         id_token,
         refresh_token,
         account_id_hint,
         chatgpt_account_id_hint,
+        chatgpt_user_id_hint,
+        organization_id_hint,
     })
 }
 
@@ -1113,9 +1170,16 @@ fn token_fingerprint(refresh_token: &str) -> String {
 /// 返回函数执行结果
 fn extract_account_meta(item: &Value) -> ImportAccountMeta {
     let meta = item.get("meta").unwrap_or(item);
-    let trusted_scope_hints = item.get("meta").is_some() || item.get("tokens").is_some();
+    let trusted_scope_hints = item.get("meta").is_some()
+        || item.get("tokens").is_some()
+        || item.get("credentials").is_some();
     ImportAccountMeta {
-        label: optional_string_any(&[(meta, "label"), (item, "label")]),
+        label: optional_string_any(&[
+            (meta, "label"),
+            (meta, "name"),
+            (item, "label"),
+            (item, "name"),
+        ]),
         issuer: optional_string_any(&[(meta, "issuer"), (item, "issuer")]),
         group_name: optional_string_any(&[
             (meta, "group_name"),

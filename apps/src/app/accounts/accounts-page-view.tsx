@@ -157,7 +157,8 @@ export interface AccountsPageViewProps {
   isUpdatingProfileAccountId: string | null;
   statusFilterOptions: StatusFilterOption[];
   importFileActionLabel: string;
-  importDirectoryActionLabel: string;
+  importCpaDirectoryActionLabel: string;
+  importSub2ApiDirectoryActionLabel: string;
   exportActionLabel: string;
   exportActionShortcut: string;
   setAddAccountModalOpen: Dispatch<SetStateAction<boolean>>;
@@ -252,7 +253,8 @@ export function AccountsPageView(props: AccountsPageViewProps) {
     isUpdatingProfileAccountId,
     statusFilterOptions,
     importFileActionLabel,
-    importDirectoryActionLabel,
+    importCpaDirectoryActionLabel,
+    importSub2ApiDirectoryActionLabel,
     exportActionLabel,
     exportActionShortcut,
     setAddAccountModalOpen,
@@ -536,8 +538,17 @@ export function AccountsPageView(props: AccountsPageViewProps) {
                     onClick={importByDirectory}
                   >
                     <FolderOpen className="mr-2 h-4 w-4" />
-                    {importDirectoryActionLabel}
-                    <DropdownMenuShortcut>DIR</DropdownMenuShortcut>
+                    {importCpaDirectoryActionLabel}
+                    <DropdownMenuShortcut>CPA</DropdownMenuShortcut>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className="h-9 rounded-lg px-2"
+                    disabled={!isServiceReady}
+                    onClick={importByDirectory}
+                  >
+                    <FolderOpen className="mr-2 h-4 w-4" />
+                    {importSub2ApiDirectoryActionLabel}
+                    <DropdownMenuShortcut>S2A</DropdownMenuShortcut>
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     className="h-9 rounded-lg px-2"

@@ -1,5 +1,5 @@
 use super::{
-    extract_token_payload, import_account_auth_json, import_single_item,
+    extract_token_payload, import_account_auth_json, import_single_item, parse_items_from_content,
     resolve_logical_account_id, ExistingAccountIndex, ImportTokenPayload,
 };
 use crate::account_identity::build_account_storage_id;
@@ -54,6 +54,8 @@ fn payload() -> ImportTokenPayload {
         refresh_token: "refresh".to_string(),
         account_id_hint: None,
         chatgpt_account_id_hint: None,
+        chatgpt_user_id_hint: None,
+        organization_id_hint: None,
     }
 }
 
@@ -197,7 +199,9 @@ fn extract_token_payload_supports_flat_codex_format() {
         "id_token": "id.flat",
         "account_id": "acc-flat",
         "access_token": "access.flat",
-        "refresh_token": "refresh.flat"
+        "refresh_token": "refresh.flat",
+        "chatgpt_user_id": "user-flat",
+        "organization_id": "org-flat"
     });
 
     let payload = extract_token_payload(&value).expect("parse flat payload");
@@ -206,6 +210,8 @@ fn extract_token_payload_supports_flat_codex_format() {
     assert_eq!(payload.refresh_token, "refresh.flat");
     assert_eq!(payload.account_id_hint.as_deref(), Some("acc-flat"));
     assert_eq!(payload.chatgpt_account_id_hint, None);
+    assert_eq!(payload.chatgpt_user_id_hint.as_deref(), Some("user-flat"));
+    assert_eq!(payload.organization_id_hint.as_deref(), Some("org-flat"));
 }
 
 /// 函数 `extract_token_payload_supports_camel_case_fields`
@@ -227,7 +233,9 @@ fn extract_token_payload_supports_camel_case_fields() {
             "accessToken": "access.camel",
             "refreshToken": "refresh.camel",
             "accountId": "acc-camel",
-            "chatgptAccountId": "cgpt-camel"
+            "chatgptAccountId": "cgpt-camel",
+            "chatgptUserId": "user-camel",
+            "organizationId": "org-camel"
         }
     });
 
@@ -240,6 +248,140 @@ fn extract_token_payload_supports_camel_case_fields() {
         payload.chatgpt_account_id_hint.as_deref(),
         Some("cgpt-camel")
     );
+    assert_eq!(
+        payload.chatgpt_user_id_hint.as_deref(),
+        Some("user-camel")
+    );
+    assert_eq!(
+        payload.organization_id_hint.as_deref(),
+        Some("org-camel")
+    );
+}
+
+/// 函数 `extract_token_payload_supports_sub2api_credentials_format`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-05-15
+///
+/// # 参数
+/// 无
+///
+/// # 返回
+/// 无
+#[test]
+fn extract_token_payload_supports_sub2api_credentials_format() {
+    let value = json!({
+        "name": "sub2api@example.com",
+        "platform": "chatgpt",
+        "type": "codex",
+        "credentials": {
+            "access_token": "access.sub2api",
+            "refresh_token": "refresh.sub2api",
+            "chatgpt_account_id": "cgpt-sub2api",
+            "chatgpt_user_id": "user-sub2api",
+            "organization_id": "org-sub2api"
+        }
+    });
+
+    let payload = extract_token_payload(&value).expect("parse sub2api payload");
+    assert_eq!(payload.access_token, "access.sub2api");
+    assert_eq!(payload.id_token, "");
+    assert_eq!(payload.refresh_token, "refresh.sub2api");
+    assert_eq!(
+        payload.chatgpt_account_id_hint.as_deref(),
+        Some("cgpt-sub2api")
+    );
+    assert_eq!(
+        payload.chatgpt_user_id_hint.as_deref(),
+        Some("user-sub2api")
+    );
+    assert_eq!(
+        payload.organization_id_hint.as_deref(),
+        Some("org-sub2api")
+    );
+}
+
+/// 函数 `parse_items_from_content_supports_sub2api_accounts_wrapper`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-05-15
+///
+/// # 参数
+/// 无
+///
+/// # 返回
+/// 无
+#[test]
+fn parse_items_from_content_supports_sub2api_accounts_wrapper() {
+    let content = json!({
+        "proxies": [],
+        "accounts": [
+            {
+                "name": "Sub2API Account",
+                "platform": "chatgpt",
+                "type": "codex",
+                "credentials": {
+                    "access_token": "access.sub2api",
+                    "refresh_token": "refresh.sub2api",
+                    "chatgpt_account_id": "cgpt-sub2api",
+                    "chatgpt_user_id": "user-sub2api",
+                    "organization_id": "org-sub2api"
+                }
+            }
+        ]
+    })
+    .to_string();
+
+    let items = parse_items_from_content(&content).expect("parse sub2api content");
+    assert_eq!(items.len(), 1);
+    assert_eq!(
+        items[0].get("name").and_then(|value| value.as_str()),
+        Some("Sub2API Account")
+    );
+
+    let payload = extract_token_payload(&items[0]).expect("parse flattened sub2api payload");
+    assert_eq!(payload.access_token, "access.sub2api");
+    assert_eq!(
+        payload.chatgpt_account_id_hint.as_deref(),
+        Some("cgpt-sub2api")
+    );
+}
+
+/// 函数 `parse_items_from_content_supports_cpa_flat_object`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-05-15
+///
+/// # 参数
+/// 无
+///
+/// # 返回
+/// 无
+#[test]
+fn parse_items_from_content_supports_cpa_flat_object() {
+    let content = json!({
+        "access_token": "access.cpa",
+        "account_id": "account-cpa",
+        "email": "cpa@example.com",
+        "expired": false,
+        "id_token": "id.cpa",
+        "last_refresh": 1770000000,
+        "refresh_token": "refresh.cpa",
+        "type": "codex"
+    })
+    .to_string();
+
+    let items = parse_items_from_content(&content).expect("parse cpa content");
+    assert_eq!(items.len(), 1);
+
+    let payload = extract_token_payload(&items[0]).expect("parse cpa payload");
+    assert_eq!(payload.access_token, "access.cpa");
+    assert_eq!(payload.id_token, "id.cpa");
+    assert_eq!(payload.refresh_token, "refresh.cpa");
+    assert_eq!(payload.account_id_hint.as_deref(), Some("account-cpa"));
 }
 
 /// 函数 `extract_token_payload_allows_missing_id_and_refresh_tokens`
@@ -714,6 +856,64 @@ fn import_single_item_allows_missing_id_and_refresh_tokens() {
     assert_eq!(token.access_token, "access.only");
     assert_eq!(token.id_token, "");
     assert_eq!(token.refresh_token, "");
+}
+
+/// 函数 `import_single_item_supports_sub2api_credentials_account`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-05-15
+///
+/// # 参数
+/// 无
+///
+/// # 返回
+/// 无
+#[test]
+fn import_single_item_supports_sub2api_credentials_account() {
+    let storage = Storage::open_in_memory().expect("open in memory");
+    storage.init().expect("init");
+    let mut idx = ExistingAccountIndex::build(&storage).expect("build index");
+    let item = json!({
+        "name": "Sub2API Account",
+        "platform": "chatgpt",
+        "type": "codex",
+        "credentials": {
+            "access_token": "access.sub2api",
+            "refresh_token": "refresh.sub2api",
+            "chatgpt_account_id": "cgpt-sub2api",
+            "chatgpt_user_id": "user-sub2api",
+            "organization_id": "org-sub2api"
+        }
+    });
+
+    let created = import_single_item(&storage, &mut idx, &item, 1).expect("import item");
+    assert!(created);
+
+    let accounts = storage.list_accounts().expect("list accounts");
+    assert_eq!(accounts.len(), 1);
+    assert_eq!(accounts[0].label, "Sub2API Account");
+    assert_eq!(
+        accounts[0].id,
+        build_account_storage_id(
+            "user-sub2api",
+            Some("cgpt-sub2api"),
+            Some("org-sub2api"),
+            None
+        )
+    );
+    assert_eq!(
+        accounts[0].chatgpt_account_id.as_deref(),
+        Some("cgpt-sub2api")
+    );
+    assert_eq!(accounts[0].workspace_id.as_deref(), Some("org-sub2api"));
+
+    let token = storage
+        .find_token_by_account_id(&accounts[0].id)
+        .expect("find token")
+        .expect("token");
+    assert_eq!(token.access_token, "access.sub2api");
+    assert_eq!(token.refresh_token, "refresh.sub2api");
 }
 
 /// 函数 `import_account_auth_json_keeps_valid_items_when_one_content_is_invalid`

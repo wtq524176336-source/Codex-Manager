@@ -113,9 +113,12 @@ export default function AccountsPage() {
   const importFileActionLabel = isDesktopRuntime
     ? t("按文件导入")
     : t("选择文件导入");
-  const importDirectoryActionLabel = isDesktopRuntime
-    ? t("按文件夹导入")
-    : t("选择目录导入");
+  const importCpaDirectoryActionLabel = isDesktopRuntime
+    ? t("导入 CPA 格式文件夹")
+    : t("选择 CPA 格式目录");
+  const importSub2ApiDirectoryActionLabel = isDesktopRuntime
+    ? t("导入 sub2api 格式文件夹")
+    : t("选择 sub2api 格式目录");
   const exportActionLabel =
     !isDesktopRuntime && canUseBrowserDownloadExport
       ? t("导出到浏览器")
@@ -568,7 +571,8 @@ const toggleCleanupStatus = (rawStatus: string) => {
       isUpdatingProfileAccountId={isUpdatingProfileAccountId}
       statusFilterOptions={statusFilterOptions}
       importFileActionLabel={importFileActionLabel}
-      importDirectoryActionLabel={importDirectoryActionLabel}
+      importCpaDirectoryActionLabel={importCpaDirectoryActionLabel}
+      importSub2ApiDirectoryActionLabel={importSub2ApiDirectoryActionLabel}
       exportActionLabel={exportActionLabel}
       exportActionShortcut={exportActionShortcut}
       setAddAccountModalOpen={setAddAccountModalOpen}
