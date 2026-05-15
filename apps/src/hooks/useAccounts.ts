@@ -128,16 +128,33 @@ function buildUsageListFingerprint(usages: AccountUsage[]): string {
     .join("|");
 }
 
-function formatRefreshAllRtItem(item: RefreshAllRtResult["results"][number] | undefined): string {
+function formatRefreshAllRtReason(
+  message: string,
+  t: (message: string, values?: Record<string, string | number>) => string,
+): string {
+  const normalized = message.trim().toLowerCase();
+  if (normalized === "missing token") {
+    return t("缺少 token");
+  }
+  if (normalized === "missing refresh_token") {
+    return t("缺少 refresh_token");
+  }
+  return message.trim() || t("未知原因");
+}
+
+function formatRefreshAllRtItem(
+  item: RefreshAllRtResult["results"][number] | undefined,
+  t: (message: string, values?: Record<string, string | number>) => string,
+): string {
   if (!item) {
     return "";
   }
   const accountName = String(item.accountName || item.accountId || "").trim();
-  const message = String(item.message || "").trim();
-  if (accountName && message) {
-    return `${accountName} - ${message}`;
+  const reason = formatRefreshAllRtReason(String(item.message || ""), t);
+  if (accountName) {
+    return `${t("邮箱")}：${accountName}，${t("原因")}：${reason}`;
   }
-  return accountName || message;
+  return `${t("原因")}：${reason}`;
 }
 
 function isSkippedRefreshAllRtItem(item: RefreshAllRtResult["results"][number]): boolean {
@@ -155,13 +172,15 @@ function buildRefreshAllRtNotice(
   const results = result?.results || [];
   const firstFailureText = formatRefreshAllRtItem(
     results.find((item) => !item.ok && !isSkippedRefreshAllRtItem(item)),
+    t,
   );
   const firstSkippedText = formatRefreshAllRtItem(
     results.find((item) => !item.ok && isSkippedRefreshAllRtItem(item)),
+    t,
   );
   const details = [
-    firstFailureText ? `${t("首个失败")}：${firstFailureText}` : "",
-    firstSkippedText ? `${t("首个跳过")}：${firstSkippedText}` : "",
+    firstFailureText ? `${t("首个失败账号")}：${firstFailureText}` : "",
+    firstSkippedText ? `${t("首个跳过账号")}：${firstSkippedText}` : "",
   ].filter(Boolean);
   const summary = t("AT/RT 刷新完成：成功{success}个，失败{failed}个，跳过{skipped}个", {
     success: succeeded,

@@ -4,7 +4,9 @@ use codexmanager_core::auth::{
 };
 use codexmanager_core::rpc::types::LoginStartResult;
 use codexmanager_core::storage::{now_ts, Account, Storage, Token};
+use crossbeam_channel::unbounded;
 use serde::Serialize;
+use std::thread;
 
 use crate::account_identity::{
     build_account_storage_id, build_fallback_subject_key, clean_value,
@@ -21,6 +23,7 @@ const CURRENT_AUTH_ACCOUNT_ID_KEY: &str = "auth.current_account_id";
 const CURRENT_AUTH_MODE_KEY: &str = "auth.current_auth_mode";
 const AUTH_MODE_CHATGPT: &str = "chatgpt";
 const AUTH_MODE_CHATGPT_AUTH_TOKENS: &str = "chatgptAuthTokens";
+const AUTH_TOKEN_REFRESH_WORKERS: usize = 8;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -76,6 +79,22 @@ pub(crate) struct ChatgptAuthTokensRefreshAllResponse {
     pub(crate) failed: usize,
     pub(crate) skipped: usize,
     pub(crate) results: Vec<ChatgptAuthTokensRefreshAllItem>,
+}
+
+#[derive(Debug, Clone)]
+struct ChatgptAuthTokensRefreshTask {
+    index: usize,
+    account_id: String,
+    account_name: String,
+    issuer: String,
+    client_id: String,
+    token: Token,
+}
+
+#[derive(Debug)]
+struct IndexedChatgptAuthTokensRefreshAllItem {
+    index: usize,
+    item: ChatgptAuthTokensRefreshAllItem,
 }
 
 #[derive(Debug, Clone)]
@@ -389,72 +408,70 @@ pub(crate) fn refresh_all_chatgpt_auth_tokens(
     let default_issuer =
         std::env::var("CODEXMANAGER_ISSUER").unwrap_or_else(|_| DEFAULT_ISSUER.to_string());
 
-    let mut results = Vec::with_capacity(accounts.len());
-    let mut requested = 0usize;
-    let mut succeeded = 0usize;
-    let mut failed = 0usize;
+    let mut indexed_results = Vec::with_capacity(accounts.len());
+    let mut tasks = Vec::new();
     let mut skipped = 0usize;
 
-    for account in accounts {
+    for (index, account) in accounts.into_iter().enumerate() {
         let account_name = account.label.clone();
-        let Some(mut token) = storage
+        let Some(token) = storage
             .find_token_by_account_id(&account.id)
             .map_err(|err| err.to_string())?
         else {
             skipped = skipped.saturating_add(1);
-            results.push(ChatgptAuthTokensRefreshAllItem {
-                account_id: account.id,
-                account_name,
-                ok: false,
-                message: Some("missing token".to_string()),
+            indexed_results.push(IndexedChatgptAuthTokensRefreshAllItem {
+                index,
+                item: ChatgptAuthTokensRefreshAllItem {
+                    account_id: account.id,
+                    account_name,
+                    ok: false,
+                    message: Some("missing token".to_string()),
+                },
             });
             continue;
         };
         if token.refresh_token.trim().is_empty() {
             skipped = skipped.saturating_add(1);
-            results.push(ChatgptAuthTokensRefreshAllItem {
-                account_id: account.id,
-                account_name,
-                ok: false,
-                message: Some("missing refresh_token".to_string()),
+            indexed_results.push(IndexedChatgptAuthTokensRefreshAllItem {
+                index,
+                item: ChatgptAuthTokensRefreshAllItem {
+                    account_id: account.id,
+                    account_name,
+                    ok: false,
+                    message: Some("missing refresh_token".to_string()),
+                },
             });
             continue;
         }
 
-        requested = requested.saturating_add(1);
         let issuer = if account.issuer.trim().is_empty() {
-            default_issuer.as_str()
+            default_issuer.clone()
         } else {
-            account.issuer.as_str()
+            account.issuer.clone()
         };
-        match refresh_and_persist_access_token(
-            &storage,
-            &mut token,
+        tasks.push(ChatgptAuthTokensRefreshTask {
+            index,
+            account_id: account.id,
+            account_name,
             issuer,
-            &client_id,
-            token_refresh_ahead_secs(),
-        ) {
-            Ok(()) => {
-                succeeded = succeeded.saturating_add(1);
-                results.push(ChatgptAuthTokensRefreshAllItem {
-                    account_id: account.id,
-                    account_name,
-                    ok: true,
-                    message: None,
-                });
-            }
-            Err(err) => {
-                failed = failed.saturating_add(1);
-                let _ = mark_account_unavailable_for_auth_error(&storage, &account.id, &err);
-                results.push(ChatgptAuthTokensRefreshAllItem {
-                    account_id: account.id,
-                    account_name,
-                    ok: false,
-                    message: Some(err),
-                });
-            }
-        }
+            client_id: client_id.clone(),
+            token,
+        });
     }
+
+    indexed_results.extend(run_refresh_all_chatgpt_auth_token_tasks(tasks)?);
+    indexed_results.sort_by_key(|item| item.index);
+
+    let requested = indexed_results.len().saturating_sub(skipped);
+    let succeeded = indexed_results
+        .iter()
+        .filter(|result| result.item.ok)
+        .count();
+    let failed = requested.saturating_sub(succeeded);
+    let results = indexed_results
+        .into_iter()
+        .map(|result| result.item)
+        .collect();
 
     Ok(ChatgptAuthTokensRefreshAllResponse {
         requested,
@@ -463,6 +480,98 @@ pub(crate) fn refresh_all_chatgpt_auth_tokens(
         skipped,
         results,
     })
+}
+
+fn run_refresh_all_chatgpt_auth_token_tasks(
+    tasks: Vec<ChatgptAuthTokensRefreshTask>,
+) -> Result<Vec<IndexedChatgptAuthTokensRefreshAllItem>, String> {
+    let total = tasks.len();
+    if total == 0 {
+        return Ok(Vec::new());
+    }
+
+    let worker_count = AUTH_TOKEN_REFRESH_WORKERS.min(total).max(1);
+    if worker_count == 1 {
+        let storage = open_storage().ok_or_else(|| "storage unavailable".to_string())?;
+        return Ok(tasks
+            .into_iter()
+            .map(|task| run_refresh_all_chatgpt_auth_token_task(&storage, task))
+            .collect());
+    }
+
+    let (sender, receiver) = unbounded::<ChatgptAuthTokensRefreshTask>();
+    for task in tasks {
+        sender
+            .send(task)
+            .map_err(|_| "enqueue auth token refresh task failed".to_string())?;
+    }
+    drop(sender);
+
+    let (result_sender, result_receiver) = unbounded::<IndexedChatgptAuthTokensRefreshAllItem>();
+    thread::scope(|scope| -> Result<(), String> {
+        let mut handles = Vec::with_capacity(worker_count);
+        for worker_index in 0..worker_count {
+            let receiver = receiver.clone();
+            let result_sender = result_sender.clone();
+            handles.push(scope.spawn(move || {
+                let storage = open_storage().ok_or_else(|| {
+                    format!("auth token refresh worker {worker_index} storage unavailable")
+                })?;
+                while let Ok(task) = receiver.recv() {
+                    result_sender
+                        .send(run_refresh_all_chatgpt_auth_token_task(&storage, task))
+                        .map_err(|_| "send auth token refresh result failed".to_string())?;
+                }
+                Ok::<(), String>(())
+            }));
+        }
+        drop(result_sender);
+
+        for handle in handles {
+            match handle.join() {
+                Ok(Ok(())) => {}
+                Ok(Err(err)) => return Err(err),
+                Err(_) => return Err("auth token refresh worker panicked".to_string()),
+            }
+        }
+        Ok(())
+    })?;
+
+    Ok(result_receiver.try_iter().collect())
+}
+
+fn run_refresh_all_chatgpt_auth_token_task(
+    storage: &Storage,
+    mut task: ChatgptAuthTokensRefreshTask,
+) -> IndexedChatgptAuthTokensRefreshAllItem {
+    let result = match refresh_and_persist_access_token(
+        storage,
+        &mut task.token,
+        &task.issuer,
+        &task.client_id,
+        token_refresh_ahead_secs(),
+    ) {
+        Ok(()) => ChatgptAuthTokensRefreshAllItem {
+            account_id: task.account_id,
+            account_name: task.account_name,
+            ok: true,
+            message: None,
+        },
+        Err(err) => {
+            let _ = mark_account_unavailable_for_auth_error(storage, &task.account_id, &err);
+            ChatgptAuthTokensRefreshAllItem {
+                account_id: task.account_id,
+                account_name: task.account_name,
+                ok: false,
+                message: Some(err),
+            }
+        }
+    };
+
+    IndexedChatgptAuthTokensRefreshAllItem {
+        index: task.index,
+        item: result,
+    }
 }
 
 /// 函数 `logout_current_account`

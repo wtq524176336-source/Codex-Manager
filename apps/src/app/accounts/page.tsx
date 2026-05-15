@@ -147,27 +147,42 @@ export default function AccountsPage() {
     });
   }, [accounts, planFilter, search, statusFilter]);
 
+  const statusCountAccounts = useMemo(() => {
+    return accounts.filter((account) => {
+      const matchSearch =
+        !search ||
+        account.name.toLowerCase().includes(search.toLowerCase()) ||
+        account.id.toLowerCase().includes(search.toLowerCase());
+      const matchPlan =
+        planFilter === "all" || normalizeAccountPlanKey(account) === planFilter;
+      return matchSearch && matchPlan;
+    });
+  }, [accounts, planFilter, search]);
+
   const statusFilterOptions = useMemo(
     () => [
-      { id: "all" as const, label: `${t("全部")} (${accounts.length})` },
+      {
+        id: "all" as const,
+        label: `${t("全部")} (${statusCountAccounts.length})`,
+      },
       {
         id: "available" as const,
-        label: `${t("正常")} (${accounts.filter((account) => account.isAvailable).length})`,
+        label: `${t("正常")} (${statusCountAccounts.filter((account) => account.isAvailable).length})`,
       },
       {
         id: "low_quota" as const,
-        label: `${t("低配额")} (${accounts.filter((account) => account.isLowQuota).length})`,
+        label: `${t("低配额")} (${statusCountAccounts.filter((account) => account.isLowQuota).length})`,
       },
       {
         id: "limited" as const,
-        label: `${t("限流")} (${accounts.filter((account) => isLimitedAccount(account)).length})`,
+        label: `${t("限流")} (${statusCountAccounts.filter((account) => isLimitedAccount(account)).length})`,
       },
       {
         id: "banned" as const,
-        label: `${t("封禁")} (${accounts.filter((account) => isBannedAccount(account)).length})`,
+        label: `${t("封禁")} (${statusCountAccounts.filter((account) => isBannedAccount(account)).length})`,
       },
     ],
-    [accounts, t],
+    [statusCountAccounts, t],
   );
 
   const cleanupStatusCounts = useMemo(() => {
