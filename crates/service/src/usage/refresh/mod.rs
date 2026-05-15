@@ -480,6 +480,11 @@ fn refresh_usage_for_token(
     let mut current = token.clone();
     let mut resolved_workspace_id = workspace_id.map(|v| v.to_string());
     let (derived_chatgpt_id, derived_workspace_id) = derive_account_meta(&current);
+    let subscription_account_id_hint = storage
+        .find_account_subscription_hint(&current.account_id)
+        .ok()
+        .flatten()
+        .map(|hint| hint.subscription_account_id);
 
     if resolved_workspace_id.is_none() {
         resolved_workspace_id = derived_workspace_id
@@ -505,8 +510,11 @@ fn refresh_usage_for_token(
     }
 
     let resolved_workspace_id = clean_header_value(resolved_workspace_id);
-    let resolved_subscription_account_id =
-        clean_header_value(derived_chatgpt_id.or_else(|| resolved_workspace_id.clone()));
+    let resolved_subscription_account_id = clean_header_value(
+        derived_chatgpt_id
+            .or_else(|| subscription_account_id_hint.clone())
+            .or_else(|| resolved_workspace_id.clone()),
+    );
     let bearer = current.access_token.clone();
 
     match refresh_account_snapshot(
@@ -548,8 +556,11 @@ fn refresh_usage_for_token(
             );
             let refreshed_workspace_id =
                 clean_header_value(refreshed_workspace_id.or_else(|| refreshed_chatgpt_id.clone()));
-            let refreshed_subscription_account_id =
-                clean_header_value(refreshed_chatgpt_id.or_else(|| refreshed_workspace_id.clone()));
+            let refreshed_subscription_account_id = clean_header_value(
+                refreshed_chatgpt_id
+                    .or_else(|| subscription_account_id_hint.clone())
+                    .or_else(|| refreshed_workspace_id.clone()),
+            );
             let bearer = current.access_token.clone();
             match refresh_account_snapshot(
                 storage,
@@ -582,17 +593,27 @@ fn refresh_account_snapshot(
     subscription_account_id: Option<&str>,
 ) -> Result<UsageAvailabilityStatus, String> {
     if let Some(subscription_account_id) = subscription_account_id {
-        let subscription =
-            fetch_account_subscription(base_url, bearer, subscription_account_id, workspace_id)?;
-        storage
-            .upsert_account_subscription(
-                account_id,
-                subscription.has_subscription,
-                subscription.plan_type.as_deref(),
-                subscription.expires_at,
-                subscription.renews_at,
-            )
-            .map_err(|err| format!("store account subscription failed: {err}"))?;
+        match fetch_account_subscription(base_url, bearer, subscription_account_id, workspace_id) {
+            Ok(subscription) => {
+                storage
+                    .upsert_account_subscription(
+                        account_id,
+                        subscription.has_subscription,
+                        subscription.plan_type.as_deref(),
+                        subscription.expires_at,
+                        subscription.renews_at,
+                    )
+                    .map_err(|err| format!("store account subscription failed: {err}"))?;
+            }
+            Err(err) => {
+                // subscription 只补充付费计划信息；失败时继续写入真正的额度快照。
+                log::warn!(
+                    "account subscription refresh failed; continuing usage refresh: account_id={} err={}",
+                    account_id,
+                    err
+                );
+            }
+        }
     }
 
     let value = fetch_usage_snapshot(base_url, bearer, workspace_id)?;

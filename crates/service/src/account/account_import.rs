@@ -698,6 +698,7 @@ fn import_single_item(
 ) -> Result<bool, String> {
     let payload = extract_token_payload(&item)?;
     let meta = extract_account_meta(item);
+    let subscription_account_id_hint = extract_untrusted_subscription_account_id(&meta, &payload);
     let claims = parse_id_token_claims(&payload.id_token).ok();
     let token_fingerprint = token_fingerprint(&payload.refresh_token);
     let subject_account_id = extract_import_subject_account_id(
@@ -877,6 +878,9 @@ fn import_single_item(
     });
     storage
         .upsert_account_metadata(&account_id, merged_note.as_deref(), merged_tags.as_deref())
+        .map_err(|e| e.to_string())?;
+    storage
+        .upsert_account_subscription_hint(&account_id, subscription_account_id_hint.as_deref())
         .map_err(|e| e.to_string())?;
     let token = Token {
         account_id: account_id.clone(),
@@ -1135,6 +1139,32 @@ fn extract_account_meta(item: &Value) -> ImportAccountMeta {
         ]),
         trusted_scope_hints,
     }
+}
+
+/// 函数 `extract_untrusted_subscription_account_id`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-05-15
+///
+/// # 参数
+/// - meta: 参数 meta
+/// - payload: 参数 payload
+///
+/// # 返回
+/// 返回函数执行结果
+fn extract_untrusted_subscription_account_id(
+    meta: &ImportAccountMeta,
+    payload: &ImportTokenPayload,
+) -> Option<String> {
+    if meta.trusted_scope_hints {
+        return None;
+    }
+    clean_value(
+        meta.chatgpt_account_id
+            .clone()
+            .or_else(|| payload.chatgpt_account_id_hint.clone()),
+    )
 }
 
 /// 函数 `required_string`
