@@ -1,10 +1,12 @@
 use codexmanager_core::storage::{now_ts, Account, Event, RequestLog, Storage, Token};
+use crossbeam_channel::unbounded;
 use reqwest::blocking::Client;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::StatusCode;
 use serde::Serialize;
 use serde_json::json;
 use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -20,6 +22,7 @@ const WARMUP_UPSTREAM_URL: &str = "https://chatgpt.com/backend-api/codex/respons
 const DEFAULT_WARMUP_MODEL: &str = "gpt-5.3-codex";
 const WARMUP_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const WARMUP_TOTAL_TIMEOUT: Duration = Duration::from_secs(90);
+const ACCOUNT_WARMUP_WORKERS: usize = 8;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -37,6 +40,20 @@ pub(crate) struct AccountWarmupItemResult {
     pub(crate) account_name: String,
     pub(crate) ok: bool,
     pub(crate) message: String,
+}
+
+#[derive(Debug, Clone)]
+struct AccountWarmupTask {
+    index: usize,
+    account: Account,
+    model_slug: String,
+    message: String,
+}
+
+#[derive(Debug)]
+struct IndexedAccountWarmupItemResult {
+    index: usize,
+    item: AccountWarmupItemResult,
 }
 
 /// 函数 `warmup_accounts`
@@ -95,22 +112,23 @@ pub(crate) fn warmup_accounts(
             });
         }
     };
-    let mut results = Vec::with_capacity(accounts.len());
-    let mut succeeded = 0usize;
-
-    for account in accounts.drain(..) {
-        let item = warmup_single_account_isolated(
-            &storage,
-            &client,
+    let tasks = accounts
+        .drain(..)
+        .enumerate()
+        .map(|(index, account)| AccountWarmupTask {
+            index,
             account,
-            warmup_model.as_str(),
-            warmup_message.as_str(),
-        );
-        if item.ok {
-            succeeded += 1;
-        }
-        results.push(item);
-    }
+            model_slug: warmup_model.clone(),
+            message: warmup_message.clone(),
+        })
+        .collect::<Vec<_>>();
+    let mut indexed_results = run_warmup_account_tasks(client, tasks)?;
+    indexed_results.sort_by_key(|result| result.index);
+    let results = indexed_results
+        .into_iter()
+        .map(|result| result.item)
+        .collect::<Vec<_>>();
+    let succeeded = results.iter().filter(|item| item.ok).count();
 
     Ok(AccountWarmupResult {
         requested: results.len(),
@@ -118,6 +136,83 @@ pub(crate) fn warmup_accounts(
         failed: results.len().saturating_sub(succeeded),
         results,
     })
+}
+
+fn run_warmup_account_tasks(
+    client: Client,
+    tasks: Vec<AccountWarmupTask>,
+) -> Result<Vec<IndexedAccountWarmupItemResult>, String> {
+    let total = tasks.len();
+    if total == 0 {
+        return Ok(Vec::new());
+    }
+
+    let worker_count = ACCOUNT_WARMUP_WORKERS.min(total).max(1);
+    if worker_count == 1 {
+        let storage = open_storage().ok_or_else(|| "storage unavailable".to_string())?;
+        return Ok(tasks
+            .into_iter()
+            .map(|task| run_warmup_account_task(&storage, &client, task))
+            .collect());
+    }
+
+    let (sender, receiver) = unbounded::<AccountWarmupTask>();
+    for task in tasks {
+        sender
+            .send(task)
+            .map_err(|_| "enqueue account warmup task failed".to_string())?;
+    }
+    drop(sender);
+
+    let (result_sender, result_receiver) = unbounded::<IndexedAccountWarmupItemResult>();
+    thread::scope(|scope| -> Result<(), String> {
+        let mut handles = Vec::with_capacity(worker_count);
+        for worker_index in 0..worker_count {
+            let client = client.clone();
+            let receiver = receiver.clone();
+            let result_sender = result_sender.clone();
+            handles.push(scope.spawn(move || {
+                let storage = open_storage().ok_or_else(|| {
+                    format!("account warmup worker {worker_index} storage unavailable")
+                })?;
+                while let Ok(task) = receiver.recv() {
+                    result_sender
+                        .send(run_warmup_account_task(&storage, &client, task))
+                        .map_err(|_| "send account warmup result failed".to_string())?;
+                }
+                Ok::<(), String>(())
+            }));
+        }
+        drop(result_sender);
+
+        for handle in handles {
+            match handle.join() {
+                Ok(Ok(())) => {}
+                Ok(Err(err)) => return Err(err),
+                Err(_) => return Err("account warmup worker panicked".to_string()),
+            }
+        }
+        Ok(())
+    })?;
+
+    Ok(result_receiver.try_iter().collect())
+}
+
+fn run_warmup_account_task(
+    storage: &Storage,
+    client: &Client,
+    task: AccountWarmupTask,
+) -> IndexedAccountWarmupItemResult {
+    IndexedAccountWarmupItemResult {
+        index: task.index,
+        item: warmup_single_account_isolated(
+            storage,
+            client,
+            task.account,
+            task.model_slug.as_str(),
+            task.message.as_str(),
+        ),
+    }
 }
 
 fn warmup_single_account_isolated(

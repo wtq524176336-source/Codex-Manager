@@ -36,6 +36,9 @@ fn rpc_io_timeout(method: &str, params: Option<&serde_json::Value>) -> Duration 
     if method == "account/chatgptAuthTokens/refreshAll" {
         return RPC_BULK_USAGE_REFRESH_IO_TIMEOUT;
     }
+    if method == "account/warmup" {
+        return RPC_BULK_USAGE_REFRESH_IO_TIMEOUT;
+    }
 
     RPC_DEFAULT_IO_TIMEOUT
 }
@@ -240,6 +243,23 @@ mod tests {
     #[test]
     fn bulk_token_refresh_uses_extended_timeout() {
         let timeout = rpc_io_timeout("account/chatgptAuthTokens/refreshAll", None);
+        assert_eq!(timeout, RPC_BULK_USAGE_REFRESH_IO_TIMEOUT);
+    }
+
+    /// 函数 `account_warmup_uses_extended_timeout`
+    ///
+    /// 作者: gaohongshun
+    ///
+    /// 时间: 2026-05-16
+    ///
+    /// # 参数
+    /// 无
+    ///
+    /// # 返回
+    /// 无
+    #[test]
+    fn account_warmup_uses_extended_timeout() {
+        let timeout = rpc_io_timeout("account/warmup", None);
         assert_eq!(timeout, RPC_BULK_USAGE_REFRESH_IO_TIMEOUT);
     }
 
