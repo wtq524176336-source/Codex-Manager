@@ -2518,11 +2518,11 @@ function LogsPageContent() {
           if (!open) setCompactDetailLog(null);
         }}
       >
-        <DialogContent className="glass-card w-[calc(100vw-2rem)] max-w-[calc(100vw-2rem)] border-none p-0 sm:max-w-[min(1200px,calc(100vw-3rem))] lg:max-w-[min(1320px,calc(100vw-4rem))]">
-          <div className="flex max-h-[88vh] flex-col">
-            <DialogHeader className="border-b border-border/60 px-6 py-5">
-              <DialogTitle>{t("压缩后请求")}</DialogTitle>
-              <DialogDescription>
+        <DialogContent className="glass-card w-[calc(100vw-2rem)] max-w-[calc(100vw-2rem)] overflow-hidden border-none p-0 sm:max-w-[min(1200px,calc(100vw-3rem))] lg:max-w-[min(1320px,calc(100vw-4rem))]">
+          <div className="flex max-h-[88vh] min-w-0 flex-col overflow-hidden">
+            <DialogHeader className="min-w-0 shrink-0 border-b border-border/60 px-6 py-5 pr-12">
+              <DialogTitle className="truncate">{t("压缩后请求")}</DialogTitle>
+              <DialogDescription className="truncate">
                 {compactDetailLog
                   ? `${formatTsFromSeconds(compactDetailLog.createdAt, t("未知时间"))} · ${
                       compactDetailLog.model || "-"
@@ -2530,12 +2530,12 @@ function LogsPageContent() {
                   : ""}
               </DialogDescription>
             </DialogHeader>
-            <div className="min-h-0 flex-1 overflow-auto px-6 py-5">
-              <pre className="max-h-[68vh] overflow-auto whitespace-pre rounded-md border border-border/70 bg-muted/40 p-4 font-mono text-xs leading-6 text-foreground">
+            <div className="min-h-0 min-w-0 flex-1 overflow-hidden px-6 py-5">
+              <pre className="max-h-[68vh] w-full min-w-0 max-w-full overflow-auto whitespace-pre-wrap break-all rounded-md border border-border/70 bg-muted/40 p-4 font-mono text-xs leading-6 text-foreground [overflow-wrap:anywhere]">
                 {compactDetailText || t("暂无压缩内容")}
               </pre>
             </div>
-            <div className="flex items-center justify-end gap-2 border-t border-border/60 px-6 py-4">
+            <div className="flex shrink-0 items-center justify-end gap-2 border-t border-border/60 px-6 py-4">
               <Button
                 type="button"
                 variant="outline"
