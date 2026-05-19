@@ -814,7 +814,7 @@ export function AccountsPageView(props: AccountsPageViewProps) {
           }
         }}
       >
-        <DialogContent className="glass-card border-border/70 sm:max-w-[640px]">
+        <DialogContent className="glass-card w-[min(900px,calc(100vw-2rem))] border-border/70 sm:max-w-[900px]">
           <DialogHeader>
             <DialogTitle>{t("删除 AT/RT 刷新失败账号？")}</DialogTitle>
             <DialogDescription>
@@ -839,14 +839,14 @@ export function AccountsPageView(props: AccountsPageViewProps) {
                 {rtFailureDeleteSelectedCount}/{rtFailureDeleteItems.length}
               </div>
             </div>
-            <div className="max-h-[320px] space-y-2 overflow-y-auto pr-1">
+            <div className="max-h-[min(56vh,460px)] min-h-0 space-y-2 overflow-y-auto pr-1">
               {rtFailureDeleteItems.map((item) => {
                 const checked = rtFailureDeleteSelectedIds.includes(item.accountId);
                 return (
                   <div
                     key={item.accountId}
                     className={cn(
-                      "flex items-start gap-3 rounded-xl border px-3 py-3 transition-colors",
+                      "grid grid-cols-[auto_minmax(0,1fr)] gap-3 rounded-xl border px-3 py-3 transition-colors",
                       checked
                         ? "border-destructive/40 bg-destructive/10"
                         : "border-border/70 bg-background/45",
@@ -865,10 +865,10 @@ export function AccountsPageView(props: AccountsPageViewProps) {
                       <div className="truncate text-sm font-semibold">
                         {item.accountName}
                       </div>
-                      <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
+                      <div className="mt-0.5 break-all font-mono text-[11px] leading-relaxed text-muted-foreground">
                         {item.accountId}
                       </div>
-                      <div className="mt-2 break-words rounded-lg bg-muted/40 px-2 py-1 text-xs text-muted-foreground">
+                      <div className="mt-2 whitespace-pre-wrap break-words rounded-lg bg-muted/40 px-2 py-1 text-xs leading-relaxed text-muted-foreground">
                         {item.reason}
                       </div>
                     </div>
