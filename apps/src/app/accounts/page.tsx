@@ -17,6 +17,7 @@ import {
   type StatusFilter,
 } from "@/app/accounts/accounts-page-helpers";
 import { AccountsPageView } from "@/app/accounts/accounts-page-view";
+import type { AddAccountModalMode } from "@/components/modals/add-account-modal";
 import { accountClient } from "@/lib/api/account-client";
 import { isBannedAccount, isLimitedAccount } from "@/lib/utils/usage";
 import type { Account } from "@/types";
@@ -90,6 +91,8 @@ export default function AccountsPage() {
   const [page, setPage] = useState(1);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [addAccountModalOpen, setAddAccountModalOpen] = useState(false);
+  const [addAccountModalMode, setAddAccountModalMode] =
+    useState<AddAccountModalMode>("login");
   const [usageModalOpen, setUsageModalOpen] = useState(false);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [exportModeDraft, setExportModeDraft] = useState<"single" | "multiple">(
@@ -555,6 +558,7 @@ const toggleCleanupStatus = (rawStatus: string) => {
       visibleAccounts={visibleAccounts}
       effectiveSelectedIds={effectiveSelectedIds}
       addAccountModalOpen={addAccountModalOpen}
+      addAccountModalMode={addAccountModalMode}
       usageModalOpen={usageModalOpen}
       exportDialogOpen={exportDialogOpen}
       exportModeDraft={exportModeDraft}
@@ -591,6 +595,7 @@ const toggleCleanupStatus = (rawStatus: string) => {
       exportActionLabel={exportActionLabel}
       exportActionShortcut={exportActionShortcut}
       setAddAccountModalOpen={setAddAccountModalOpen}
+      setAddAccountModalMode={setAddAccountModalMode}
       setExportDialogOpen={setExportDialogOpen}
       setExportModeDraft={setExportModeDraft}
       setDeleteDialogState={setDeleteDialogState}

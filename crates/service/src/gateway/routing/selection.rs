@@ -13,7 +13,8 @@ static CURRENT_DB_PATH: OnceLock<RwLock<String>> = OnceLock::new();
 const DEFAULT_CANDIDATE_CACHE_TTL_MS: u64 = 500;
 const CANDIDATE_CACHE_TTL_ENV: &str = "CODEXMANAGER_CANDIDATE_CACHE_TTL_MS";
 // OpenAI 在 used_percent 未到 100 时就会触发 usage limit（常见于 ChatGPT Plus OAuth
-// 账号的 5 小时窗口）。将快要耗尽的账号降权到候选列表尾部，避免网关反复挑到它。
+// 账号的 5 小时窗口）。将快要耗尽的非 free 账号降权到候选列表尾部，避免网关反复挑到它。
+// free / 7 天单窗口账号只在快照耗尽或上游明确报不可用后切换。
 const LOW_QUOTA_THRESHOLD_ENV: &str = "CODEXMANAGER_LOW_QUOTA_THRESHOLD_PERCENT";
 const DEFAULT_LOW_QUOTA_THRESHOLD_PERCENT: f64 = 95.0;
 
@@ -83,7 +84,7 @@ fn collect_gateway_candidates_uncached(storage: &Storage) -> Result<Vec<(Account
     Ok(out)
 }
 
-/// 将快要耗尽的账号（primary 或 secondary used_percent 超过阈值）稳定地排到列表尾部。
+/// 将快要耗尽的非 free 账号（primary 或 secondary used_percent 超过阈值）稳定地排到列表尾部。
 /// 不从候选中剔除，保证在全部账号都被降权的极端场景下仍有号可用。
 fn demote_low_quota_candidates(storage: &Storage, candidates: &mut Vec<(Account, Token)>) {
     if candidates.len() < 2 {
@@ -94,8 +95,8 @@ fn demote_low_quota_candidates(storage: &Storage, candidates: &mut Vec<(Account,
         return;
     }
     let threshold = low_quota_threshold_percent();
-    candidates.sort_by_key(|(account, _)| {
-        if is_low_quota_account(&account.id, &snapshots, threshold) {
+    candidates.sort_by_key(|(account, token)| {
+        if is_low_quota_account(&account.id, token, &snapshots, threshold) {
             1u8
         } else {
             0u8
@@ -114,12 +115,18 @@ fn load_usage_snapshots(storage: &Storage) -> HashMap<String, UsageSnapshotRecor
 
 fn is_low_quota_account(
     account_id: &str,
+    token: &Token,
     snapshots: &HashMap<String, UsageSnapshotRecord>,
     threshold: f64,
 ) -> bool {
     let Some(snap) = snapshots.get(account_id) else {
         return false;
     };
+    if crate::account_plan::resolve_account_plan(Some(token), Some(snap))
+        .is_some_and(|plan| plan.normalized == "free")
+    {
+        return false;
+    }
     let primary_low = snap.used_percent.is_some_and(|pct| pct >= threshold);
     let secondary_low = snap
         .secondary_used_percent

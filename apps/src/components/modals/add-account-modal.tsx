@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { 
   Dialog, 
   DialogContent, 
@@ -27,9 +27,12 @@ import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { FileUp, Info, LogIn, Clipboard, ExternalLink, Hash } from "lucide-react";
 
+export type AddAccountModalMode = "login" | "json";
+
 interface AddAccountModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  mode?: AddAccountModalMode;
 }
 
 /**
@@ -145,6 +148,77 @@ function normalizeImportContentForCompatibility(rawContent: string): string {
   }
 }
 
+function findJsonValueEnd(text: string, start: number): number {
+  const stack: string[] = [];
+  let inString = false;
+  let escaped = false;
+
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === "\"") {
+      inString = true;
+      continue;
+    }
+    if (char === "{" || char === "[") {
+      stack.push(char);
+      continue;
+    }
+    if (char !== "}" && char !== "]") {
+      continue;
+    }
+
+    const open = stack[stack.length - 1];
+    if ((char === "}" && open !== "{") || (char === "]" && open !== "[")) {
+      return -1;
+    }
+    stack.pop();
+    if (stack.length === 0) {
+      return index + 1;
+    }
+  }
+
+  return -1;
+}
+
+function extractJsonImportContents(rawContent: string): string[] {
+  const text = String(rawContent || "");
+  const contents: string[] = [];
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (char !== "{" && char !== "[") {
+      continue;
+    }
+
+    const end = findJsonValueEnd(text, index);
+    if (end <= index) {
+      continue;
+    }
+
+    const candidate = text.slice(index, end).trim();
+    try {
+      JSON.parse(candidate);
+      contents.push(normalizeImportContentForCompatibility(candidate));
+      index = end - 1;
+    } catch {
+      // 不是完整 JSON，继续向后找下一个可能的 JSON 片段。
+    }
+  }
+
+  return contents;
+}
+
 /**
  * 函数 `buildBulkImportContents`
  *
@@ -163,7 +237,20 @@ function buildBulkImportContents(rawContent: string): string[] {
   if (!text) return [];
 
   if (text.startsWith("{") || text.startsWith("[")) {
-    return [normalizeImportContentForCompatibility(text)];
+    try {
+      JSON.parse(text);
+      return [normalizeImportContentForCompatibility(text)];
+    } catch {
+      const extracted = extractJsonImportContents(text);
+      if (extracted.length > 0) {
+        return extracted;
+      }
+    }
+  }
+
+  const extracted = extractJsonImportContents(text);
+  if (extracted.length > 0) {
+    return extracted;
   }
 
   return text
@@ -210,11 +297,13 @@ function getBulkImportErrorMessage(error: unknown, t: (key: string) => string): 
  * # 返回
  * 返回函数执行结果
  */
-export function AddAccountModal({ open, onOpenChange }: AddAccountModalProps) {
+export function AddAccountModal({ open, onOpenChange, mode = "login" }: AddAccountModalProps) {
   const { t } = useI18n();
   const serviceStatus = useAppStore((state) => state.serviceStatus);
   const { canAccessManagementRpc } = useRuntimeCapabilities();
-  const [activeTab, setActiveTab] = useState("login");
+  const importOnly = mode === "json";
+  const initialTab = importOnly ? "bulk" : "login";
+  const [activeTab, setActiveTab] = useState(initialTab);
   const [isLoading, setIsLoading] = useState(false);
   const [isPollingLogin, setIsPollingLogin] = useState(false);
   const [loginHint, setLoginHint] = useState("");
@@ -233,10 +322,34 @@ export function AddAccountModal({ open, onOpenChange }: AddAccountModalProps) {
   const unavailableMessage = canAccessManagementRpc
     ? t("服务未连接，账号授权与导入暂不可用；连接恢复后可继续操作。")
     : t("当前运行环境暂不支持账号管理。");
+  const titleText = importOnly ? t("按 JSON 导入") : t("新增账号");
+  const descriptionText = importOnly
+    ? t("粘贴订单页整段内容或多个账号 JSON，保存后自动导入。")
+    : t("通过登录授权或批量导入文本内容来添加账号。");
+  const bulkLabel = importOnly
+    ? t("JSON 账号数据")
+    : t("账号数据（Token 可每行一个，JSON 可整段粘贴）");
+  const bulkPlaceholder = importOnly
+    ? t("可粘贴单个 JSON、JSON 数组，或从链动小铺订单详情页整段复制的内容。")
+    : t("粘贴账号数据。普通 Token 可每行一个；完整 JSON / JSON 数组请整段粘贴。");
+  const bulkHelpText = importOnly
+    ? t("会自动提取文本中的多个账号 JSON，订单说明、序号等普通文字会被忽略。")
+    : t("支持格式：ChatGPT 账号（Refresh Token）、Claude Session 等。系统将自动识别格式并导入。");
+  const submitText = importOnly ? t("保存") : t("开始导入");
+  const contentMaxHeightClass = importOnly
+    ? "max-h-[calc(85vh-96px)]"
+    : "max-h-[calc(85vh-154px)]";
+  const dialogIcon = useMemo(
+    () =>
+      importOnly
+        ? <FileUp className="h-5 w-5 text-primary" />
+        : <LogIn className="h-5 w-5 text-primary" />,
+    [importOnly],
+  );
 
   const resetModalState = useCallback(() => {
     loginPollTokenRef.current += 1;
-    setActiveTab("login");
+    setActiveTab(initialTab);
     setIsLoading(false);
     setIsPollingLogin(false);
     setLoginHint("");
@@ -245,7 +358,7 @@ export function AddAccountModal({ open, onOpenChange }: AddAccountModalProps) {
     setLoginUrl("");
     setManualCallback("");
     setBulkContent("");
-  }, []);
+  }, [initialTab]);
 
   /**
    * 函数 `invalidateLoginQueries`
@@ -492,10 +605,17 @@ export function AddAccountModal({ open, onOpenChange }: AddAccountModalProps) {
     if (!ensureServiceReady("导入账号")) {
       return;
     }
-    if (!bulkContent.trim()) return;
+    if (!bulkContent.trim()) {
+      toast.error(importOnly ? t("请先粘贴 JSON 内容") : t("请先粘贴账号数据"));
+      return;
+    }
     setIsLoading(true);
     try {
       const contents = buildBulkImportContents(bulkContent);
+      if (contents.length === 0) {
+        toast.error(importOnly ? t("未找到可导入的 JSON 内容") : t("未找到可导入的账号数据"));
+        return;
+      }
       const result = await accountClient.import(contents);
       const total = Number(result?.total || 0);
       const created = Number(result?.created || 0);
@@ -546,25 +666,28 @@ export function AddAccountModal({ open, onOpenChange }: AddAccountModalProps) {
           <div className="shrink-0 bg-muted/20 px-6 pt-6">
             <DialogHeader className="mb-4">
               <DialogTitle className="flex items-center gap-2">
-                <LogIn className="h-5 w-5 text-primary" />
-                {t("新增账号")}
+                {dialogIcon}
+                {titleText}
               </DialogTitle>
               <DialogDescription>
-                {t("通过登录授权或批量导入文本内容来添加账号。")}
+                {descriptionText}
               </DialogDescription>
             </DialogHeader>
-            <TabsList className="grid w-full grid-cols-2 h-10 mb-0">
-              <TabsTrigger value="login" className="gap-2">
-                <LogIn className="h-3.5 w-3.5" /> {t("登录授权")}
-              </TabsTrigger>
-              <TabsTrigger value="bulk" className="gap-2">
-                <FileUp className="h-3.5 w-3.5" /> {t("批量导入")}
-              </TabsTrigger>
-            </TabsList>
+            {!importOnly ? (
+              <TabsList className="grid w-full grid-cols-2 h-10 mb-0">
+                <TabsTrigger value="login" className="gap-2">
+                  <LogIn className="h-3.5 w-3.5" /> {t("登录授权")}
+                </TabsTrigger>
+                <TabsTrigger value="bulk" className="gap-2">
+                  <FileUp className="h-3.5 w-3.5" /> {t("批量导入")}
+                </TabsTrigger>
+              </TabsList>
+            ) : null}
           </div>
 
-          <div className="max-h-[calc(85vh-154px)] overflow-y-auto p-6">
-            <TabsContent value="login" className="mt-0 space-y-4">
+          <div className={`${contentMaxHeightClass} overflow-y-auto p-6`}>
+            {!importOnly ? (
+              <TabsContent value="login" className="mt-0 space-y-4">
               {!isServiceReady ? (
                 <div className="rounded-lg border border-border/60 bg-muted/30 p-3 text-sm text-muted-foreground">
                   {canAccessManagementRpc
@@ -642,7 +765,8 @@ export function AddAccountModal({ open, onOpenChange }: AddAccountModalProps) {
                   </div>
                 </div>
               </div>
-            </TabsContent>
+              </TabsContent>
+            ) : null}
 
             <TabsContent value="bulk" className="mt-0 space-y-4">
               {!isServiceReady ? (
@@ -651,10 +775,10 @@ export function AddAccountModal({ open, onOpenChange }: AddAccountModalProps) {
                 </div>
               ) : null}
               <div className="space-y-2">
-                <Label>{t("账号数据（Token 可每行一个，JSON 可整段粘贴）")}</Label>
+                <Label>{bulkLabel}</Label>
                 <Textarea 
-                  placeholder={t("粘贴账号数据。普通 Token 可每行一个；完整 JSON / JSON 数组请整段粘贴。")}
-                  className="min-h-[250px] resize-none overflow-auto whitespace-pre-wrap break-all [overflow-wrap:anywhere] font-mono text-[10px] leading-4"
+                  placeholder={bulkPlaceholder}
+                  className="min-h-[300px] resize-none overflow-auto whitespace-pre-wrap break-all [overflow-wrap:anywhere] font-mono text-[10px] leading-4"
                   value={bulkContent}
                   disabled={!isServiceReady}
                   onChange={(e) => setBulkContent(e.target.value)}
@@ -662,14 +786,14 @@ export function AddAccountModal({ open, onOpenChange }: AddAccountModalProps) {
               </div>
               <div className="rounded-lg bg-blue-500/5 border border-blue-500/20 p-3 text-[10px] text-blue-600 dark:text-blue-400 leading-relaxed">
                 <Info className="h-3.5 w-3.5 inline-block mr-1.5 -mt-0.5" />
-                {t("支持格式：ChatGPT 账号（Refresh Token）、Claude Session 等。系统将自动识别格式并导入。")}
+                {bulkHelpText}
               </div>
               <Button
                 onClick={handleBulkImport}
                 disabled={!isServiceReady || isLoading}
                 className="w-full"
               >
-                {t("开始导入")}
+                {submitText}
               </Button>
             </TabsContent>
           </div>

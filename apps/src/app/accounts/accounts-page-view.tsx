@@ -15,7 +15,10 @@ import {
   Trash2,
   Zap,
 } from "lucide-react";
-import { AddAccountModal } from "@/components/modals/add-account-modal";
+import {
+  AddAccountModal,
+  type AddAccountModalMode,
+} from "@/components/modals/add-account-modal";
 import { ConfirmDialog } from "@/components/modals/confirm-dialog";
 import UsageModal from "@/components/modals/usage-modal";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -126,6 +129,7 @@ export interface AccountsPageViewProps {
   visibleAccounts: Account[];
   effectiveSelectedIds: string[];
   addAccountModalOpen: boolean;
+  addAccountModalMode: AddAccountModalMode;
   usageModalOpen: boolean;
   exportDialogOpen: boolean;
   exportModeDraft: AccountExportMode;
@@ -162,6 +166,7 @@ export interface AccountsPageViewProps {
   exportActionLabel: string;
   exportActionShortcut: string;
   setAddAccountModalOpen: Dispatch<SetStateAction<boolean>>;
+  setAddAccountModalMode: Dispatch<SetStateAction<AddAccountModalMode>>;
   setExportDialogOpen: Dispatch<SetStateAction<boolean>>;
   setExportModeDraft: Dispatch<SetStateAction<AccountExportMode>>;
   setDeleteDialogState: Dispatch<SetStateAction<DeleteDialogState>>;
@@ -222,6 +227,7 @@ export function AccountsPageView(props: AccountsPageViewProps) {
     visibleAccounts,
     effectiveSelectedIds,
     addAccountModalOpen,
+    addAccountModalMode,
     usageModalOpen,
     exportDialogOpen,
     exportModeDraft,
@@ -258,6 +264,7 @@ export function AccountsPageView(props: AccountsPageViewProps) {
     exportActionLabel,
     exportActionShortcut,
     setAddAccountModalOpen,
+    setAddAccountModalMode,
     setExportDialogOpen,
     setExportModeDraft,
     setDeleteDialogState,
@@ -520,9 +527,23 @@ export function AccountsPageView(props: AccountsPageViewProps) {
                   <DropdownMenuItem
                     className="h-9 rounded-lg px-2"
                     disabled={!isServiceReady}
-                    onClick={() => setAddAccountModalOpen(true)}
+                    onClick={() => {
+                      setAddAccountModalMode("login");
+                      setAddAccountModalOpen(true);
+                    }}
                   >
                     <Plus className="mr-2 h-4 w-4" /> {t("添加账号")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className="h-9 rounded-lg px-2"
+                    disabled={!isServiceReady}
+                    onClick={() => {
+                      setAddAccountModalMode("json");
+                      setAddAccountModalOpen(true);
+                    }}
+                  >
+                    <FileUp className="mr-2 h-4 w-4" /> {t("按 JSON 导入")}
+                    <DropdownMenuShortcut>JSON</DropdownMenuShortcut>
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     className="h-9 rounded-lg px-2"
@@ -980,6 +1001,7 @@ export function AccountsPageView(props: AccountsPageViewProps) {
         <AddAccountModal
           open={isPageActive && addAccountModalOpen}
           onOpenChange={setAddAccountModalOpen}
+          mode={addAccountModalMode}
         />
       ) : null}
       <UsageModal
