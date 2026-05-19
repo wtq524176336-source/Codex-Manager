@@ -23,7 +23,7 @@ impl Storage {
     /// 返回函数执行结果
     pub fn insert_account(&self, account: &Account) -> Result<()> {
         self.conn.execute(
-            "INSERT OR REPLACE INTO accounts (
+            "INSERT INTO accounts (
                 id,
                 label,
                 issuer,
@@ -45,7 +45,16 @@ impl Storage {
                 ?8,
                 ?9,
                 COALESCE((SELECT preferred FROM accounts WHERE id = ?1), 0)
-            )",
+            )
+            ON CONFLICT(id) DO UPDATE SET
+                label = excluded.label,
+                issuer = excluded.issuer,
+                chatgpt_account_id = excluded.chatgpt_account_id,
+                workspace_id = excluded.workspace_id,
+                sort = excluded.sort,
+                status = excluded.status,
+                created_at = excluded.created_at,
+                updated_at = excluded.updated_at",
             (
                 &account.id,
                 &account.label,

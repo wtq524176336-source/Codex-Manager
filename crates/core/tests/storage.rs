@@ -47,6 +47,72 @@ fn storage_can_insert_account_and_token() {
     assert_eq!(storage.token_count().expect("count tokens"), 1);
 }
 
+/// 函数 `account_upsert_preserves_existing_token`
+///
+/// 作者: gaohongshun
+///
+/// 时间: 2026-05-19
+///
+/// # 参数
+/// 无
+///
+/// # 返回
+/// 无
+#[test]
+fn account_upsert_preserves_existing_token() {
+    let storage = Storage::open_in_memory().expect("open in memory");
+    storage.init().expect("init schema");
+    let now = now_ts();
+
+    let mut account = Account {
+        id: "acc-preserve-token".to_string(),
+        label: "preserve token".to_string(),
+        issuer: "https://auth.openai.com".to_string(),
+        chatgpt_account_id: Some("acct_old".to_string()),
+        workspace_id: Some("org_old".to_string()),
+        group_name: None,
+        sort: 0,
+        status: "active".to_string(),
+        created_at: now,
+        updated_at: now,
+    };
+    storage.insert_account(&account).expect("insert account");
+    storage
+        .insert_token(&Token {
+            account_id: account.id.clone(),
+            id_token: "id-preserve".to_string(),
+            access_token: "access-preserve".to_string(),
+            refresh_token: "refresh-preserve".to_string(),
+            api_key_access_token: Some("api-key-preserve".to_string()),
+            last_refresh: now,
+        })
+        .expect("insert token");
+
+    account.chatgpt_account_id = Some("acct_new".to_string());
+    account.workspace_id = Some("org_new".to_string());
+    account.status = "limited".to_string();
+    account.updated_at = now + 1;
+    storage.insert_account(&account).expect("update account");
+
+    let updated_account = storage
+        .find_account_by_id(&account.id)
+        .expect("find account")
+        .expect("account exists");
+    assert_eq!(updated_account.workspace_id.as_deref(), Some("org_new"));
+    assert_eq!(updated_account.status, "limited");
+
+    let preserved_token = storage
+        .find_token_by_account_id(&account.id)
+        .expect("find token")
+        .expect("token still exists");
+    assert_eq!(preserved_token.access_token, "access-preserve");
+    assert_eq!(preserved_token.refresh_token, "refresh-preserve");
+    assert_eq!(
+        preserved_token.api_key_access_token.as_deref(),
+        Some("api-key-preserve")
+    );
+}
+
 /// 函数 `storage_can_find_token_and_account_by_account_id`
 ///
 /// 作者: gaohongshun
