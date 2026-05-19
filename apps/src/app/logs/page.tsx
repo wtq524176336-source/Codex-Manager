@@ -332,6 +332,13 @@ function formatTableTokenAmount(value: number | null | undefined): string {
   return Math.round(normalized).toLocaleString("zh-CN");
 }
 
+function formatTableCostUsd(value: number | null | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return "-";
+  }
+  return `$${value.toFixed(6)}`;
+}
+
 function formatOutputTokenRate(log: RequestLog): string {
   if (typeof log.outputTokens !== "number" || !Number.isFinite(log.outputTokens)) {
     return "-";
@@ -1973,34 +1980,37 @@ function LogsPageContent() {
               </div>
             </CardHeader>
             <CardContent className="px-0">
-              <Table className="min-w-[1440px] table-fixed">
+              <Table className="w-[1260px] min-w-[1260px] table-fixed">
             <TableHeader>
               <TableRow>
-                <TableHead className="h-12 w-[150px] px-4 text-[11px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
+                <TableHead className="h-12 w-[126px] px-2 text-[11px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
                   {t("时间")}
                 </TableHead>
-                <TableHead className="w-[120px] px-4 text-[11px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
+                <TableHead className="w-[112px] px-2 text-[11px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
                   {t("类型 / 方法 / 路径")}
                 </TableHead>
-                <TableHead className="w-[224px] px-4 text-[11px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
+                <TableHead className="w-[170px] px-2 text-[11px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
                   {t("账号 / 密钥")}
                 </TableHead>
-                <TableHead className="w-[180px] px-4 text-[11px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
+                <TableHead className="w-[146px] px-2 text-[11px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
                   {t("模型 / 推理 / 等级")}
                 </TableHead>
-                <TableHead className="w-[92px] px-4 text-[11px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
+                <TableHead className="w-[64px] px-2 text-[11px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
                   {t("状态")}
                 </TableHead>
-                <TableHead className="w-[128px] px-4 text-[11px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
+                <TableHead className="w-[94px] px-2 text-[11px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
                   {t("用时 / 首响")}
                 </TableHead>
-                <TableHead className="w-[168px] px-4 text-[11px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
+                <TableHead className="w-[232px] px-2 text-[11px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
                   {t("Token")}
                 </TableHead>
-                <TableHead className="w-[240px] px-4 text-[11px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
+                <TableHead className="w-[76px] px-2 text-[11px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
+                  {t("费用")}
+                </TableHead>
+                <TableHead className="w-[162px] px-2 text-[11px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
                   {t("错误")}
                 </TableHead>
-                <TableHead className="w-[120px] px-4 text-[11px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
+                <TableHead className="w-[78px] px-2 text-[11px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
                   {t("详情")}
                 </TableHead>
               </TableRow>
@@ -2009,40 +2019,43 @@ function LogsPageContent() {
               {isLogsLoading ? (
                 Array.from({ length: 10 }).map((_, index) => (
                   <TableRow key={index}>
-                    <TableCell>
-                      <Skeleton className="h-4 w-32" />
-                    </TableCell>
-                    <TableCell>
-                      <Skeleton className="h-4 w-40" />
-                    </TableCell>
-                    <TableCell>
-                      <Skeleton className="h-4 w-32" />
-                    </TableCell>
-                    <TableCell>
+                    <TableCell className="px-2">
                       <Skeleton className="h-4 w-24" />
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="px-2">
+                      <Skeleton className="h-4 w-28" />
+                    </TableCell>
+                    <TableCell className="px-2">
+                      <Skeleton className="h-4 w-32" />
+                    </TableCell>
+                    <TableCell className="px-2">
+                      <Skeleton className="h-4 w-24" />
+                    </TableCell>
+                    <TableCell className="px-2">
                       <Skeleton className="h-6 w-12 rounded-full" />
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="px-2">
                       <Skeleton className="h-4 w-12" />
                     </TableCell>
-                    <TableCell>
-                      <Skeleton className="h-4 w-20" />
+                    <TableCell className="px-2">
+                      <Skeleton className="h-4 w-32" />
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="px-2">
+                      <Skeleton className="h-4 w-12" />
+                    </TableCell>
+                    <TableCell className="px-2">
                       <Skeleton className="h-4 w-full" />
                     </TableCell>
-                    <TableCell>
-                      <Skeleton className="h-7 w-16" />
+                    <TableCell className="px-2">
+                      <Skeleton className="h-7 w-12" />
                     </TableCell>
                   </TableRow>
                 ))
               ) : logs.length === 0 ? (
                 <TableRow>
                   <TableCell
-                    colSpan={9}
-                    className="h-52 px-4 text-center text-sm text-muted-foreground"
+                    colSpan={10}
+                    className="h-52 px-2 text-center text-sm text-muted-foreground"
                   >
                     {!serviceStatus.connected
                       ? t("服务未连接，无法获取日志")
@@ -2055,13 +2068,13 @@ function LogsPageContent() {
                     key={log.id}
                     className="group text-xs hover:bg-muted/20"
                   >
-                    <TableCell className="px-4 py-3 font-mono text-[11px] text-muted-foreground">
+                    <TableCell className="px-2 py-3 font-mono text-[11px] text-muted-foreground">
                       {formatTsFromSeconds(log.createdAt, t("未知时间"))}
                     </TableCell>
-                    <TableCell className="px-4 py-3 align-top">
+                    <TableCell className="px-2 py-3 align-top">
                       <RequestRouteInfoCell log={log} />
                     </TableCell>
-                    <TableCell className="px-4 py-3 align-top">
+                    <TableCell className="px-2 py-3 align-top">
                       <AccountKeyInfoCell
                         log={log}
                         accountLabel={resolveAccountDisplayName(
@@ -2073,13 +2086,13 @@ function LogsPageContent() {
                         aggregateApiMap={aggregateApiMap}
                       />
                     </TableCell>
-                    <TableCell className="px-4 py-3 align-top">
+                    <TableCell className="px-2 py-3 align-top">
                       <ModelEffortCell log={log} />
                     </TableCell>
-                    <TableCell className="px-4 py-3 align-top">
+                    <TableCell className="px-2 py-3 align-top">
                       {getStatusBadge(resolveDisplayedStatusCode(log))}
                     </TableCell>
-                    <TableCell className="px-4 py-3 align-top font-mono">
+                    <TableCell className="px-2 py-3 align-top font-mono">
                       <span
                         className="text-xs text-primary"
                         title={t("首响表示从请求开始到首个上游响应片段的耗时")}
@@ -2088,17 +2101,18 @@ function LogsPageContent() {
                         {formatDuration(log.firstResponseMs)}
                       </span>
                     </TableCell>
-                    <TableCell className="px-4 py-3 align-top">
-                      <div className="flex flex-col gap-0.5 text-[10px] text-muted-foreground">
-                        <span>{t("总")} {formatTableTokenAmount(log.totalTokens)}</span>
+                    <TableCell className="px-2 py-3 align-top">
+                      <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-x-3 gap-y-0.5 text-[11px] leading-4 text-muted-foreground">
+                        <span>{t("总输入")} {formatTableTokenAmount(log.inputTokens)}</span>
+                        <span>{t("输出")} {formatTableTokenAmount(log.outputTokens)}</span>
                         <span>
-                          {t("输入")} {formatTableTokenAmount(log.inputTokens)}
-                        </span>
-                        <span>
-                          {t("输出")} {formatTableTokenAmount(log.outputTokens)}
-                        </span>
-                        <span className="opacity-60">
-                          {t("缓存")} {formatTableTokenAmount(log.cachedInputTokens)}
+                          {t("输入")}{" "}
+                          {formatTableTokenAmount(
+                            Math.max(
+                              0,
+                              (log.inputTokens || 0) - (log.cachedInputTokens || 0),
+                            ),
+                          )}
                         </span>
                         <span
                           className="font-medium text-primary"
@@ -2106,12 +2120,19 @@ function LogsPageContent() {
                         >
                           {t("速度")} {formatOutputTokenRate(log)}
                         </span>
+                        <span>{t("缓存")} {formatTableTokenAmount(log.cachedInputTokens)}</span>
+                        <span />
                       </div>
                     </TableCell>
-                    <TableCell className="px-4 py-3 text-left align-top">
+                    <TableCell className="px-2 py-3 align-top">
+                      <div className="font-mono text-[11px] text-muted-foreground">
+                        {formatTableCostUsd(log.estimatedCostUsd)}
+                      </div>
+                    </TableCell>
+                    <TableCell className="px-2 py-3 text-left align-top">
                       <ErrorInfoCell error={log.error} />
                     </TableCell>
-                    <TableCell className="px-4 py-3 text-left align-top">
+                    <TableCell className="px-2 py-3 text-left align-top">
                       <CompactDetailCell log={log} onOpen={setCompactDetailLog} />
                     </TableCell>
                   </TableRow>

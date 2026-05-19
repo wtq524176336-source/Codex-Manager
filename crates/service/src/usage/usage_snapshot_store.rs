@@ -1,4 +1,5 @@
 use crate::account_availability::{evaluate_snapshot, Availability};
+use crate::account_plan::resolve_account_plan;
 use crate::account_status::set_account_status;
 use codexmanager_core::storage::{now_ts, Storage, UsageSnapshotRecord};
 use codexmanager_core::usage::parse_usage_snapshot;
@@ -6,9 +7,43 @@ use codexmanager_core::usage::parse_usage_snapshot;
 const DEFAULT_USAGE_SNAPSHOTS_RETAIN_PER_ACCOUNT: usize = 0;
 const USAGE_SNAPSHOTS_RETAIN_PER_ACCOUNT_ENV: &str =
     "CODEXMANAGER_USAGE_SNAPSHOTS_RETAIN_PER_ACCOUNT";
+const FIVE_HOUR_WINDOW_MINUTES: i64 = 300;
 
 fn usage_status_updates_blocked(current_status: &str) -> bool {
     current_status.trim().eq_ignore_ascii_case("disabled")
+}
+
+fn is_primary_five_hour_only(record: &UsageSnapshotRecord) -> bool {
+    record.window_minutes == Some(FIVE_HOUR_WINDOW_MINUTES)
+        && record.used_percent.is_some()
+        && record.secondary_used_percent.is_none()
+        && record.secondary_window_minutes.is_none()
+}
+
+fn is_known_free_account(
+    storage: &Storage,
+    account_id: &str,
+    previous_snapshot: Option<&UsageSnapshotRecord>,
+) -> bool {
+    if let Ok(Some(subscription)) = storage.find_account_subscription(account_id) {
+        if !subscription.has_subscription {
+            return true;
+        }
+    }
+
+    let token = storage.find_token_by_account_id(account_id).ok().flatten();
+    resolve_account_plan(token.as_ref(), previous_snapshot)
+        .map(|plan| plan.normalized == "free")
+        .unwrap_or(false)
+}
+
+fn should_ignore_free_primary_five_hour_snapshot(
+    storage: &Storage,
+    record: &UsageSnapshotRecord,
+    previous_snapshot: Option<&UsageSnapshotRecord>,
+) -> bool {
+    is_primary_five_hour_only(record)
+        && is_known_free_account(storage, &record.account_id, previous_snapshot)
 }
 
 /// 函数 `usage_snapshots_retain_per_account`
@@ -102,6 +137,16 @@ pub(crate) fn store_usage_snapshot(
         credits_json: parsed.credits_json,
         captured_at: now_ts(),
     };
+    let previous_snapshot = storage
+        .latest_usage_snapshot_for_account(account_id)
+        .map_err(|e| e.to_string())?;
+    if should_ignore_free_primary_five_hour_snapshot(storage, &record, previous_snapshot.as_ref()) {
+        log::warn!(
+            "ignore primary-only five-hour usage snapshot for free account: account_id={}",
+            account_id
+        );
+        return Ok(());
+    }
     storage
         .insert_usage_snapshot(&record)
         .map_err(|e| e.to_string())?;

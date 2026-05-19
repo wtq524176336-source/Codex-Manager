@@ -7,7 +7,7 @@ use crate::account_status::{
     mark_account_unavailable_for_deactivation_error,
     mark_account_unavailable_for_refresh_token_error,
 };
-use crate::usage_snapshot_store::apply_status_from_snapshot;
+use crate::usage_snapshot_store::{apply_status_from_snapshot, store_usage_snapshot};
 use codexmanager_core::storage::{now_ts, Account, Storage, UsageSnapshotRecord};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -28,6 +28,73 @@ fn unique_id(prefix: &str) -> String {
         .expect("clock")
         .as_nanos();
     format!("{prefix}-{nanos}")
+}
+
+#[test]
+fn free_account_ignores_primary_only_five_hour_snapshot() {
+    let storage = Storage::open_in_memory().expect("open");
+    storage.init().expect("init");
+    let account_id = "acc-free-five-hour";
+    let now = now_ts();
+    let account = Account {
+        id: account_id.to_string(),
+        label: "free".to_string(),
+        issuer: "issuer".to_string(),
+        chatgpt_account_id: None,
+        workspace_id: None,
+        group_name: None,
+        sort: 0,
+        status: "active".to_string(),
+        created_at: now,
+        updated_at: now,
+    };
+    storage.insert_account(&account).expect("insert");
+    storage
+        .upsert_account_subscription(account_id, false, None, None, None)
+        .expect("subscription");
+
+    store_usage_snapshot(
+        &storage,
+        account_id,
+        serde_json::json!({
+            "rate_limit": {
+                "primary_window": {
+                    "used_percent": 7.0,
+                    "limit_window_seconds": 604800,
+                    "reset_at": now + 604800
+                }
+            }
+        }),
+    )
+    .expect("store weekly snapshot");
+    store_usage_snapshot(
+        &storage,
+        account_id,
+        serde_json::json!({
+            "rate_limit": {
+                "primary_window": {
+                    "used_percent": 1.0,
+                    "limit_window_seconds": 18000,
+                    "reset_at": now + 18000
+                }
+            }
+        }),
+    )
+    .expect("ignore five-hour snapshot");
+
+    assert_eq!(
+        storage
+            .usage_snapshot_count_for_account(account_id)
+            .expect("count snapshots"),
+        1
+    );
+    let latest = storage
+        .latest_usage_snapshot_for_account(account_id)
+        .expect("load latest")
+        .expect("snapshot");
+    assert_eq!(latest.used_percent, Some(7.0));
+    assert_eq!(latest.window_minutes, Some(10080));
+    assert_eq!(latest.secondary_window_minutes, None);
 }
 
 /// 函数 `apply_status_missing_snapshot_keeps_account_status`
