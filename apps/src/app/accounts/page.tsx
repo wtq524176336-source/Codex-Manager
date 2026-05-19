@@ -14,13 +14,14 @@ import {
   type DeleteDialogState,
   normalizeAccountPlanKey,
   normalizeTagsDraft,
+  type RtRefreshFailureDeleteItem,
   type StatusFilter,
 } from "@/app/accounts/accounts-page-helpers";
 import { AccountsPageView } from "@/app/accounts/accounts-page-view";
 import type { AddAccountModalMode } from "@/components/modals/add-account-modal";
 import { accountClient } from "@/lib/api/account-client";
 import { isBannedAccount, isLimitedAccount } from "@/lib/utils/usage";
-import type { Account } from "@/types";
+import type { Account, ChatgptAuthTokensRefreshAllResult } from "@/types";
 
 type CleanupStatus = "unavailable" | "banned" | "limited";
 
@@ -35,6 +36,34 @@ function normalizeCleanupStatus(status: string): CleanupStatus | null {
   return CLEANUP_STATUSES.includes(normalized as CleanupStatus)
     ? (normalized as CleanupStatus)
     : null;
+}
+
+function formatRtRefreshFailureReason(
+  message: string | null | undefined,
+  t: (message: string, values?: Record<string, string | number>) => string,
+) {
+  const normalized = String(message || "").trim();
+  const lower = normalized.toLowerCase();
+  if (lower === "missing token") {
+    return t("缺少 token");
+  }
+  if (lower === "missing refresh_token") {
+    return t("缺少 refresh_token");
+  }
+  return normalized || t("未知原因");
+}
+
+function buildRtRefreshFailureDeleteItems(
+  result: ChatgptAuthTokensRefreshAllResult | undefined,
+  t: (message: string, values?: Record<string, string | number>) => string,
+): RtRefreshFailureDeleteItem[] {
+  return (result?.results || [])
+    .filter((item) => !item.ok && item.accountId.trim())
+    .map((item) => ({
+      accountId: item.accountId.trim(),
+      accountName: item.accountName.trim() || item.accountId.trim(),
+      reason: formatRtRefreshFailureReason(item.message, t),
+    }));
 }
 
 export default function AccountsPage() {
@@ -111,6 +140,14 @@ export default function AccountsPage() {
     "unavailable",
     "banned",
   ]);
+  const [rtFailureDeleteDialogOpen, setRtFailureDeleteDialogOpen] =
+    useState(false);
+  const [rtFailureDeleteItems, setRtFailureDeleteItems] = useState<
+    RtRefreshFailureDeleteItem[]
+  >([]);
+  const [rtFailureDeleteSelectedIds, setRtFailureDeleteSelectedIds] = useState<
+    string[]
+  >([]);
   const [switchingApiKeyId, setSwitchingApiKeyId] = useState<string | null>(null);
 
   const importFileActionLabel = isDesktopRuntime
@@ -143,7 +180,6 @@ export default function AccountsPage() {
       const matchStatus =
         statusFilter === "all" ||
         (statusFilter === "available" && account.isAvailable) ||
-        (statusFilter === "low_quota" && account.isLowQuota) ||
         (statusFilter === "limited" && isLimitedAccount(account)) ||
         (statusFilter === "banned" && isBannedAccount(account));
       return matchSearch && matchPlan && matchStatus;
@@ -171,10 +207,6 @@ export default function AccountsPage() {
       {
         id: "available" as const,
         label: `${t("正常")} (${statusCountAccounts.filter((account) => account.isAvailable).length})`,
-      },
-      {
-        id: "low_quota" as const,
-        label: `${t("低配额")} (${statusCountAccounts.filter((account) => account.isLowQuota).length})`,
       },
       {
         id: "limited" as const,
@@ -401,14 +433,14 @@ export default function AccountsPage() {
     setCleanupDialogOpen(true);
   };
 
-const toggleCleanupStatus = (rawStatus: string) => {
-  const status = normalizeCleanupStatus(rawStatus);
-  if (!status) {
-    return;
-  }
-  setCleanupStatusDraft((current) =>
-    current.includes(status)
-      ? current.filter((item) => item !== status)
+  const toggleCleanupStatus = (rawStatus: string) => {
+    const status = normalizeCleanupStatus(rawStatus);
+    if (!status) {
+      return;
+    }
+    setCleanupStatusDraft((current) =>
+      current.includes(status)
+        ? current.filter((item) => item !== status)
         : [...current, status],
     );
   };
@@ -483,6 +515,38 @@ const toggleCleanupStatus = (rawStatus: string) => {
     setDeleteDialogState({ kind: "single", account });
   };
 
+  const handleRefreshAllAccountRt = async () => {
+    try {
+      const result = await refreshAllAccountRt();
+      const failedItems = buildRtRefreshFailureDeleteItems(result, t);
+      if (!failedItems.length) {
+        return;
+      }
+      setRtFailureDeleteItems(failedItems);
+      setRtFailureDeleteSelectedIds(failedItems.map((item) => item.accountId));
+      setRtFailureDeleteDialogOpen(true);
+    } catch {
+      // hook 内已经提示错误
+    }
+  };
+
+  const toggleRtFailureDeleteSelection = (accountId: string) => {
+    setRtFailureDeleteSelectedIds((current) =>
+      current.includes(accountId)
+        ? current.filter((id) => id !== accountId)
+        : [...current, accountId],
+    );
+  };
+
+  const toggleAllRtFailureDeleteSelection = () => {
+    const allIds = rtFailureDeleteItems.map((item) => item.accountId);
+    setRtFailureDeleteSelectedIds((current) =>
+      allIds.length > 0 && allIds.every((id) => current.includes(id))
+        ? []
+        : allIds,
+    );
+  };
+
   const openAccountEditor = (account: Account) => {
     setAccountEditorState({
       accountId: account.id,
@@ -541,6 +605,23 @@ const toggleCleanupStatus = (rawStatus: string) => {
     );
   };
 
+  const handleConfirmRtFailureDelete = async () => {
+    if (!rtFailureDeleteSelectedIds.length) {
+      toast.error(t("请先勾选要删除的账号"));
+      return;
+    }
+    const targetIds = [...rtFailureDeleteSelectedIds];
+    try {
+      await deleteManyAccounts(targetIds);
+      setRtFailureDeleteDialogOpen(false);
+      setRtFailureDeleteItems([]);
+      setRtFailureDeleteSelectedIds([]);
+      setSelectedIds((current) => current.filter((id) => !targetIds.includes(id)));
+    } catch {
+      // hook 内已经提示错误，保留弹窗便于用户重试或取消
+    }
+  };
+
   return (
     <AccountsPageView
       accounts={accounts}
@@ -574,6 +655,9 @@ const toggleCleanupStatus = (rawStatus: string) => {
       cleanupDialogOpen={cleanupDialogOpen}
       cleanupStatusDraft={cleanupStatusDraft}
       cleanupStatusOptions={cleanupStatusOptions}
+      rtFailureDeleteDialogOpen={rtFailureDeleteDialogOpen}
+      rtFailureDeleteItems={rtFailureDeleteItems}
+      rtFailureDeleteSelectedIds={rtFailureDeleteSelectedIds}
       currentEditingAccount={currentEditingAccount}
       labelDraft={labelDraft}
       tagsDraft={tagsDraft}
@@ -600,6 +684,7 @@ const toggleCleanupStatus = (rawStatus: string) => {
       setExportModeDraft={setExportModeDraft}
       setDeleteDialogState={setDeleteDialogState}
       setCleanupDialogOpen={setCleanupDialogOpen}
+      setRtFailureDeleteDialogOpen={setRtFailureDeleteDialogOpen}
       setAccountEditorState={setAccountEditorState}
       setLabelDraft={setLabelDraft}
       setTagsDraft={setTagsDraft}
@@ -617,6 +702,9 @@ const toggleCleanupStatus = (rawStatus: string) => {
       openCleanupDialog={openCleanupDialog}
       toggleCleanupStatus={toggleCleanupStatus}
       handleConfirmCleanupStatuses={handleConfirmCleanupStatuses}
+      toggleRtFailureDeleteSelection={toggleRtFailureDeleteSelection}
+      toggleAllRtFailureDeleteSelection={toggleAllRtFailureDeleteSelection}
+      handleConfirmRtFailureDelete={handleConfirmRtFailureDelete}
       handleWarmupAccounts={handleWarmupAccounts}
       openExportDialog={openExportDialog}
       handleConfirmExport={handleConfirmExport}
@@ -626,7 +714,7 @@ const toggleCleanupStatus = (rawStatus: string) => {
       handleConfirmAccountEditor={handleConfirmAccountEditor}
       handleConfirmDelete={handleConfirmDelete}
       refreshAllAccounts={refreshAllAccounts}
-      refreshAllAccountRt={refreshAllAccountRt}
+      refreshAllAccountRt={handleRefreshAllAccountRt}
       refreshAccountList={refreshAccountList}
       refreshAccountRt={refreshAccountRt}
       importByFile={importByFile}

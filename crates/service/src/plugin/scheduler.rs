@@ -5,6 +5,13 @@ use super::runtime::run_plugin_task;
 use super::store::rearm_enabled_interval_tasks_for_plugin;
 
 const DEFAULT_PLUGIN_SCHEDULER_INTERVAL_SECS: u64 = 5;
+const DISABLED_SCHEDULED_PLUGIN_IDS: &[&str] = &["cleanup-unavailable-free-accounts"];
+
+fn is_disabled_scheduled_plugin(plugin_id: &str) -> bool {
+    DISABLED_SCHEDULED_PLUGIN_IDS
+        .iter()
+        .any(|disabled| *disabled == plugin_id)
+}
 
 /// 函数 `run_due_tasks_once`
 ///
@@ -33,6 +40,9 @@ pub(crate) fn run_due_tasks_once() -> u64 {
         }
     };
     for task in tasks {
+        if is_disabled_scheduled_plugin(&task.plugin_id) {
+            continue;
+        }
         let _ = run_plugin_task(&task.id, None);
     }
 
@@ -58,6 +68,9 @@ pub(crate) fn run_due_tasks_once() -> u64 {
 
     let mut next_sleep_secs = DEFAULT_PLUGIN_SCHEDULER_INTERVAL_SECS;
     for task in tasks {
+        if is_disabled_scheduled_plugin(&task.plugin_id) {
+            continue;
+        }
         if task.schedule_kind == "manual" || !task.enabled {
             continue;
         }

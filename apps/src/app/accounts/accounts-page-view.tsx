@@ -75,6 +75,7 @@ import {
   type AccountEditorState,
   type AccountExportMode,
   type DeleteDialogState,
+  type RtRefreshFailureDeleteItem,
   type StatusFilter,
   AccountInfoCell,
   QuotaOverviewCell,
@@ -142,6 +143,9 @@ export interface AccountsPageViewProps {
   cleanupDialogOpen: boolean;
   cleanupStatusDraft: string[];
   cleanupStatusOptions: CleanupStatusOption[];
+  rtFailureDeleteDialogOpen: boolean;
+  rtFailureDeleteItems: RtRefreshFailureDeleteItem[];
+  rtFailureDeleteSelectedIds: string[];
   selectedAccount: Account | null;
   accountEditorState: AccountEditorState | null;
   deleteDialogState: DeleteDialogState;
@@ -171,6 +175,7 @@ export interface AccountsPageViewProps {
   setExportModeDraft: Dispatch<SetStateAction<AccountExportMode>>;
   setDeleteDialogState: Dispatch<SetStateAction<DeleteDialogState>>;
   setCleanupDialogOpen: Dispatch<SetStateAction<boolean>>;
+  setRtFailureDeleteDialogOpen: Dispatch<SetStateAction<boolean>>;
   setAccountEditorState: Dispatch<SetStateAction<AccountEditorState | null>>;
   setLabelDraft: Dispatch<SetStateAction<string>>;
   setTagsDraft: Dispatch<SetStateAction<string>>;
@@ -188,6 +193,9 @@ export interface AccountsPageViewProps {
   openCleanupDialog: () => void;
   toggleCleanupStatus: (status: string) => void;
   handleConfirmCleanupStatuses: () => Promise<void>;
+  toggleRtFailureDeleteSelection: (accountId: string) => void;
+  toggleAllRtFailureDeleteSelection: () => void;
+  handleConfirmRtFailureDelete: () => Promise<void>;
   handleWarmupAccounts: () => Promise<void>;
   openExportDialog: () => void;
   handleConfirmExport: () => Promise<void>;
@@ -240,6 +248,9 @@ export function AccountsPageView(props: AccountsPageViewProps) {
     cleanupDialogOpen,
     cleanupStatusDraft,
     cleanupStatusOptions,
+    rtFailureDeleteDialogOpen,
+    rtFailureDeleteItems,
+    rtFailureDeleteSelectedIds,
     selectedAccount,
     accountEditorState,
     deleteDialogState,
@@ -269,6 +280,7 @@ export function AccountsPageView(props: AccountsPageViewProps) {
     setExportModeDraft,
     setDeleteDialogState,
     setCleanupDialogOpen,
+    setRtFailureDeleteDialogOpen,
     setAccountEditorState,
     setLabelDraft,
     setTagsDraft,
@@ -285,6 +297,9 @@ export function AccountsPageView(props: AccountsPageViewProps) {
     openCleanupDialog,
     toggleCleanupStatus,
     handleConfirmCleanupStatuses,
+    toggleRtFailureDeleteSelection,
+    toggleAllRtFailureDeleteSelection,
+    handleConfirmRtFailureDelete,
     handleWarmupAccounts,
     openExportDialog,
     handleConfirmExport,
@@ -309,6 +324,12 @@ export function AccountsPageView(props: AccountsPageViewProps) {
       cleanupStatusDraft.includes(option.id) ? total + option.count : total,
     0,
   );
+  const rtFailureDeleteSelectedCount = rtFailureDeleteSelectedIds.length;
+  const allRtFailureDeleteSelected =
+    rtFailureDeleteItems.length > 0 &&
+    rtFailureDeleteItems.every((item) =>
+      rtFailureDeleteSelectedIds.includes(item.accountId),
+    );
   const activeApiKeyModeLabel =
     activeApiKeyMode === "aggregate"
       ? t("聚合API模式")
@@ -780,6 +801,101 @@ export function AccountsPageView(props: AccountsPageViewProps) {
                 <Trash2 className="mr-2 h-4 w-4" />
               )}
               {t("确认清理")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isPageActive && rtFailureDeleteDialogOpen}
+        onOpenChange={(open) => {
+          if (!isDeletingMany) {
+            setRtFailureDeleteDialogOpen(open);
+          }
+        }}
+      >
+        <DialogContent className="glass-card border-border/70 sm:max-w-[640px]">
+          <DialogHeader>
+            <DialogTitle>{t("删除 AT/RT 刷新失败账号？")}</DialogTitle>
+            <DialogDescription>
+              {t("这些账号刷新 AT/RT 失败或缺少 token，不会自动删除；请勾选后确认。")}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="rounded-xl border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+              {t("删除后不可恢复；未勾选的账号会保留在列表中。")}
+            </div>
+            <div className="flex items-center gap-3 rounded-xl border border-border/70 bg-background/45 px-3 py-2">
+              <Checkbox
+                checked={allRtFailureDeleteSelected}
+                disabled={isDeletingMany || rtFailureDeleteItems.length === 0}
+                onCheckedChange={toggleAllRtFailureDeleteSelection}
+                aria-label={t("全选失败账号")}
+              />
+              <div className="min-w-0 flex-1 text-sm font-medium">
+                {t("全选失败账号")}
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {rtFailureDeleteSelectedCount}/{rtFailureDeleteItems.length}
+              </div>
+            </div>
+            <div className="max-h-[320px] space-y-2 overflow-y-auto pr-1">
+              {rtFailureDeleteItems.map((item) => {
+                const checked = rtFailureDeleteSelectedIds.includes(item.accountId);
+                return (
+                  <div
+                    key={item.accountId}
+                    className={cn(
+                      "flex items-start gap-3 rounded-xl border px-3 py-3 transition-colors",
+                      checked
+                        ? "border-destructive/40 bg-destructive/10"
+                        : "border-border/70 bg-background/45",
+                    )}
+                  >
+                    <Checkbox
+                      className="mt-0.5"
+                      checked={checked}
+                      disabled={isDeletingMany}
+                      onCheckedChange={() =>
+                        toggleRtFailureDeleteSelection(item.accountId)
+                      }
+                      aria-label={item.accountName}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-semibold">
+                        {item.accountName}
+                      </div>
+                      <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
+                        {item.accountId}
+                      </div>
+                      <div className="mt-2 break-words rounded-lg bg-muted/40 px-2 py-1 text-xs text-muted-foreground">
+                        {item.reason}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          <DialogFooter className="gap-2 sm:gap-2">
+            <DialogClose
+              className={buttonVariants({ variant: "outline" })}
+              type="button"
+              disabled={isDeletingMany}
+            >
+              {t("取消")}
+            </DialogClose>
+            <Button
+              variant="destructive"
+              disabled={isDeletingMany || rtFailureDeleteSelectedCount <= 0}
+              onClick={() => void handleConfirmRtFailureDelete()}
+            >
+              {isDeletingMany ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Trash2 className="mr-2 h-4 w-4" />
+              )}
+              {t("删除选中账号")} ({rtFailureDeleteSelectedCount})
             </Button>
           </DialogFooter>
         </DialogContent>

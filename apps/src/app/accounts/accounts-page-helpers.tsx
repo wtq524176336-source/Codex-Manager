@@ -16,7 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import type { Account } from "@/types";
 
-export type StatusFilter = "all" | "available" | "low_quota" | "limited" | "banned";
+export type StatusFilter = "all" | "available" | "limited" | "banned";
 export type AccountExportMode = "single" | "multiple";
 
 export type TranslateFn = (
@@ -73,8 +73,6 @@ export function formatStatusFilterLabel(value: string, t: TranslateFn) {
   switch (nextValue) {
     case "available":
       return t("正常");
-    case "low_quota":
-      return t("低配额");
     case "limited":
       return t("限流");
     case "banned":
@@ -107,6 +105,12 @@ export interface AccountEditorState {
   currentLabel: string;
   currentTags: string;
   currentNote: string;
+}
+
+export interface RtRefreshFailureDeleteItem {
+  accountId: string;
+  accountName: string;
+  reason: string;
 }
 
 export type DeleteDialogState =

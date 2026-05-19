@@ -9,7 +9,6 @@ use crate::storage_helpers::open_storage;
 
 const BUILTIN_MARKET_SOURCE_URL: &str = "builtin://codexmanager";
 const BUILTIN_CLEANUP_TASK_INTERVAL_SECS: i64 = 60;
-const BUILTIN_UNAVAILABLE_FREE_CLEANUP_TASK_INTERVAL_SECS: i64 = 60;
 const BUILTIN_MARKET_MODE: &str = "builtin";
 const CUSTOM_MARKET_MODE: &str = "custom";
 
@@ -325,28 +324,16 @@ pub(crate) fn fetch_catalog_entries(
 /// # 返回
 /// 返回函数执行结果
 fn builtin_catalog_entries() -> Vec<PluginCatalogEntry> {
-    vec![
-        build_builtin_cleanup_plugin(
-            "cleanup-banned-accounts",
-            "清理封禁账号",
-            "一键清理所有状态为 banned 的账号，适合做批量收尾整理。",
-            "开始清理封禁账号：",
-            "cleanup_banned_accounts()",
-            "清理完成，删除 ",
-            "所有封禁账号",
-            BUILTIN_CLEANUP_TASK_INTERVAL_SECS,
-        ),
-        build_builtin_cleanup_plugin(
-            "cleanup-unavailable-free-accounts",
-            "清理不可用免费账号",
-            "自动清理状态不可用且属于 free 的账号，适合做定时收尾整理。",
-            "开始清理不可用免费账号：",
-            "cleanup_unavailable_free_accounts()",
-            "清理完成，删除 ",
-            "不可用免费账号",
-            BUILTIN_UNAVAILABLE_FREE_CLEANUP_TASK_INTERVAL_SECS,
-        ),
-    ]
+    vec![build_builtin_cleanup_plugin(
+        "cleanup-banned-accounts",
+        "清理封禁账号",
+        "一键清理所有状态为 banned 的账号，适合做批量收尾整理。",
+        "开始清理封禁账号：",
+        "cleanup_banned_accounts()",
+        "清理完成，删除 ",
+        "所有封禁账号",
+        BUILTIN_CLEANUP_TASK_INTERVAL_SECS,
+    )]
 }
 
 /// 函数 `build_builtin_cleanup_plugin`
@@ -676,7 +663,7 @@ mod tests {
     #[test]
     fn builtin_catalog_exposes_cleanup_plugins() {
         let items = builtin_catalog_entries();
-        assert_eq!(items.len(), 2);
+        assert_eq!(items.len(), 1);
         let banned = items
             .iter()
             .find(|item| item.id == "cleanup-banned-accounts")
@@ -695,26 +682,6 @@ mod tests {
         assert_eq!(
             banned.tasks[0].interval_seconds,
             Some(super::BUILTIN_CLEANUP_TASK_INTERVAL_SECS)
-        );
-
-        let unavailable_free = items
-            .iter()
-            .find(|item| item.id == "cleanup-unavailable-free-accounts")
-            .expect("unavailable free cleanup plugin");
-        assert_eq!(unavailable_free.manifest_version, "1");
-        assert_eq!(unavailable_free.category.as_deref(), Some("official"));
-        assert_eq!(unavailable_free.runtime_kind, "rhai");
-        assert!(unavailable_free
-            .permissions
-            .iter()
-            .any(|item| item == "accounts:cleanup"));
-        assert!(!unavailable_free.tags.is_empty());
-        assert_eq!(unavailable_free.tasks.len(), 1);
-        assert_eq!(unavailable_free.tasks[0].entrypoint, "run");
-        assert_eq!(unavailable_free.tasks[0].schedule_kind, "interval");
-        assert_eq!(
-            unavailable_free.tasks[0].interval_seconds,
-            Some(super::BUILTIN_UNAVAILABLE_FREE_CLEANUP_TASK_INTERVAL_SECS)
         );
     }
 

@@ -710,7 +710,7 @@ export function useAccounts() {
         toast.info(t("当前没有可刷新的账号"));
         return;
       }
-      refreshAllAccountRtMutation.mutate();
+      return refreshAllAccountRtMutation.mutateAsync();
     },
     refreshAllAccounts: () => {
       if (!ensureServiceReady("刷新账号")) return;
@@ -731,7 +731,7 @@ export function useAccounts() {
     },
     deleteManyAccounts: (accountIds: string[]) => {
       if (!ensureServiceReady("批量删除账号")) return;
-      deleteManyMutation.mutate(accountIds);
+      return deleteManyMutation.mutateAsync(accountIds);
     },
     cleanupAccountsByStatuses: async (statuses: string[]) => {
       if (!ensureServiceReady("清理账号")) return;
