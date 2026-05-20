@@ -16,10 +16,12 @@ import {
   normalizeTagsDraft,
   type RtRefreshFailureDeleteItem,
   type StatusFilter,
+  type WarmupFailureItem,
 } from "@/app/accounts/accounts-page-helpers";
 import { AccountsPageView } from "@/app/accounts/accounts-page-view";
 import type { AddAccountModalMode } from "@/components/modals/add-account-modal";
 import { accountClient } from "@/lib/api/account-client";
+import type { AccountWarmupResult } from "@/lib/api/account-maintenance";
 import { isBannedAccount, isLimitedAccount } from "@/lib/utils/usage";
 import type { Account, ChatgptAuthTokensRefreshAllResult } from "@/types";
 
@@ -64,6 +66,24 @@ function buildRtRefreshFailureDeleteItems(
       accountName: item.accountName.trim() || item.accountId.trim(),
       reason: formatRtRefreshFailureReason(item.message, t),
     }));
+}
+
+function buildWarmupFailureItems(
+  result: AccountWarmupResult | undefined,
+  t: (message: string, values?: Record<string, string | number>) => string,
+): WarmupFailureItem[] {
+  return (result?.results || [])
+    .filter((item) => !item.ok)
+    .map((item) => {
+      const accountId = item.accountId.trim();
+      const accountName = item.accountName.trim();
+      const reason = item.message.trim();
+      return {
+        accountId,
+        accountName: accountName || accountId || t("未知账号"),
+        reason: reason || t("未知原因"),
+      };
+    });
 }
 
 export default function AccountsPage() {
@@ -147,6 +167,10 @@ export default function AccountsPage() {
   >([]);
   const [rtFailureDeleteSelectedIds, setRtFailureDeleteSelectedIds] = useState<
     string[]
+  >([]);
+  const [warmupFailureDialogOpen, setWarmupFailureDialogOpen] = useState(false);
+  const [warmupFailureItems, setWarmupFailureItems] = useState<
+    WarmupFailureItem[]
   >([]);
   const [switchingApiKeyId, setSwitchingApiKeyId] = useState<string | null>(null);
 
@@ -472,10 +496,15 @@ export default function AccountsPage() {
       return;
     }
     try {
-      await warmupAccounts({
+      const result = await warmupAccounts({
         accountIds: [],
         message: "hi",
       });
+      const failedItems = buildWarmupFailureItems(result, t);
+      if (failedItems.length > 0) {
+        setWarmupFailureItems(failedItems);
+        setWarmupFailureDialogOpen(true);
+      }
     } catch {
       // 中文注释：错误提示已在 hook 内统一处理，这里不重复提示。
     }
@@ -658,6 +687,8 @@ export default function AccountsPage() {
       rtFailureDeleteDialogOpen={rtFailureDeleteDialogOpen}
       rtFailureDeleteItems={rtFailureDeleteItems}
       rtFailureDeleteSelectedIds={rtFailureDeleteSelectedIds}
+      warmupFailureDialogOpen={warmupFailureDialogOpen}
+      warmupFailureItems={warmupFailureItems}
       currentEditingAccount={currentEditingAccount}
       labelDraft={labelDraft}
       tagsDraft={tagsDraft}
@@ -685,6 +716,7 @@ export default function AccountsPage() {
       setDeleteDialogState={setDeleteDialogState}
       setCleanupDialogOpen={setCleanupDialogOpen}
       setRtFailureDeleteDialogOpen={setRtFailureDeleteDialogOpen}
+      setWarmupFailureDialogOpen={setWarmupFailureDialogOpen}
       setAccountEditorState={setAccountEditorState}
       setLabelDraft={setLabelDraft}
       setTagsDraft={setTagsDraft}

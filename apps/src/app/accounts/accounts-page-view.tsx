@@ -77,6 +77,7 @@ import {
   type DeleteDialogState,
   type RtRefreshFailureDeleteItem,
   type StatusFilter,
+  type WarmupFailureItem,
   AccountInfoCell,
   QuotaOverviewCell,
   buildQuotaSummaryItems,
@@ -146,6 +147,8 @@ export interface AccountsPageViewProps {
   rtFailureDeleteDialogOpen: boolean;
   rtFailureDeleteItems: RtRefreshFailureDeleteItem[];
   rtFailureDeleteSelectedIds: string[];
+  warmupFailureDialogOpen: boolean;
+  warmupFailureItems: WarmupFailureItem[];
   selectedAccount: Account | null;
   accountEditorState: AccountEditorState | null;
   deleteDialogState: DeleteDialogState;
@@ -176,6 +179,7 @@ export interface AccountsPageViewProps {
   setDeleteDialogState: Dispatch<SetStateAction<DeleteDialogState>>;
   setCleanupDialogOpen: Dispatch<SetStateAction<boolean>>;
   setRtFailureDeleteDialogOpen: Dispatch<SetStateAction<boolean>>;
+  setWarmupFailureDialogOpen: Dispatch<SetStateAction<boolean>>;
   setAccountEditorState: Dispatch<SetStateAction<AccountEditorState | null>>;
   setLabelDraft: Dispatch<SetStateAction<string>>;
   setTagsDraft: Dispatch<SetStateAction<string>>;
@@ -251,6 +255,8 @@ export function AccountsPageView(props: AccountsPageViewProps) {
     rtFailureDeleteDialogOpen,
     rtFailureDeleteItems,
     rtFailureDeleteSelectedIds,
+    warmupFailureDialogOpen,
+    warmupFailureItems,
     selectedAccount,
     accountEditorState,
     deleteDialogState,
@@ -281,6 +287,7 @@ export function AccountsPageView(props: AccountsPageViewProps) {
     setDeleteDialogState,
     setCleanupDialogOpen,
     setRtFailureDeleteDialogOpen,
+    setWarmupFailureDialogOpen,
     setAccountEditorState,
     setLabelDraft,
     setTagsDraft,
@@ -897,6 +904,56 @@ export function AccountsPageView(props: AccountsPageViewProps) {
               )}
               {t("删除选中账号")} ({rtFailureDeleteSelectedCount})
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isPageActive && warmupFailureDialogOpen}
+        onOpenChange={setWarmupFailureDialogOpen}
+      >
+        <DialogContent className="glass-card w-[min(900px,calc(100vw-2rem))] border-border/70 sm:max-w-[900px]">
+          <DialogHeader>
+            <DialogTitle>{t("预热失败账号")}</DialogTitle>
+            <DialogDescription>
+              {t("以下账号预热失败；这里只展示结果，不会自动删除账号。")}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="rounded-xl border border-amber-300/35 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-200">
+              {t("失败账号数量")}: {warmupFailureItems.length}
+            </div>
+            <div className="max-h-[min(56vh,460px)] min-h-0 space-y-2 overflow-y-auto pr-1">
+              {warmupFailureItems.map((item, index) => (
+                <div
+                  key={`${item.accountId || item.accountName}-${index}`}
+                  className="grid grid-cols-[auto_minmax(0,1fr)] gap-3 rounded-xl border border-amber-300/35 bg-amber-500/10 px-3 py-3"
+                >
+                  <div className="mt-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-amber-500/15 text-xs font-semibold text-amber-700 dark:text-amber-200">
+                    {index + 1}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold">
+                      {item.accountName}
+                    </div>
+                    <div className="mt-0.5 break-all font-mono text-[11px] leading-relaxed text-muted-foreground">
+                      {item.accountId || t("无账号 ID")}
+                    </div>
+                    <div className="mt-2 whitespace-pre-wrap break-words rounded-lg bg-background/55 px-2 py-1 text-xs leading-relaxed text-muted-foreground">
+                      {item.reason}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <DialogFooter>
+            <DialogClose
+              className={buttonVariants({ variant: "outline" })}
+              type="button"
+            >
+              {t("关闭")}
+            </DialogClose>
           </DialogFooter>
         </DialogContent>
       </Dialog>

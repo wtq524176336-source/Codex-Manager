@@ -628,7 +628,6 @@ export function useAccounts() {
       const requested = Number(result?.requested || 0);
       const succeeded = Number(result?.succeeded || 0);
       const failed = Number(result?.failed || 0);
-      const firstFailedItem = (result?.results || []).find((item) => !item.ok);
       if (requested <= 0) {
         toast.info(t("当前没有可预热的账号"));
         return;
@@ -644,11 +643,7 @@ export function useAccounts() {
         success: succeeded,
         failed,
       });
-      toast.warning(
-        firstFailedItem?.message
-          ? `${summary}；${t("首个失败")}: ${firstFailedItem.accountName || firstFailedItem.accountId} - ${firstFailedItem.message}`
-          : summary,
-      );
+      toast.warning(`${summary}；${t("已打开失败账号列表")}`);
     },
     onError: (error: unknown) => {
       toast.error(`${t("账号预热失败")}: ${getAppErrorMessage(error)}`);

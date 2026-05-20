@@ -113,6 +113,12 @@ export interface RtRefreshFailureDeleteItem {
   reason: string;
 }
 
+export interface WarmupFailureItem {
+  accountId: string;
+  accountName: string;
+  reason: string;
+}
+
 export type DeleteDialogState =
   | { kind: "single"; account: Account }
   | { kind: "selected"; ids: string[]; count: number }
