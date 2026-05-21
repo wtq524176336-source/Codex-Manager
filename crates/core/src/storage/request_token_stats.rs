@@ -110,11 +110,24 @@ impl Storage {
             return Ok(0.0);
         }
         let mut stmt = self.conn.prepare(
-            "SELECT IFNULL(SUM(estimated_cost_usd), 0.0)
-             FROM request_token_stats
-             WHERE account_id = ?1
-               AND created_at >= ?2
-               AND created_at < ?3",
+            "SELECT IFNULL(SUM(t.estimated_cost_usd), 0.0)
+             FROM request_token_stats t
+             LEFT JOIN request_logs r ON r.id = t.request_log_id
+             WHERE t.account_id = ?1
+               AND (
+                    CASE
+                        WHEN r.created_at IS NOT NULL AND IFNULL(r.duration_ms, 0) > 0
+                            THEN r.created_at + CAST((IFNULL(r.duration_ms, 0) + 999) / 1000 AS INTEGER)
+                        ELSE t.created_at
+                    END
+               ) >= ?2
+               AND (
+                    CASE
+                        WHEN r.created_at IS NOT NULL AND IFNULL(r.duration_ms, 0) > 0
+                            THEN r.created_at + CAST((IFNULL(r.duration_ms, 0) + 999) / 1000 AS INTEGER)
+                        ELSE t.created_at
+                    END
+               ) < ?3",
         )?;
         stmt.query_row((account_id, start_ts, end_ts), |row| row.get(0))
     }
