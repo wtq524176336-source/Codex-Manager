@@ -230,6 +230,29 @@ async fn responses_handler(
     {
         return crate::http::responses_websocket::upgrade_responses_websocket(request).await;
     }
+    if request.method() == axum::http::Method::GET
+        && request.uri().path() == "/v1/responses"
+        && (request.headers().contains_key(header::UPGRADE)
+            || request.headers().contains_key("sec-websocket-key"))
+    {
+        let upgrade = request
+            .headers()
+            .get(header::UPGRADE)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("-");
+        let connection = request
+            .headers()
+            .get(header::CONNECTION)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("-");
+        log::warn!(
+            "event=responses_ws_upgrade_not_recognized uri={} upgrade={} connection={} has_sec_websocket_key={}",
+            request.uri(),
+            upgrade,
+            connection,
+            request.headers().contains_key("sec-websocket-key")
+        );
+    }
     proxy_handler(State(state), request).await
 }
 

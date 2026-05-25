@@ -243,6 +243,11 @@ fn upstream_connect_timeout_cached() -> Duration {
     Duration::from_secs(UPSTREAM_CONNECT_TIMEOUT_SECS.load(Ordering::Relaxed))
 }
 
+pub(crate) fn upstream_connect_timeout() -> Duration {
+    ensure_runtime_config_loaded();
+    upstream_connect_timeout_cached()
+}
+
 /// 函数 `build_upstream_client`
 ///
 /// 作者: gaohongshun

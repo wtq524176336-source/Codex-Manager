@@ -8,7 +8,8 @@ use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::net::IpAddr;
-use std::time::Instant;
+use std::future::Future;
+use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
@@ -138,18 +139,21 @@ impl WsSessionError {
 
 pub(super) fn is_websocket_upgrade_request(headers: &HeaderMap) -> bool {
     let upgrade_is_websocket = headers
-        .get(header::UPGRADE)
-        .and_then(|value| value.to_str().ok())
-        .is_some_and(|value| value.eq_ignore_ascii_case("websocket"));
+        .get_all(header::UPGRADE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .any(|value| value.eq_ignore_ascii_case("websocket"));
     let connection_has_upgrade = headers
-        .get(header::CONNECTION)
-        .and_then(|value| value.to_str().ok())
-        .is_some_and(|value| {
+        .get_all(header::CONNECTION)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .any(|value| {
             value
                 .split(',')
                 .any(|token| token.trim().eq_ignore_ascii_case("upgrade"))
         });
-    upgrade_is_websocket && connection_has_upgrade
+    let has_websocket_key = headers.contains_key("sec-websocket-key");
+    upgrade_is_websocket && (connection_has_upgrade || has_websocket_key)
 }
 
 pub(super) async fn upgrade_responses_websocket(request: HttpRequest<Body>) -> Response<Body> {
@@ -159,6 +163,11 @@ pub(super) async fn upgrade_responses_websocket(request: HttpRequest<Body>) -> R
         Ok(context) => context,
         Err(response) => return response,
     };
+    log::info!(
+        "event=responses_ws_upgrade_accepted api_key_id={} transparent_mode={}",
+        context.api_key.id,
+        context.transparent_mode
+    );
 
     let ws = match WebSocketUpgrade::from_request_parts(&mut parts, &()).await {
         Ok(ws) => ws,
@@ -811,8 +820,7 @@ async fn connect_upstream_websocket(
         };
         let request =
             build_upstream_websocket_request(ws_url.as_str(), &account, bearer.as_str(), context)?;
-        let proxy_url = crate::gateway::current_upstream_proxy_url_for_account(account.id.as_str());
-        match connect_upstream_websocket_request(request, ws_url.as_str(), proxy_url.as_deref())
+        match connect_upstream_websocket_for_account(request, ws_url.as_str(), &account, context)
             .await
         {
             Ok((stream, _)) => {
@@ -885,6 +893,176 @@ fn build_upstream_websocket_url(upstream_base: &str) -> Result<String, WsSession
     Ok(url.to_string())
 }
 
+struct WsProxySelection {
+    url: Option<String>,
+    source: &'static str,
+}
+
+async fn connect_upstream_websocket_for_account(
+    request: WsClientRequest,
+    ws_url: &str,
+    account: &codexmanager_core::storage::Account,
+    context: &WsRequestContext,
+) -> Result<
+    (
+        tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>,
+        WsClientResponse,
+    ),
+    String,
+> {
+    let proxy = websocket_proxy_selection_for_account(account.id.as_str(), ws_url);
+    let proxy_log = proxy
+        .url
+        .as_deref()
+        .map(sanitize_proxy_url_for_log)
+        .unwrap_or_else(|| "direct".to_string());
+    let started_at = Instant::now();
+    log::info!(
+        "event=responses_ws_upstream_connect_start api_key_id={} account_id={} upstream_url={} proxy_source={} proxy={} transparent_mode={}",
+        context.api_key.id,
+        account.id,
+        ws_url,
+        proxy.source,
+        proxy_log,
+        context.transparent_mode
+    );
+    let result = connect_upstream_websocket_request(request, ws_url, proxy.url.as_deref()).await;
+    match &result {
+        Ok(_) => log::info!(
+            "event=responses_ws_upstream_connect_ok api_key_id={} account_id={} upstream_url={} proxy_source={} elapsed_ms={}",
+            context.api_key.id,
+            account.id,
+            ws_url,
+            proxy.source,
+            started_at.elapsed().as_millis()
+        ),
+        Err(err) => log::warn!(
+            "event=responses_ws_upstream_connect_failed api_key_id={} account_id={} upstream_url={} proxy_source={} proxy={} elapsed_ms={} err={}",
+            context.api_key.id,
+            account.id,
+            ws_url,
+            proxy.source,
+            proxy_log,
+            started_at.elapsed().as_millis(),
+            err
+        ),
+    }
+    result
+}
+
+fn websocket_proxy_selection_for_account(account_id: &str, ws_url: &str) -> WsProxySelection {
+    if let Some(proxy_url) = crate::gateway::current_upstream_proxy_url_for_account(account_id)
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        return WsProxySelection {
+            url: Some(proxy_url),
+            source: "configured",
+        };
+    }
+    if let Some(proxy_url) = websocket_env_proxy_url(ws_url) {
+        return WsProxySelection {
+            url: Some(proxy_url),
+            source: "environment",
+        };
+    }
+    WsProxySelection {
+        url: None,
+        source: "direct",
+    }
+}
+
+fn websocket_env_proxy_url(ws_url: &str) -> Option<String> {
+    if websocket_no_proxy_matches(ws_url) {
+        return None;
+    }
+    [
+        "HTTPS_PROXY",
+        "https_proxy",
+        "ALL_PROXY",
+        "all_proxy",
+        "HTTP_PROXY",
+        "http_proxy",
+    ]
+    .into_iter()
+    .find_map(env_proxy_value)
+}
+
+fn env_proxy_value(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn websocket_no_proxy_matches(ws_url: &str) -> bool {
+    let Some(target_host) = url::Url::parse(ws_url)
+        .ok()
+        .and_then(|url| url.host_str().map(|host| host.to_ascii_lowercase()))
+    else {
+        return false;
+    };
+    let Some(no_proxy) = env_proxy_value("NO_PROXY").or_else(|| env_proxy_value("no_proxy"))
+    else {
+        return false;
+    };
+    no_proxy
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .any(|pattern| {
+            if pattern == "*" {
+                return true;
+            }
+            let normalized = pattern
+                .trim_start_matches('.')
+                .split(':')
+                .next()
+                .unwrap_or(pattern)
+                .to_ascii_lowercase();
+            target_host == normalized || target_host.ends_with(&format!(".{normalized}"))
+        })
+}
+
+fn sanitize_proxy_url_for_log(proxy_url: &str) -> String {
+    let Ok(mut url) = url::Url::parse(proxy_url) else {
+        return "<invalid-proxy-url>".to_string();
+    };
+    if !url.username().is_empty() {
+        let _ = url.set_username("***");
+    }
+    if url.password().is_some() {
+        let _ = url.set_password(Some("***"));
+    }
+    url.to_string()
+}
+
+fn websocket_connect_timeout() -> Duration {
+    let timeout = crate::gateway::current_upstream_connect_timeout();
+    if timeout.is_zero() {
+        Duration::from_secs(15)
+    } else {
+        timeout
+    }
+}
+
+async fn with_websocket_connect_timeout<T, F>(
+    operation: &str,
+    timeout: Duration,
+    future: F,
+) -> Result<T, String>
+where
+    F: Future<Output = Result<T, String>>,
+{
+    match tokio::time::timeout(timeout, future).await {
+        Ok(result) => result,
+        Err(_) => Err(format!(
+            "{operation} timed out after {} ms",
+            timeout.as_millis()
+        )),
+    }
+}
+
 async fn connect_upstream_websocket_request(
     request: WsClientRequest,
     ws_url: &str,
@@ -896,16 +1074,36 @@ async fn connect_upstream_websocket_request(
     ),
     String,
 > {
+    let timeout = websocket_connect_timeout();
     let Some(proxy_url) = proxy_url.map(str::trim).filter(|value| !value.is_empty()) else {
-        return connect_async_tls_with_config(request, None, false, None)
-            .await
-            .map_err(|err| err.to_string());
+        return with_websocket_connect_timeout(
+            "connect direct upstream websocket",
+            timeout,
+            async move {
+                connect_async_tls_with_config(request, None, false, None)
+                    .await
+                    .map_err(|err| format!("connect direct upstream websocket failed: {err}"))
+            },
+        )
+        .await;
     };
 
-    let stream = connect_websocket_proxy_tcp(ws_url, proxy_url).await?;
-    client_async_tls_with_config(request, stream, None, None)
-        .await
-        .map_err(|err| err.to_string())
+    let stream = with_websocket_connect_timeout(
+        "connect websocket proxy tunnel",
+        timeout,
+        connect_websocket_proxy_tcp(ws_url, proxy_url),
+    )
+    .await?;
+    with_websocket_connect_timeout(
+        "handshake upstream websocket through proxy",
+        timeout,
+        async move {
+            client_async_tls_with_config(request, stream, None, None)
+                .await
+                .map_err(|err| format!("handshake upstream websocket through proxy failed: {err}"))
+        },
+    )
+    .await
 }
 
 async fn connect_websocket_proxy_tcp(ws_url: &str, proxy_url: &str) -> Result<TcpStream, String> {
@@ -1534,11 +1732,11 @@ async fn try_rotate_ws_upstream_after_terminal(
     };
 
     ensure_rustls_crypto_provider();
-    let proxy_url = crate::gateway::current_upstream_proxy_url_for_account(account.id.as_str());
-    let replacement = match connect_upstream_websocket_request(
+    let replacement = match connect_upstream_websocket_for_account(
         request,
         upstream.upstream_url.as_str(),
-        proxy_url.as_deref(),
+        &account,
+        context,
     )
     .await
     {
