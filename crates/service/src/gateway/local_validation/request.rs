@@ -1279,6 +1279,14 @@ pub(super) fn build_local_validation_result(
     if transparent_mode {
         super::super::validate_text_input_limit_for_path(&normalized_path, &body)
             .map_err(|err| LocalValidationError::new(400, err.message()))?;
+        let local_conversation_id =
+            super::super::resolve_native_transparent_conversation_id(&incoming_headers);
+        let conversation_binding = super::super::conversation_binding::load_conversation_binding(
+            &storage,
+            api_key.key_hash.as_str(),
+            local_conversation_id.as_deref(),
+        )
+        .map_err(|err| LocalValidationError::new(500, err))?;
         let is_stream = resolve_client_is_stream(
             effective_protocol_type,
             normalized_path.as_str(),
@@ -1316,8 +1324,8 @@ pub(super) fn build_local_validation_result(
             request_method,
             key_id: api_key.id,
             platform_key_hash: api_key.key_hash,
-            local_conversation_id: None,
-            conversation_binding: None,
+            local_conversation_id,
+            conversation_binding,
             model_for_log,
             reasoning_for_log,
             service_tier_for_log,

@@ -31,6 +31,8 @@ fn is_codex_header_name(name: &str) -> bool {
     name.eq_ignore_ascii_case("x-openai-subagent")
         || name.eq_ignore_ascii_case("x-client-request-id")
         || name.eq_ignore_ascii_case("session_id")
+        || name.eq_ignore_ascii_case("session-id")
+        || name.eq_ignore_ascii_case("thread-id")
         || name.eq_ignore_ascii_case("conversation_id")
         || name.to_ascii_lowercase().starts_with("x-codex-")
 }
@@ -149,7 +151,8 @@ use request_rewrite::{
     apply_request_overrides_with_service_tier_and_prompt_cache_key_scope, compute_upstream_url,
 };
 pub(super) use thread_anchor::{
-    resolve_fallback_thread_anchor, resolve_local_conversation_id_with_sticky_fallback,
+    has_native_active_turn_state, resolve_fallback_thread_anchor,
+    resolve_local_conversation_id_with_sticky_fallback, resolve_native_transparent_conversation_id,
 };
 pub(crate) use trace_log::{
     log_client_service_tier, log_request_execution_plan, log_request_final, log_request_start,

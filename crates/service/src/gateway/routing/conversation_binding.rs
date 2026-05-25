@@ -1,6 +1,8 @@
 use codexmanager_core::storage::{now_ts, Account, ConversationBinding, Storage, Token};
 use sha2::{Digest, Sha256};
 
+use crate::usage_account_meta::{derive_account_meta, patch_account_meta_in_place};
+
 #[derive(Debug, Clone)]
 pub(crate) struct ConversationRoutingContext {
     pub(crate) platform_key_hash: String,
@@ -156,6 +158,59 @@ fn rotate_to_account_id(candidates: &mut [(Account, Token)], account_id: &str) -
         candidates.rotate_left(index);
     }
     true
+}
+
+fn account_allows_native_active_turn_replay(account: &Account) -> bool {
+    !matches!(
+        account.status.trim().to_ascii_lowercase().as_str(),
+        "unavailable" | "banned" | "disabled" | "inactive"
+    )
+}
+
+pub(crate) fn restore_native_active_turn_bound_candidate(
+    storage: &Storage,
+    binding: Option<&ConversationBinding>,
+    candidates: &mut Vec<(Account, Token)>,
+) -> Result<Option<String>, String> {
+    let Some(binding) = binding else {
+        return Ok(None);
+    };
+    let account_id = binding.account_id.trim();
+    if account_id.is_empty() {
+        return Ok(None);
+    }
+    if candidates
+        .iter()
+        .any(|(account, _)| account.id.as_str() == account_id)
+    {
+        return Ok(Some(account_id.to_string()));
+    }
+
+    let account = storage
+        .find_account_by_id(account_id)
+        .map_err(|err| format!("load native turn bound account failed: {err}"))?;
+    let Some(mut account) = account else {
+        return Ok(None);
+    };
+    if !account_allows_native_active_turn_replay(&account) {
+        return Ok(None);
+    }
+
+    let token = storage
+        .find_token_by_account_id(account_id)
+        .map_err(|err| format!("load native turn bound token failed: {err}"))?;
+    let Some(token) = token else {
+        return Ok(None);
+    };
+
+    let (chatgpt_account_id, workspace_id) = derive_account_meta(&token);
+    if patch_account_meta_in_place(&mut account, chatgpt_account_id, workspace_id) {
+        account.updated_at = now_ts();
+        let _ = storage.insert_account(&account);
+    }
+
+    candidates.push((account, token));
+    Ok(Some(account_id.to_string()))
 }
 
 /// 函数 `derive_next_thread_epoch`

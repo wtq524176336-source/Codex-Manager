@@ -496,6 +496,12 @@ pub(in super::super) fn proxy_validated_request(
         }
     }
 
+    let native_active_turn_replay = transparent_mode
+        && super::super::has_native_active_turn_state(&incoming_headers)
+        && conversation_binding.is_some();
+    let respond_when_empty =
+        respond_when_account_candidates_empty(execution_plan) && !native_active_turn_replay;
+
     let (request, mut candidates) = match prepare_candidates_for_proxy(
         request,
         &storage,
@@ -509,12 +515,15 @@ pub(in super::super) fn proxy_validated_request(
         reasoning_for_log.as_deref(),
         account_plan_filter.as_deref(),
         request_type_for_log.as_str(),
-        respond_when_account_candidates_empty(execution_plan),
+        respond_when_empty,
     ) {
         CandidatePrecheckResult::Ready {
             request,
             candidates,
         } => (request, candidates),
+        CandidatePrecheckResult::Empty { request } if native_active_turn_replay => {
+            (request, Vec::new())
+        }
         CandidatePrecheckResult::Empty { request } => {
             match resolve_aggregate_candidates_for_route(
                 &storage,
@@ -566,6 +575,15 @@ pub(in super::super) fn proxy_validated_request(
             }
         }
         CandidatePrecheckResult::Responded => return Ok(()),
+    };
+    let preserve_native_turn_account_id = if native_active_turn_replay {
+        super::super::conversation_binding::restore_native_active_turn_bound_candidate(
+            &storage,
+            conversation_binding.as_ref(),
+            &mut candidates,
+        )?
+    } else {
+        None
     };
     let setup = prepare_request_setup(
         path.as_str(),
@@ -635,6 +653,7 @@ pub(in super::super) fn proxy_validated_request(
             debug,
             allow_openai_fallback,
             disable_challenge_stateless_retry,
+            preserve_native_turn_account_id: preserve_native_turn_account_id.as_deref(),
         },
     )? {
         CandidateExecutionResult::Handled => return Ok(()),

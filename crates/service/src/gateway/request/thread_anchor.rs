@@ -14,6 +14,25 @@ pub(crate) fn has_native_thread_anchor(headers: &IncomingHeaderSnapshot) -> bool
         || normalize_anchor(headers.turn_state()).is_some()
 }
 
+pub(crate) fn resolve_native_transparent_conversation_id(
+    headers: &IncomingHeaderSnapshot,
+) -> Option<String> {
+    normalize_anchor(headers.thread_id())
+        .or_else(|| normalize_anchor(headers.conversation_id()))
+        .or_else(|| {
+            normalize_anchor(headers.turn_state()).map(|turn_state| {
+                format!(
+                    "codex-turn-state-{}",
+                    super::anchor_fingerprint::fingerprint_anchor(turn_state.as_str())
+                )
+            })
+        })
+}
+
+pub(crate) fn has_native_active_turn_state(headers: &IncomingHeaderSnapshot) -> bool {
+    normalize_anchor(headers.turn_state()).is_some()
+}
+
 pub(crate) fn resolve_local_conversation_id_with_sticky_fallback(
     headers: &IncomingHeaderSnapshot,
     allow_sticky_fallback: bool,

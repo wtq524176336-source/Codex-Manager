@@ -67,12 +67,21 @@ impl OpenAIResponsesEvent {
             .map(OpenAIResponsesEventKind::from_type)
             .unwrap_or(OpenAIResponsesEventKind::Other);
 
-        let upstream_error_hint = extract_error_message_from_json(&value);
+        let extra_output_text = collect_extra_output_text(&value, kind);
+        let mut upstream_error_hint = extract_error_message_from_json(&value);
+        if upstream_error_hint.is_none() {
+            if let Some(message) = extra_output_text
+                .as_deref()
+                .and_then(usage_limit_message_from_text)
+            {
+                upstream_error_hint = Some(message);
+            }
+        }
         let terminal =
             terminal_for_event(kind, event_type.as_deref(), upstream_error_hint.as_deref());
 
         let mut usage = parse_usage_from_json(&value);
-        if let Some(extra_output_text) = collect_extra_output_text(&value, kind) {
+        if let Some(extra_output_text) = extra_output_text {
             let target = usage.output_text.get_or_insert_with(String::new);
             append_output_text(target, extra_output_text.as_str());
         }
@@ -134,6 +143,15 @@ fn normalize_terminal_error_hint(raw: &str) -> String {
     }
 
     trimmed.to_string()
+}
+
+pub(in super::super) fn usage_limit_message_from_text(text: &str) -> Option<String> {
+    let message = text.trim();
+    if message.is_empty() {
+        return None;
+    }
+    crate::account_status::usage_limit_reason_from_message(message)?;
+    Some(message.to_string())
 }
 
 fn collect_extra_output_text(value: &Value, kind: OpenAIResponsesEventKind) -> Option<String> {
@@ -223,5 +241,26 @@ mod tests {
             Some("response.image_generation_call.partial_image")
         );
         assert!(event.terminal.is_none());
+    }
+
+    #[test]
+    fn parse_openai_responses_event_preserves_usage_limit_delta_as_terminal_error() {
+        let message = "You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at May 26th, 2026\n12:22 AM.";
+        let lines = vec![
+            "event: response.output_text.delta\n".to_string(),
+            format!(
+                "data: {{\"type\":\"response.output_text.delta\",\"delta\":{}}}\n",
+                serde_json::to_string(message).expect("serialize message")
+            ),
+            "\n".to_string(),
+        ];
+
+        let event = OpenAIResponsesEvent::parse(&lines).expect("parsed event");
+        assert_eq!(event.upstream_error_hint.as_deref(), Some(message));
+        assert!(matches!(
+            event.terminal,
+            Some(SseTerminal::Err(ref actual)) if actual == message
+        ));
+        assert_eq!(event.usage.output_text.as_deref(), Some(message));
     }
 }

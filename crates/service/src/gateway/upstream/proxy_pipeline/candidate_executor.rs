@@ -82,6 +82,7 @@ pub(in super::super) struct CandidateExecutorParams<'a> {
     pub(in super::super) debug: bool,
     pub(in super::super) allow_openai_fallback: bool,
     pub(in super::super) disable_challenge_stateless_retry: bool,
+    pub(in super::super) preserve_native_turn_account_id: Option<&'a str>,
 }
 
 fn record_failover_attempt(
@@ -179,6 +180,7 @@ pub(in super::super) fn execute_candidate_sequence(
         debug,
         allow_openai_fallback,
         disable_challenge_stateless_retry,
+        preserve_native_turn_account_id,
     } = params;
     let transparent_mode = context.transparent_mode();
     let mut request = Some(request);
@@ -189,6 +191,11 @@ pub(in super::super) fn execute_candidate_sequence(
     let mut last_attempt_url = None;
     let mut last_attempt_error = None;
     for (idx, (account, mut token)) in candidates.into_iter().enumerate() {
+        let preserve_native_turn_account = preserve_native_turn_account_id
+            .is_some_and(|account_id| account_id == account.id.as_str());
+        if preserve_native_turn_account_id.is_some() && !preserve_native_turn_account {
+            continue;
+        }
         if deadline::is_expired(request_deadline) {
             let request = request
                 .take()
@@ -256,16 +263,20 @@ pub(in super::super) fn execute_candidate_sequence(
             )
         };
         context.log_candidate_start(&account.id, idx, strip_session_affinity);
-        if let Some(skip_reason) = context.should_skip_candidate(&account.id, idx) {
-            context.log_candidate_skip(&account.id, idx, skip_reason);
-            match skip_reason {
-                super::super::support::candidates::CandidateSkipReason::Cooldown => {
-                    skipped_cooldown += 1;
+        if !preserve_native_turn_account {
+            if let Some(skip_reason) = context.should_skip_candidate(&account.id, idx) {
+                context.log_candidate_skip(&account.id, idx, skip_reason);
+                match skip_reason {
+                    super::super::support::candidates::CandidateSkipReason::Cooldown => {
+                        skipped_cooldown += 1;
+                    }
                 }
+                continue;
             }
-            continue;
         }
         attempted_account_ids.push(account.id.clone());
+        let attempt_has_more_candidates =
+            context.has_more_candidates(idx) && !preserve_native_turn_account;
 
         let request_ref = request
             .as_ref()
@@ -316,7 +327,7 @@ pub(in super::super) fn execute_candidate_sequence(
             debug,
             allow_openai_fallback: attempt_allow_openai_fallback,
             disable_challenge_stateless_retry,
-            has_more_candidates: context.has_more_candidates(idx),
+            has_more_candidates: attempt_has_more_candidates,
             context,
             setup,
             trace: &mut attempt_trace,
@@ -338,7 +349,7 @@ pub(in super::super) fn execute_candidate_sequence(
                 if should_failover_terminal_gateway_error(
                     context,
                     &account.id,
-                    context.has_more_candidates(idx),
+                    attempt_has_more_candidates,
                     &message,
                     &mut attempt_trace,
                     &mut last_attempt_url,
@@ -390,7 +401,7 @@ pub(in super::super) fn execute_candidate_sequence(
                         debug,
                         allow_openai_fallback: attempt_allow_openai_fallback,
                         disable_challenge_stateless_retry,
-                        has_more_candidates: context.has_more_candidates(idx),
+                        has_more_candidates: attempt_has_more_candidates,
                         context,
                         setup,
                         trace: &mut attempt_trace,
@@ -454,7 +465,7 @@ pub(in super::super) fn execute_candidate_sequence(
                     started_at,
                     attempt_model_for_log,
                     Some(attempted_account_ids.as_slice()),
-                    context.has_more_candidates(idx),
+                    attempt_has_more_candidates,
                 )? {
                     FinalizeUpstreamResponseOutcome::Handled => {
                         if let Err(err) = super::super::super::conversation_binding::record_conversation_binding_terminal_response(

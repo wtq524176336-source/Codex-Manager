@@ -11,6 +11,7 @@ pub(crate) struct IncomingHeaderSnapshot {
     user_agent: Option<String>,
     originator: Option<String>,
     session_id: Option<String>,
+    thread_id: Option<String>,
     session_affinity: Option<String>,
     client_request_id: Option<String>,
     subagent: Option<String>,
@@ -83,6 +84,15 @@ impl IncomingHeaderSnapshot {
             if snapshot.session_id.is_none() && name.eq_ignore_ascii_case("session_id") {
                 if !value.is_empty() {
                     snapshot.session_id = Some(value.to_string());
+                }
+                continue;
+            }
+            if snapshot.thread_id.is_none()
+                && (name.eq_ignore_ascii_case("thread-id")
+                    || name.eq_ignore_ascii_case("thread_id"))
+            {
+                if !value.is_empty() {
+                    snapshot.thread_id = Some(value.to_string());
                 }
                 continue;
             }
@@ -232,6 +242,15 @@ impl IncomingHeaderSnapshot {
                 let value = header.value.as_str().trim();
                 if !value.is_empty() {
                     snapshot.session_id = Some(value.to_string());
+                }
+                continue;
+            }
+            if snapshot.thread_id.is_none()
+                && (header.field.equiv("thread-id") || header.field.equiv("thread_id"))
+            {
+                let value = header.value.as_str().trim();
+                if !value.is_empty() {
+                    snapshot.thread_id = Some(value.to_string());
                 }
                 continue;
             }
@@ -526,6 +545,10 @@ impl IncomingHeaderSnapshot {
     /// 返回函数执行结果
     pub(crate) fn session_id(&self) -> Option<&str> {
         self.session_id.as_deref()
+    }
+
+    pub(crate) fn thread_id(&self) -> Option<&str> {
+        self.thread_id.as_deref()
     }
 
     /// 函数 `session_affinity`
