@@ -526,7 +526,9 @@ fn authorize_websocket_request(headers: &HeaderMap) -> Result<WsRequestContext, 
     })
 }
 
-async fn receive_initial_request(socket: &mut WebSocket) -> Result<Option<Message>, WsSessionError> {
+async fn receive_initial_request(
+    socket: &mut WebSocket,
+) -> Result<Option<Message>, WsSessionError> {
     loop {
         let Some(message) = socket.recv().await else {
             return Ok(None);
