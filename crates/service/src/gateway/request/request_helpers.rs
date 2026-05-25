@@ -369,9 +369,11 @@ pub(crate) fn should_drop_incoming_header(name: &str) -> bool {
 /// 返回函数执行结果
 #[cfg(test)]
 pub(crate) fn should_drop_session_affinity_header(name: &str) -> bool {
-    // 中文注释：session_id / turn-state 属于会话粘性信号，正常直连时应保留；
+    // 中文注释：session_id/session-id / turn-state 属于会话粘性信号，正常直连时应保留；
     // 仅在 failover 到其他账号时剔除，避免继续命中旧账号会话路由导致“切换无效”。
-    name.eq_ignore_ascii_case("session_id") || name.eq_ignore_ascii_case("x-codex-turn-state")
+    name.eq_ignore_ascii_case("session_id")
+        || name.eq_ignore_ascii_case("session-id")
+        || name.eq_ignore_ascii_case("x-codex-turn-state")
 }
 
 /// 函数 `should_drop_incoming_header_for_failover`
