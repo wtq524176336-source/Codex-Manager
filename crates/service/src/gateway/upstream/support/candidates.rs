@@ -3,7 +3,6 @@ use codexmanager_core::storage::{Account, Storage, Token};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in super::super) enum CandidateSkipReason {
     Cooldown,
-    Inflight,
 }
 
 /// 函数 `prepare_gateway_candidates`
@@ -111,7 +110,6 @@ pub(in super::super) fn candidate_skip_reason_for_proxy(
     account_id: &str,
     idx: usize,
     candidate_count: usize,
-    account_max_inflight: usize,
 ) -> Option<CandidateSkipReason> {
     let has_more_candidates = idx + 1 < candidate_count;
     if super::super::super::is_account_in_cooldown(account_id) && has_more_candidates {
@@ -121,24 +119,13 @@ pub(in super::super) fn candidate_skip_reason_for_proxy(
         return Some(CandidateSkipReason::Cooldown);
     }
 
-    if account_max_inflight > 0
-        && super::super::super::account_inflight_count(account_id) >= account_max_inflight
-        && has_more_candidates
-    {
-        // 中文注释：并发上限是软约束，最后一个候选仍要尝试，避免把可恢复抖动直接放大成全局不可用。
-        super::super::super::record_gateway_candidate_skip(
-            super::super::super::GatewayCandidateSkipReason::Inflight,
-        );
-        return Some(CandidateSkipReason::Inflight);
-    }
-
     None
 }
 #[cfg(test)]
 mod tests {
     use super::{
         allow_openai_fallback_for_account, candidate_skip_reason_for_proxy,
-        free_account_model_override, CandidateSkipReason,
+        free_account_model_override,
     };
     use codexmanager_core::storage::{now_ts, Account, Storage, Token, UsageSnapshotRecord};
 
@@ -467,9 +454,9 @@ mod tests {
     }
 
     #[test]
-    fn candidate_skip_reason_for_proxy_allows_failover_when_head_account_is_inflight_limited() {
+    fn candidate_skip_reason_for_proxy_does_not_skip_when_account_is_inflight() {
         let _guard = crate::gateway::acquire_account_inflight("acc-preferred");
-        let actual = candidate_skip_reason_for_proxy("acc-preferred", 0, 2, 1);
-        assert_eq!(actual, Some(CandidateSkipReason::Inflight));
+        let actual = candidate_skip_reason_for_proxy("acc-preferred", 0, 2);
+        assert_eq!(actual, None);
     }
 }

@@ -18,7 +18,6 @@ const SETTINGS_SNAPSHOT = {
   freeAccountMaxModel: "auto",
   freeAccountMaxModelOptions: ["auto", "gpt-5"],
   modelForwardRules: "",
-  accountMaxInflight: 1,
   gatewayOriginator: "codex-cli",
   gatewayOriginatorDefault: "codex-cli",
   gatewayUserAgentVersion: "1.0.0",

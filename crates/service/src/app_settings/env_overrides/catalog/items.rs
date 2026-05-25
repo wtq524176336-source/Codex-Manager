@@ -47,13 +47,6 @@ pub(crate) const ENV_OVERRIDE_CATALOG: &[EnvOverrideCatalogItem] = &[
         "200",
     ),
     EnvOverrideCatalogItem::new(
-        "CODEXMANAGER_ACCOUNT_MAX_INFLIGHT",
-        "单账号最大并发",
-        ENV_OVERRIDE_SCOPE_SERVICE,
-        ENV_OVERRIDE_APPLY_MODE_RUNTIME,
-        "0",
-    ),
-    EnvOverrideCatalogItem::new(
         "CODEXMANAGER_ALLOW_NON_LOOPBACK_LOGIN_ADDR",
         "允许非回环登录回调",
         ENV_OVERRIDE_SCOPE_SERVICE,

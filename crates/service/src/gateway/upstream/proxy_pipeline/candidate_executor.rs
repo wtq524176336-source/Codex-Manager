@@ -185,7 +185,7 @@ pub(in super::super) fn execute_candidate_sequence(
     let mut state = CandidateExecutionState::default();
     let mut attempted_account_ids = Vec::new();
     let mut skipped_cooldown = 0usize;
-    let mut skipped_inflight = 0usize;
+    let skipped_inflight = 0usize;
     let mut last_attempt_url = None;
     let mut last_attempt_error = None;
     for (idx, (account, mut token)) in candidates.into_iter().enumerate() {
@@ -261,9 +261,6 @@ pub(in super::super) fn execute_candidate_sequence(
             match skip_reason {
                 super::super::support::candidates::CandidateSkipReason::Cooldown => {
                     skipped_cooldown += 1;
-                }
-                super::super::support::candidates::CandidateSkipReason::Inflight => {
-                    skipped_inflight += 1;
                 }
             }
             continue;

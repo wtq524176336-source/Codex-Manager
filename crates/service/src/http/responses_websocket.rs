@@ -6,9 +6,10 @@ use axum::http::{Request as HttpRequest, Response, StatusCode};
 use base64::Engine as _;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::net::IpAddr;
 use std::future::Future;
+use std::net::IpAddr;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -20,14 +21,24 @@ use tokio_tungstenite::tungstenite::Message as UpstreamMessage;
 use tokio_tungstenite::{client_async_tls_with_config, connect_async_tls_with_config};
 
 use crate::http::codex_source::{
-    response_create_client_metadata, ResponseCreateWsRequest, ResponsesWsRequest,
-    RESPONSES_ENDPOINT, X_CODEX_PARENT_THREAD_ID_HEADER, X_CODEX_TURN_METADATA_HEADER,
-    X_CODEX_WINDOW_ID_HEADER, X_OPENAI_SUBAGENT_HEADER,
+    response_create_client_metadata, RESPONSES_ENDPOINT, X_CODEX_PARENT_THREAD_ID_HEADER,
+    X_CODEX_TURN_METADATA_HEADER, X_CODEX_WINDOW_ID_HEADER, X_OPENAI_SUBAGENT_HEADER,
 };
 use crate::http::proxy_response::{text_error_response, text_response};
 use crate::storage_helpers::{hash_platform_key, open_storage};
 
 const RESPONSES_WS_ERROR_CODE: &str = "responses_websocket_error";
+
+fn websocket_text_sha256_16(text: &str) -> String {
+    use std::fmt::Write as _;
+
+    let digest = Sha256::digest(text.as_bytes());
+    let mut output = String::with_capacity(16);
+    for byte in digest.iter().take(8) {
+        let _ = write!(&mut output, "{byte:02x}");
+    }
+    output
+}
 
 #[derive(Clone)]
 struct WsRequestContext {
@@ -657,6 +668,7 @@ fn rewrite_client_frame(
     let previous_response_id = object.remove("previous_response_id");
     let generate = object.remove("generate");
     let client_metadata = object.remove("client_metadata");
+    let client_passthrough_fields = object.clone();
 
     let rewritten_body = crate::gateway::gateway_rewrite_ws_responses_body(
         RESPONSES_ENDPOINT,
@@ -695,37 +707,62 @@ fn rewrite_client_frame(
     if let Some(client_metadata) = merged_client_metadata {
         rewritten_object.insert("client_metadata".to_string(), client_metadata);
     }
+    let mut restored_keys = Vec::new();
+    for (key, value) in client_passthrough_fields {
+        if key == "stream_passthrough" {
+            continue;
+        }
+        if !rewritten_object.contains_key(&key) {
+            restored_keys.push(key.clone());
+            rewritten_object.insert(key, value);
+        }
+    }
+    if !restored_keys.is_empty() {
+        restored_keys.sort_unstable();
+        log::debug!(
+            "event=responses_ws_passthrough_fields_restored api_key_id={} keys={}",
+            context.api_key.id,
+            restored_keys.join(",")
+        );
+    }
 
-    let request: ResponseCreateWsRequest =
-        serde_json::from_value(Value::Object(rewritten_object.clone())).map_err(|err| {
+    let model = rewritten_object
+        .get("model")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| {
             WsSessionError::bad_request_bilingual(
-                "WebSocket 请求不符合官方 Codex request 形状",
-                format!("invalid official codex websocket request shape: {err}"),
+                "重写后的 WebSocket 请求缺少 model 字段",
+                "rewritten websocket request missing model field",
             )
         })?;
-    let effective_service_tier = request
-        .service_tier
-        .as_deref()
+    let effective_service_tier = rewritten_object
+        .get("service_tier")
+        .and_then(Value::as_str)
         .and_then(crate::apikey::service_tier::normalize_service_tier_for_log)
         .map(str::to_string);
-    let reasoning_effort = request
-        .reasoning
-        .as_ref()
+    let reasoning_effort = rewritten_object
+        .get("reasoning")
         .and_then(|value| value.get("effort"))
         .and_then(Value::as_str)
         .map(str::to_string);
-    let text = serde_json::to_string(&ResponsesWsRequest::ResponseCreate(request.clone()))
-        .map_err(|err| {
-            WsSessionError::bad_request_bilingual(
-                "序列化官方 Codex WebSocket 请求失败",
-                format!("serialize official codex websocket request failed: {err}"),
-            )
-        })?;
+
+    let mut final_payload = rewritten_object.clone();
+    final_payload.insert(
+        "type".to_string(),
+        Value::String("response.create".to_string()),
+    );
+    let text = serde_json::to_string(&Value::Object(final_payload)).map_err(|err| {
+        WsSessionError::bad_request_bilingual(
+            "序列化官方 Codex WebSocket 请求失败",
+            format!("serialize official codex websocket request failed: {err}"),
+        )
+    })?;
 
     Ok(PreparedClientFrame {
         upstream_message: UpstreamMessage::Text(text.clone().into()),
         text,
-        model: Some(request.model),
+        model: Some(model),
         reasoning_effort,
         service_tier: explicit_service_tier_for_log,
         effective_service_tier,
@@ -917,14 +954,16 @@ async fn connect_upstream_websocket_for_account(
         .map(sanitize_proxy_url_for_log)
         .unwrap_or_else(|| "direct".to_string());
     let started_at = Instant::now();
+    let connect_timeout_ms = websocket_connect_timeout().as_millis();
     log::info!(
-        "event=responses_ws_upstream_connect_start api_key_id={} account_id={} upstream_url={} proxy_source={} proxy={} transparent_mode={}",
+        "event=responses_ws_upstream_connect_start api_key_id={} account_id={} upstream_url={} proxy_source={} proxy={} transparent_mode={} connect_timeout_ms={}",
         context.api_key.id,
         account.id,
         ws_url,
         proxy.source,
         proxy_log,
-        context.transparent_mode
+        context.transparent_mode,
+        connect_timeout_ms
     );
     let result = connect_upstream_websocket_request(request, ws_url, proxy.url.as_deref()).await;
     match &result {
@@ -980,6 +1019,10 @@ fn websocket_proxy_selection_for_account(account_id: &str, ws_url: &str) -> WsPr
 
 fn websocket_env_proxy_url(ws_url: &str) -> Option<String> {
     if websocket_no_proxy_matches(ws_url) {
+        log::info!(
+            "event=responses_ws_proxy_env_bypassed upstream_url={} reason=no_proxy",
+            ws_url
+        );
         return None;
     }
     [
@@ -1021,8 +1064,7 @@ fn websocket_no_proxy_matches(ws_url: &str) -> bool {
     else {
         return false;
     };
-    let Some(no_proxy) = env_text_value("NO_PROXY").or_else(|| env_text_value("no_proxy"))
-    else {
+    let Some(no_proxy) = env_text_value("NO_PROXY").or_else(|| env_text_value("no_proxy")) else {
         return false;
     };
     no_proxy
@@ -1156,12 +1198,20 @@ fn parse_windows_proxy_server(ws_url: &str, proxy_server: &str) -> Option<String
         .ok()
         .map(|url| url.scheme().to_ascii_lowercase())
         .unwrap_or_else(|| "wss".to_string());
-    let preferred_key = if target_scheme == "ws" { "http" } else { "https" };
+    let preferred_key = if target_scheme == "ws" {
+        "http"
+    } else {
+        "https"
+    };
     let mut preferred = None;
     let mut http = None;
     let mut socks = None;
 
-    for part in raw.split(';').map(str::trim).filter(|part| !part.is_empty()) {
+    for part in raw
+        .split(';')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+    {
         let Some((key, value)) = part.split_once('=') else {
             continue;
         };
@@ -1196,7 +1246,10 @@ fn windows_proxy_entry_to_url(key: &str, value: &str) -> String {
 }
 
 fn websocket_proxy_override_matches(ws_url: &str, override_list: Option<&str>) -> bool {
-    let Some(raw) = override_list.map(str::trim).filter(|value| !value.is_empty()) else {
+    let Some(raw) = override_list
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
         return false;
     };
     let Some(target_host) = websocket_target_host(ws_url) else {
@@ -1747,6 +1800,28 @@ fn begin_ws_request_log(
         prepared.has_service_tier_field,
         prepared.raw_service_tier.as_deref(),
         prepared.service_tier.as_deref(),
+    );
+    let (frame_kind, frame_len, frame_sha256_16) = if prepared.text.is_empty() {
+        let frame_len = match &prepared.upstream_message {
+            UpstreamMessage::Binary(bytes) => bytes.len(),
+            _ => 0,
+        };
+        ("binary", frame_len, "-".to_string())
+    } else {
+        (
+            "text",
+            prepared.text.len(),
+            websocket_text_sha256_16(prepared.text.as_str()),
+        )
+    };
+    log::info!(
+        "event=responses_ws_client_frame_prepared trace_id={} api_key_id={} transparent_mode={} frame_kind={} frame_len={} frame_sha256_16={}",
+        trace_id,
+        context.api_key.id,
+        context.transparent_mode,
+        frame_kind,
+        frame_len,
+        frame_sha256_16
     );
     PendingWsRequestLog {
         trace_id,
@@ -2593,6 +2668,8 @@ mod tests {
             "include",
             "input",
             "instructions",
+            "max_output_tokens",
+            "metadata",
             "model",
             "parallel_tool_calls",
             "previous_response_id",
@@ -2601,10 +2678,15 @@ mod tests {
             "service_tier",
             "store",
             "stream",
+            "temperature",
             "text",
             "tool_choice",
             "tools",
+            "top_p",
+            "truncation",
             "type",
+            "unknown_field",
+            "user",
         ]
         .into_iter()
         .collect::<std::collections::BTreeSet<_>>();
@@ -2626,13 +2708,13 @@ mod tests {
             value["client_metadata"]["x-codex-turn-metadata"],
             "turn-meta-1"
         );
-        assert!(object.get("max_output_tokens").is_none());
-        assert!(object.get("metadata").is_none());
-        assert!(object.get("temperature").is_none());
-        assert!(object.get("top_p").is_none());
-        assert!(object.get("truncation").is_none());
-        assert!(object.get("user").is_none());
-        assert!(object.get("unknown_field").is_none());
+        assert_eq!(value["max_output_tokens"], 1024);
+        assert_eq!(value["metadata"]["client"], "third-party");
+        assert_eq!(value["temperature"], 0.2);
+        assert_eq!(value["top_p"], 0.9);
+        assert_eq!(value["truncation"], "auto");
+        assert_eq!(value["user"], "third-party-user");
+        assert_eq!(value["unknown_field"], true);
     }
 
     #[test]

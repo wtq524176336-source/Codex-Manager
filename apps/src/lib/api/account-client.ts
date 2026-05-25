@@ -107,7 +107,6 @@ interface ApiKeyPayload {
   rotationStrategy?: string | null;
   aggregateApiId?: string | null;
   accountPlanFilter?: string | null;
-  quotaLimitTokens?: number | null;
 }
 
 export interface ManagedModelPayload {
@@ -581,7 +580,6 @@ export const accountClient = {
         rotationStrategy: params.rotationStrategy || null,
         aggregateApiId: params.aggregateApiId || null,
         accountPlanFilter: params.accountPlanFilter || null,
-        quotaLimitTokens: params.quotaLimitTokens ?? null,
       })
     );
     return normalizeApiKeyCreateResult(result);
@@ -606,9 +604,6 @@ export const accountClient = {
       aggregateApiId: params.aggregateApiId || null,
       accountPlanFilter: params.accountPlanFilter || null,
     };
-    if ("quotaLimitTokens" in params) {
-      payload.quotaLimitTokens = params.quotaLimitTokens ?? null;
-    }
     return invoke("service_apikey_update_model", withAddr(payload));
   },
   disableApiKey: (keyId: string) =>

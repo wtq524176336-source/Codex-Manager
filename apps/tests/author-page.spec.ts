@@ -20,7 +20,6 @@ const SETTINGS_SNAPSHOT = {
   freeAccountMaxModel: "auto",
   freeAccountMaxModelOptions: ["auto", "gpt-5"],
   modelForwardRules: "",
-  accountMaxInflight: 1,
   gatewayOriginator: "codex-cli",
   gatewayOriginatorDefault: "codex-cli",
   gatewayUserAgentVersion: "1.0.0",
@@ -141,7 +140,7 @@ async function mockRuntimeAndRpc(page: Page) {
     const method = typeof payload?.method === "string" ? payload.method : "";
     const id = payload?.id ?? 1;
 
-    const resultByMethod = {
+    const resultByMethod: Record<string, unknown> = {
       "appSettings/get": SETTINGS_SNAPSHOT,
       initialize: {
         userAgent: "codex_cli_rs/0.3.0",
@@ -156,9 +155,8 @@ async function mockRuntimeAndRpc(page: Page) {
         httpWorkerMin: 8,
         httpStreamWorkerFactor: 1,
         httpStreamWorkerMin: 2,
-        accountMaxInflight: 1,
       },
-    } satisfies Record<string, unknown>;
+    };
 
     if (!(method in resultByMethod)) {
       await route.fulfill({

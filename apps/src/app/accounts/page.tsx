@@ -347,7 +347,6 @@ export default function AccountsPage() {
           nextRotationStrategy === "account_rotation"
             ? activeApiKey.accountPlanFilter || null
             : null,
-        quotaLimitTokens: activeApiKey.quotaLimitTokens,
       });
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["apikeys"] }),

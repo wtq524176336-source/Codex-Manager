@@ -16,7 +16,6 @@ pub(in super::super) struct GatewayUpstreamExecutionContext<'a> {
     service_tier_for_log: Option<&'a str>,
     effective_service_tier_for_log: Option<&'a str>,
     candidate_count: usize,
-    account_max_inflight: usize,
     transparent_mode: bool,
 }
 
@@ -48,7 +47,6 @@ impl<'a> GatewayUpstreamExecutionContext<'a> {
         service_tier_for_log: Option<&'a str>,
         effective_service_tier_for_log: Option<&'a str>,
         candidate_count: usize,
-        account_max_inflight: usize,
         transparent_mode: bool,
     ) -> Self {
         Self {
@@ -66,7 +64,6 @@ impl<'a> GatewayUpstreamExecutionContext<'a> {
             service_tier_for_log,
             effective_service_tier_for_log,
             candidate_count,
-            account_max_inflight,
             transparent_mode,
         }
     }
@@ -110,12 +107,7 @@ impl<'a> GatewayUpstreamExecutionContext<'a> {
         account_id: &str,
         idx: usize,
     ) -> Option<candidates::CandidateSkipReason> {
-        candidates::candidate_skip_reason_for_proxy(
-            account_id,
-            idx,
-            self.candidate_count,
-            self.account_max_inflight,
-        )
+        candidates::candidate_skip_reason_for_proxy(account_id, idx, self.candidate_count)
     }
 
     /// 函数 `log_candidate_start`
@@ -163,7 +155,6 @@ impl<'a> GatewayUpstreamExecutionContext<'a> {
     ) {
         let reason_text = match reason {
             candidates::CandidateSkipReason::Cooldown => "cooldown",
-            candidates::CandidateSkipReason::Inflight => "inflight",
         };
         super::super::super::trace_log::log_candidate_skip(
             self.trace_id,

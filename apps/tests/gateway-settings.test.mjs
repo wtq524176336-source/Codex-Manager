@@ -76,7 +76,6 @@ test("readGatewayConcurrencyRecommendation 解析推荐并补齐保底值", () =
     httpWorkerMin: 12,
     httpStreamWorkerFactor: 2,
     httpStreamWorkerMin: 4,
-    accountMaxInflight: 2,
   });
 
   assert.equal(recommendation.cpuCores, 12);
@@ -86,7 +85,6 @@ test("readGatewayConcurrencyRecommendation 解析推荐并补齐保底值", () =
   assert.equal(recommendation.httpWorkerMin, 12);
   assert.equal(recommendation.httpStreamWorkerFactor, 2);
   assert.equal(recommendation.httpStreamWorkerMin, 4);
-  assert.equal(recommendation.accountMaxInflight, 2);
   assert.equal(recommendation.queueWaitTimeoutMs, 100);
 });
 

@@ -122,7 +122,6 @@ export type WorkerPreset = {
 
 export type WorkerRecommendedSettings = {
   backgroundTasks: Pick<BackgroundTaskSettings, WorkerPresetKey>;
-  accountMaxInflight: number;
 };
 
 export const WORKER_PRESETS: WorkerPreset[] = [
@@ -253,7 +252,6 @@ export function normalizeWorkerRecommendation(
       httpStreamWorkerFactor: readNumberField(source, "httpStreamWorkerFactor", 1),
       httpStreamWorkerMin: readNumberField(source, "httpStreamWorkerMin", 2),
     },
-    accountMaxInflight: readNumberField(source, "accountMaxInflight", 1),
   };
 }
 
@@ -264,7 +262,7 @@ export function matchesRecommendedWorkerSettings(
   return (
     WORKER_PRESET_KEYS.every(
       (key) => snapshot.backgroundTasks[key] === recommendation.backgroundTasks[key],
-    ) && snapshot.accountMaxInflight === recommendation.accountMaxInflight
+    )
   );
 }
 

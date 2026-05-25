@@ -80,7 +80,6 @@ export const useAppStore = create<AppState>((set) => ({
       "gpt-5.4",
     ],
     modelForwardRules: "",
-    accountMaxInflight: 1,
     gatewayOriginator: DEFAULT_CODEX_ORIGINATOR,
     gatewayOriginatorDefault: DEFAULT_CODEX_ORIGINATOR,
     gatewayUserAgentVersion: DEFAULT_CODEX_USER_AGENT_VERSION,

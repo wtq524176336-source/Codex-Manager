@@ -9,7 +9,6 @@ export interface ApiKey {
   aggregateApiId: string | null;
   accountPlanFilter: string | null;
   aggregateApiUrl: string | null;
-  quotaLimitTokens: number | null;
   protocol: string;
   clientType: string;
   authScheme: string;

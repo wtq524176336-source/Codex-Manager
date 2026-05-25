@@ -659,6 +659,24 @@ fn apply_request_overrides_with_prompt_cache_key_mode(
     if body.is_empty() {
         return body;
     }
+    if normalized_model.is_none()
+        && normalized_reasoning.is_none()
+        && normalized_service_tier.is_none()
+        && !use_codex_responses_compat
+        && !super::strict_request_param_allowlist_enabled()
+    {
+        let is_chat = request_rewrite_shared::path_matches_template(path, "/v1/chat/completions");
+        if !is_chat {
+            return body;
+        }
+        let contains_subslice = |needle: &[u8]| -> bool {
+            body.len() >= needle.len() && body.windows(needle.len()).any(|w| w == needle)
+        };
+        let has_messages = contains_subslice(b"messages");
+        if has_messages && !contains_subslice(b"stream") && !contains_subslice(b"reasoning") {
+            return body;
+        }
+    }
     if let Ok(mut payload) = serde_json::from_slice::<Value>(&body) {
         if let Some(obj) = payload.as_object_mut() {
             let mut changed = false;

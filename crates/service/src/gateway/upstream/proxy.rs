@@ -598,7 +598,6 @@ pub(in super::super) fn proxy_validated_request(
         service_tier_for_log.as_deref(),
         effective_service_tier_for_log.as_deref(),
         setup.candidate_count,
-        setup.account_max_inflight,
         transparent_mode,
     );
     let allow_openai_fallback = setup.upstream_fallback_base.is_some();
@@ -744,8 +743,7 @@ mod tests {
         request_deadline_for_path, resolve_upstream_is_stream,
         respond_when_account_candidates_empty,
         should_fallback_to_aggregate_after_account_exhaustion,
-        should_route_aggregate_models_to_account,
-        should_try_provider_executor_aggregate_route,
+        should_route_aggregate_models_to_account, should_try_provider_executor_aggregate_route,
     };
     use crate::gateway::upstream::executor::{
         GatewayUpstreamExecutionPlan, GatewayUpstreamExecutorKind, GatewayUpstreamRouteKind,
@@ -883,17 +881,25 @@ mod tests {
             route_kind: GatewayUpstreamRouteKind::AccountRotation,
         };
 
-        assert!(should_route_aggregate_models_to_account(aggregate, "/v1/models"));
+        assert!(should_route_aggregate_models_to_account(
+            aggregate,
+            "/v1/models"
+        ));
         assert!(should_route_aggregate_models_to_account(
             aggregate,
             "/v1/models?limit=20"
         ));
-        assert!(should_route_aggregate_models_to_account(aggregate, "/models"));
+        assert!(should_route_aggregate_models_to_account(
+            aggregate, "/models"
+        ));
         assert!(!should_route_aggregate_models_to_account(
             aggregate,
             "/v1/responses"
         ));
-        assert!(!should_route_aggregate_models_to_account(account, "/v1/models"));
+        assert!(!should_route_aggregate_models_to_account(
+            account,
+            "/v1/models"
+        ));
     }
 
     #[test]

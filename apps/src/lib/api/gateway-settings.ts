@@ -73,7 +73,6 @@ export interface GatewayConcurrencyRecommendation {
   httpWorkerMin: number;
   httpStreamWorkerFactor: number;
   httpStreamWorkerMin: number;
-  accountMaxInflight: number;
   queueWaitTimeoutMs: number;
 }
 
@@ -91,7 +90,6 @@ const DEFAULT_GATEWAY_CONCURRENCY_RECOMMENDATION: GatewayConcurrencyRecommendati
   httpWorkerMin: 4,
   httpStreamWorkerFactor: 1,
   httpStreamWorkerMin: 1,
-  accountMaxInflight: 1,
   queueWaitTimeoutMs: 100,
 };
 
@@ -189,11 +187,6 @@ export function readGatewayConcurrencyRecommendation(
       payload,
       "httpStreamWorkerMin",
       DEFAULT_GATEWAY_CONCURRENCY_RECOMMENDATION.httpStreamWorkerMin
-    ),
-    accountMaxInflight: readNumberField(
-      payload,
-      "accountMaxInflight",
-      DEFAULT_GATEWAY_CONCURRENCY_RECOMMENDATION.accountMaxInflight
     ),
     queueWaitTimeoutMs: readNumberField(
       payload,

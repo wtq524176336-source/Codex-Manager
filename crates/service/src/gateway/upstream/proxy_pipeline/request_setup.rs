@@ -10,7 +10,6 @@ pub(in super::super) struct UpstreamRequestSetup {
     pub(in super::super) url: String,
     pub(in super::super) url_alt: Option<String>,
     pub(in super::super) candidate_count: usize,
-    pub(in super::super) account_max_inflight: usize,
     pub(in super::super) anthropic_has_thread_anchor: bool,
     pub(in super::super) has_sticky_fallback_session: bool,
     pub(in super::super) has_sticky_fallback_conversation: bool,
@@ -49,7 +48,6 @@ pub(in super::super) fn prepare_request_setup(
     let (url, url_alt) =
         super::super::super::request_rewrite::compute_upstream_url(upstream_base.as_str(), path);
     let candidate_count = candidates.len();
-    let account_max_inflight = super::super::super::account_max_inflight_limit();
     let conversation_routing =
         super::super::super::conversation_binding::prepare_conversation_routing(
             platform_key_hash,
@@ -84,7 +82,6 @@ pub(in super::super) fn prepare_request_setup(
         url,
         url_alt,
         candidate_count,
-        account_max_inflight,
         anthropic_has_thread_anchor,
         has_sticky_fallback_session: false,
         has_sticky_fallback_conversation:

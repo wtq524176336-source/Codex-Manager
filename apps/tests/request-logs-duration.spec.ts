@@ -18,7 +18,6 @@ const SETTINGS_SNAPSHOT = {
   freeAccountMaxModel: "auto",
   freeAccountMaxModelOptions: ["auto", "gpt-5"],
   modelForwardRules: "",
-  accountMaxInflight: 1,
   gatewayOriginator: "codex-cli",
   gatewayOriginatorDefault: "codex-cli",
   gatewayUserAgentVersion: "1.0.0",
@@ -105,7 +104,6 @@ test("request logs display total duration and first-response latency", async ({
         httpWorkerMin: 8,
         httpStreamWorkerFactor: 1,
         httpStreamWorkerMin: 2,
-        accountMaxInflight: 1,
       });
       return;
     }

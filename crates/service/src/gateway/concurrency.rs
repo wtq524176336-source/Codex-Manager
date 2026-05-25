@@ -12,7 +12,6 @@ pub(crate) struct GatewayConcurrencyRecommendation {
     pub(crate) http_worker_min: usize,
     pub(crate) http_stream_worker_factor: usize,
     pub(crate) http_stream_worker_min: usize,
-    pub(crate) account_max_inflight: usize,
     pub(crate) queue_wait_timeout_ms: u64,
 }
 
@@ -62,13 +61,12 @@ pub(crate) fn recommend_gateway_concurrency(
         http_worker_min,
         http_stream_worker_factor,
         http_stream_worker_min,
-        account_max_inflight,
     ) = match resource_score {
-        1 => (2, 2, 4, 1, 1, 1),
-        2..=4 => (3, 3, 6, 1, 2, 1),
-        5..=8 => (4, 4, 8, 1, 2, 2),
-        9..=16 => (6, 5, 12, 2, 4, 2),
-        _ => (8, 6, 16, 2, 4, 4),
+        1 => (2, 2, 4, 1, 1),
+        2..=4 => (3, 3, 6, 1, 2),
+        5..=8 => (4, 4, 8, 1, 2),
+        9..=16 => (6, 5, 12, 2, 4),
+        _ => (8, 6, 16, 2, 4),
     };
 
     GatewayConcurrencyRecommendation {
@@ -79,7 +77,6 @@ pub(crate) fn recommend_gateway_concurrency(
         http_worker_min,
         http_stream_worker_factor,
         http_stream_worker_min,
-        account_max_inflight,
         queue_wait_timeout_ms: 100,
     }
 }
@@ -107,7 +104,6 @@ mod tests {
         assert_eq!(recommendation.http_worker_min, 4);
         assert_eq!(recommendation.http_stream_worker_factor, 1);
         assert_eq!(recommendation.http_stream_worker_min, 1);
-        assert_eq!(recommendation.account_max_inflight, 1);
     }
 
     /// 函数 `larger_machine_scales_up_gradually`
@@ -129,6 +125,5 @@ mod tests {
         assert_eq!(recommendation.http_worker_min, 12);
         assert_eq!(recommendation.http_stream_worker_factor, 2);
         assert_eq!(recommendation.http_stream_worker_min, 4);
-        assert_eq!(recommendation.account_max_inflight, 2);
     }
 }

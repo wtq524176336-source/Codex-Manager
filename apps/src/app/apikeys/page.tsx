@@ -62,10 +62,6 @@ import {
   buildCcSwitchProviderName,
   normalizeCodexManagerGatewayEndpoint,
 } from "@/lib/utils/ccswitch";
-import {
-  estimateQuotaLimitUsd,
-  formatQuotaLimitUsd,
-} from "@/lib/utils/api-key-quota";
 import { formatCompactNumber } from "@/lib/utils/usage";
 
 const ROTATION_STRATEGY_LABELS: Record<string, string> = {
@@ -478,7 +474,6 @@ export default function ApiKeysPage() {
           nextRotationStrategy === "account_rotation"
             ? key.accountPlanFilter || null
             : null,
-        quotaLimitTokens: key.quotaLimitTokens,
       });
       await queryClient.invalidateQueries({ queryKey: ["apikeys"] });
     } finally {
@@ -655,23 +650,6 @@ export default function ApiKeysPage() {
                   const rotationSwitchLabel = isAggregateRotation
                     ? t("切换为账号轮转")
                     : t("切换为聚合API轮转");
-                  const quotaLimitTokens =
-                    typeof key.quotaLimitTokens === "number" &&
-                    Number.isFinite(key.quotaLimitTokens) &&
-                    key.quotaLimitTokens > 0
-                      ? key.quotaLimitTokens
-                      : null;
-                  const quotaRemaining =
-                    quotaLimitTokens === null
-                      ? null
-                      : Math.max(0, quotaLimitTokens - usedTokens);
-                  const isQuotaExhausted =
-                    quotaLimitTokens !== null && usedTokens >= quotaLimitTokens;
-                  const quotaLimitUsd =
-                    quotaLimitTokens === null
-                      ? null
-                      : estimateQuotaLimitUsd(quotaLimitTokens);
-
                   return (
                     <TableRow key={key.id} className="group">
                       <TableCell>
@@ -735,35 +713,11 @@ export default function ApiKeysPage() {
                       </TableCell>
                       <TableCell className="font-mono text-xs">
                         <div className="space-y-1">
-                          <div
-                            className={
-                              isQuotaExhausted
-                                ? "font-semibold text-red-500"
-                                : "text-foreground"
-                            }
-                          >
+                          <div className="text-foreground">
                             {formatCompactTokenAmount(usedTokens)}
-                            {quotaLimitTokens !== null ? (
-                              <span className="text-muted-foreground">
-                                {" "}
-                                / {formatCompactTokenAmount(quotaLimitTokens)}
-                              </span>
-                            ) : null}
                           </div>
                           <div className="text-[10px] font-normal text-muted-foreground">
-                            {quotaLimitTokens === null
-                              ? `${t("已花费")} ${formatQuotaLimitUsd(
-                                  usedCostUsd,
-                                )} · ${t("不限额")}`
-                              : isQuotaExhausted
-                                ? `${t("已达上限")} · ${formatQuotaLimitUsd(
-                                    usedCostUsd,
-                                  )} / ${formatQuotaLimitUsd(quotaLimitUsd)}`
-                                : `${t("剩余")} ${formatCompactTokenAmount(
-                                    quotaRemaining,
-                                  )} · ${formatQuotaLimitUsd(
-                                    usedCostUsd,
-                                  )} / ${formatQuotaLimitUsd(quotaLimitUsd)}`}
+                            {`${t("已花费")} ${formatUsd(usedCostUsd)}`}
                           </div>
                         </div>
                       </TableCell>

@@ -451,7 +451,7 @@ pub(crate) fn current_codex_image_tool_model() -> String {
 /// 返回函数执行结果
 pub(crate) fn account_max_inflight_limit() -> usize {
     ensure_runtime_config_loaded();
-    ACCOUNT_MAX_INFLIGHT.load(Ordering::Relaxed)
+    0
 }
 
 /// 函数 `set_account_max_inflight_limit`
@@ -465,11 +465,11 @@ pub(crate) fn account_max_inflight_limit() -> usize {
 ///
 /// # 返回
 /// 返回函数执行结果
-pub(crate) fn set_account_max_inflight_limit(limit: usize) -> usize {
+pub(crate) fn set_account_max_inflight_limit(_limit: usize) -> usize {
     ensure_runtime_config_loaded();
-    ACCOUNT_MAX_INFLIGHT.store(limit, Ordering::Relaxed);
-    std::env::set_var(ENV_ACCOUNT_MAX_INFLIGHT, limit.to_string());
-    limit
+    ACCOUNT_MAX_INFLIGHT.store(0, Ordering::Relaxed);
+    std::env::set_var(ENV_ACCOUNT_MAX_INFLIGHT, "0");
+    0
 }
 
 /// 函数 `strict_request_param_allowlist_enabled`

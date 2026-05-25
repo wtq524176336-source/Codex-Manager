@@ -87,7 +87,6 @@ import {
   THEMES,
   WORKER_PRESET_KEYS,
   WORKER_PRESETS,
-  asRecord,
   buildReleaseUrl,
   type CheckUpdateRequest,
   compareEnvOverrideItems,
@@ -190,7 +189,6 @@ export default function SettingsPage() {
             ...snapshot.backgroundTasks,
             ...recommendation.backgroundTasks,
           },
-          accountMaxInflight: recommendation.accountMaxInflight,
           _silent: true,
         })
         .then(() => {
@@ -200,7 +198,6 @@ export default function SettingsPage() {
             "httpWorkerMin",
             "httpStreamWorkerFactor",
             "httpStreamWorkerMin",
-            "accountMaxInflight",
           ]);
           toast.success(t("系统推导已应用"));
         })
@@ -882,48 +879,6 @@ export default function SettingsPage() {
           ...snapshot.backgroundTasks,
           [key]: nextValue,
         },
-      })
-      .then(() => {
-        setBackgroundTaskDraft((current) => {
-          const nextDraft = { ...current };
-          delete nextDraft[draftKey];
-          return nextDraft;
-        });
-      })
-      .catch(() => undefined);
-  };
-
-  /**
-   * 函数 `saveAccountMaxInflightField`
-   *
-   * 作者: gaohongshun
-   *
-   * 时间: 2026-04-02
-   *
-   * # 参数
-   * - minimum: 参数 minimum
-   *
-   * # 返回
-   * 返回函数执行结果
-   */
-  const saveAccountMaxInflightField = (minimum = 0) => {
-    if (!snapshot) return;
-    const draftKey = "accountMaxInflight";
-    const sourceValue =
-      backgroundTaskDraft[draftKey] ?? stringifyNumber(snapshot.accountMaxInflight);
-    const nextValue = parseIntegerInput(sourceValue, minimum);
-    if (nextValue == null) {
-      toast.error(t("请输入合法的数值"));
-      setBackgroundTaskDraft((current) => {
-        const nextDraft = { ...current };
-        delete nextDraft[draftKey];
-        return nextDraft;
-      });
-      return;
-    }
-    void updateSettings
-      .mutateAsync({
-        accountMaxInflight: nextValue,
       })
       .then(() => {
         setBackgroundTaskDraft((current) => {
@@ -1847,12 +1802,6 @@ export default function SettingsPage() {
                       "流式请求至少保留多少个处理线程，保证长连接不卡住。",
                     key: "httpStreamWorkerMin",
                   },
-                  {
-                    label: "单账号并发上限",
-                    helper:
-                      "同一账号同时能处理多少个请求。满了以后会优先换下一个账号；填 0 表示关闭上限。",
-                    key: "accountMaxInflight",
-                  },
                 ].map((worker) => (
                   <div key={worker.key} className="grid gap-1.5">
                     <Label className="text-xs">{t(worker.label)}</Label>
@@ -1861,16 +1810,14 @@ export default function SettingsPage() {
                     </p>
                     <Input
                       type="number"
-                      min={worker.key === "accountMaxInflight" ? 0 : 1}
+                      min={1}
                       className="h-9"
                       value={
                         backgroundTaskDraft[worker.key] ??
                         stringifyNumber(
-                          worker.key === "accountMaxInflight"
-                            ? snapshot.accountMaxInflight
-                            : (snapshot.backgroundTasks[
-                                worker.key as keyof BackgroundTaskSettings
-                              ] as number),
+                          snapshot.backgroundTasks[
+                            worker.key as keyof BackgroundTaskSettings
+                          ] as number,
                         )
                       }
                       onChange={(event) =>
@@ -1880,12 +1827,10 @@ export default function SettingsPage() {
                         }))
                       }
                       onBlur={() =>
-                        worker.key === "accountMaxInflight"
-                          ? saveAccountMaxInflightField(0)
-                          : saveBackgroundTaskField(
-                              worker.key as keyof BackgroundTaskSettings,
-                              1,
-                            )
+                        saveBackgroundTaskField(
+                          worker.key as keyof BackgroundTaskSettings,
+                          1,
+                        )
                       }
                     />
                   </div>
