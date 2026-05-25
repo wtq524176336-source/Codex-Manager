@@ -259,6 +259,7 @@ dependencies = [
  "url",
  "urlencoding",
  "webbrowser",
+ "windows-registry",
  "winres",
  "zstd",
 ]

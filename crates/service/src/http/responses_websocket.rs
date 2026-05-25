@@ -966,6 +966,12 @@ fn websocket_proxy_selection_for_account(account_id: &str, ws_url: &str) -> WsPr
             source: "environment",
         };
     }
+    if let Some(proxy_url) = websocket_system_proxy_url(ws_url) {
+        return WsProxySelection {
+            url: Some(proxy_url),
+            source: "system",
+        };
+    }
     WsProxySelection {
         url: None,
         source: "direct",
@@ -989,6 +995,19 @@ fn websocket_env_proxy_url(ws_url: &str) -> Option<String> {
 }
 
 fn env_proxy_value(name: &str) -> Option<String> {
+    let value = env_text_value(name)?;
+    let normalized = normalize_websocket_proxy_url(value.as_str());
+    if normalized.is_none() {
+        log::warn!(
+            "event=responses_ws_env_proxy_ignored var={} proxy={} reason=unsupported_or_invalid",
+            name,
+            sanitize_proxy_url_for_log(value.as_str())
+        );
+    }
+    normalized
+}
+
+fn env_text_value(name: &str) -> Option<String> {
     std::env::var(name)
         .ok()
         .map(|value| value.trim().to_string())
@@ -1002,7 +1021,7 @@ fn websocket_no_proxy_matches(ws_url: &str) -> bool {
     else {
         return false;
     };
-    let Some(no_proxy) = env_proxy_value("NO_PROXY").or_else(|| env_proxy_value("no_proxy"))
+    let Some(no_proxy) = env_text_value("NO_PROXY").or_else(|| env_text_value("no_proxy"))
     else {
         return false;
     };
@@ -1022,6 +1041,229 @@ fn websocket_no_proxy_matches(ws_url: &str) -> bool {
                 .to_ascii_lowercase();
             target_host == normalized || target_host.ends_with(&format!(".{normalized}"))
         })
+}
+
+fn normalize_websocket_proxy_url(proxy_url: &str) -> Option<String> {
+    let value = rewrite_websocket_proxy_url(proxy_url);
+    let Ok(parsed) = url::Url::parse(value.as_str()) else {
+        return None;
+    };
+    match parsed.scheme() {
+        "http" | "socks" | "socks5" | "socks5h" => Some(value),
+        _ => None,
+    }
+}
+
+fn rewrite_websocket_proxy_url(proxy_url: &str) -> String {
+    let mut normalized = proxy_url.trim().to_string();
+    if normalized.is_empty() {
+        return normalized;
+    }
+    if let Some(rest) = normalized.strip_prefix("http://socks") {
+        normalized = format!("socks{rest}");
+    } else if let Some(rest) = normalized.strip_prefix("https://socks") {
+        normalized = format!("socks{rest}");
+    }
+    if normalized.starts_with("socks5://") {
+        normalized = normalized.replacen("socks5://", "socks5h://", 1);
+    } else if normalized.starts_with("socks://") {
+        normalized = normalized.replacen("socks://", "socks5h://", 1);
+    } else if !normalized.contains("://") {
+        normalized = format!("http://{normalized}");
+    }
+    normalized
+}
+
+#[cfg(windows)]
+fn websocket_system_proxy_url(ws_url: &str) -> Option<String> {
+    let settings = match windows_registry::CURRENT_USER
+        .open("Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings")
+    {
+        Ok(settings) => settings,
+        Err(err) => {
+            log::debug!(
+                "event=responses_ws_system_proxy_unavailable reason=open_registry_failed err={}",
+                err
+            );
+            return None;
+        }
+    };
+
+    let enabled = settings.get_u32("ProxyEnable").unwrap_or(0);
+    if enabled == 0 {
+        log::debug!("event=responses_ws_system_proxy_ignored reason=proxy_disabled");
+        return None;
+    }
+
+    let proxy_override = settings.get_string("ProxyOverride").ok();
+    if websocket_proxy_override_matches(ws_url, proxy_override.as_deref()) {
+        log::info!(
+            "event=responses_ws_system_proxy_ignored reason=override_match upstream_url={}",
+            ws_url
+        );
+        return None;
+    }
+
+    let raw_proxy = match settings.get_string("ProxyServer") {
+        Ok(value) => value,
+        Err(err) => {
+            log::debug!(
+                "event=responses_ws_system_proxy_unavailable reason=read_proxy_server_failed err={}",
+                err
+            );
+            return None;
+        }
+    };
+    let Some(proxy_url) = parse_windows_proxy_server(ws_url, raw_proxy.as_str()) else {
+        log::warn!(
+            "event=responses_ws_system_proxy_ignored reason=empty_proxy_server raw={}",
+            raw_proxy
+        );
+        return None;
+    };
+    let normalized = normalize_websocket_proxy_url(proxy_url.as_str());
+    if let Some(value) = normalized {
+        log::info!(
+            "event=responses_ws_system_proxy_selected proxy={}",
+            sanitize_proxy_url_for_log(value.as_str())
+        );
+        return Some(value);
+    }
+
+    log::warn!(
+        "event=responses_ws_system_proxy_ignored reason=unsupported_or_invalid proxy={}",
+        sanitize_proxy_url_for_log(proxy_url.as_str())
+    );
+    None
+}
+
+#[cfg(not(windows))]
+fn websocket_system_proxy_url(_ws_url: &str) -> Option<String> {
+    None
+}
+
+#[cfg(windows)]
+fn parse_windows_proxy_server(ws_url: &str, proxy_server: &str) -> Option<String> {
+    let raw = proxy_server.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    if !raw.contains('=') {
+        return Some(raw.to_string());
+    }
+
+    let target_scheme = url::Url::parse(ws_url)
+        .ok()
+        .map(|url| url.scheme().to_ascii_lowercase())
+        .unwrap_or_else(|| "wss".to_string());
+    let preferred_key = if target_scheme == "ws" { "http" } else { "https" };
+    let mut preferred = None;
+    let mut http = None;
+    let mut socks = None;
+
+    for part in raw.split(';').map(str::trim).filter(|part| !part.is_empty()) {
+        let Some((key, value)) = part.split_once('=') else {
+            continue;
+        };
+        let key = key.trim().to_ascii_lowercase();
+        let value = value.trim();
+        if value.is_empty() {
+            continue;
+        }
+        let candidate = windows_proxy_entry_to_url(key.as_str(), value);
+        if key == preferred_key {
+            preferred = Some(candidate);
+        } else if key == "http" {
+            http = Some(candidate);
+        } else if matches!(key.as_str(), "socks" | "socks4" | "socks5") {
+            socks = Some(candidate);
+        }
+    }
+
+    preferred.or(http).or(socks)
+}
+
+#[cfg(windows)]
+fn windows_proxy_entry_to_url(key: &str, value: &str) -> String {
+    if value.contains("://") {
+        return value.to_string();
+    }
+    if matches!(key, "socks" | "socks4" | "socks5") {
+        format!("socks5h://{value}")
+    } else {
+        format!("http://{value}")
+    }
+}
+
+fn websocket_proxy_override_matches(ws_url: &str, override_list: Option<&str>) -> bool {
+    let Some(raw) = override_list.map(str::trim).filter(|value| !value.is_empty()) else {
+        return false;
+    };
+    let Some(target_host) = websocket_target_host(ws_url) else {
+        return false;
+    };
+    raw.split(';')
+        .map(str::trim)
+        .filter(|pattern| !pattern.is_empty())
+        .any(|pattern| websocket_proxy_override_pattern_matches(&target_host, pattern))
+}
+
+fn websocket_target_host(ws_url: &str) -> Option<String> {
+    url::Url::parse(ws_url)
+        .ok()
+        .and_then(|url| url.host_str().map(|host| host.to_ascii_lowercase()))
+}
+
+fn websocket_proxy_override_pattern_matches(target_host: &str, pattern: &str) -> bool {
+    let pattern = pattern.trim().to_ascii_lowercase();
+    if pattern == "*" {
+        return true;
+    }
+    if pattern == "<local>" {
+        return !target_host.contains('.') || is_local_proxy_host(target_host);
+    }
+    let normalized = pattern
+        .trim_start_matches('.')
+        .split(':')
+        .next()
+        .unwrap_or(pattern.as_str());
+    if normalized.contains('*') {
+        return wildcard_ascii_match(normalized, target_host);
+    }
+    target_host == normalized || target_host.ends_with(&format!(".{normalized}"))
+}
+
+fn wildcard_ascii_match(pattern: &str, value: &str) -> bool {
+    let pattern_parts: Vec<&str> = pattern.split('*').collect();
+    if pattern_parts.len() == 1 {
+        return pattern == value;
+    }
+
+    let mut remaining = value;
+    for (index, part) in pattern_parts.iter().enumerate() {
+        if part.is_empty() {
+            continue;
+        }
+        let Some(position) = remaining.find(part) else {
+            return false;
+        };
+        if index == 0 && !pattern.starts_with('*') && position != 0 {
+            return false;
+        }
+        remaining = &remaining[position + part.len()..];
+    }
+    if !pattern.ends_with('*') {
+        if let Some(last) = pattern_parts.iter().rev().find(|part| !part.is_empty()) {
+            return value.ends_with(last);
+        }
+    }
+    true
+}
+
+fn is_local_proxy_host(host: &str) -> bool {
+    matches!(host, "localhost" | "127.0.0.1" | "::1")
+        || host.starts_with("127.")
+        || host.eq_ignore_ascii_case("[::1]")
 }
 
 fn sanitize_proxy_url_for_log(proxy_url: &str) -> String {

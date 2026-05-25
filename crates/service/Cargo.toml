@@ -32,5 +32,8 @@ sysinfo = "0.30"
 
 [dev-dependencies]
 
+[target.'cfg(windows)'.dependencies]
+windows-registry = "0.6.1"
+
 [target.'cfg(windows)'.build-dependencies]
 winres = "0.1"
