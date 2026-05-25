@@ -1783,12 +1783,14 @@ mod tests {
     use super::{
         build_socks5_connect_request, infer_ws_terminal_status, inspect_ws_terminal_event,
         is_previous_response_not_found_terminal, merge_client_metadata, parse_websocket_target,
-        proxy_basic_auth_header, rewrite_client_frame, strip_previous_response_id_from_ws_text,
-        WsRequestContext,
+        prepare_initial_client_frame, proxy_basic_auth_header, rewrite_client_frame,
+        strip_previous_response_id_from_ws_text, WsRequestContext,
     };
+    use axum::extract::ws::Message;
     use axum::http::{HeaderMap, HeaderValue};
     use codexmanager_core::storage::ApiKey;
     use serde_json::json;
+    use tokio_tungstenite::tungstenite::Message as UpstreamMessage;
 
     fn sample_api_key() -> ApiKey {
         ApiKey {
@@ -2065,6 +2067,30 @@ mod tests {
         assert!(prepared.model.is_none());
         assert!(prepared.reasoning_effort.is_none());
         assert!(prepared.service_tier.is_none());
+    }
+
+    #[test]
+    fn websocket_transparent_initial_binary_frame_is_forwarded() {
+        let context = WsRequestContext {
+            api_key: sample_api_key(),
+            incoming_headers: sample_incoming_headers_with_metadata(),
+            prompt_cache_key: Some("sticky-thread".to_string()),
+            effective_upstream_base: "https://chatgpt.com/backend-api/codex".to_string(),
+            prefer_raw_errors: false,
+            transparent_mode: true,
+        };
+        let prepared = prepare_initial_client_frame(
+            Message::Binary(b"opaque-ws-frame".to_vec().into()),
+            &context,
+        )
+        .unwrap_or_else(|_| panic!("prepare initial websocket frame failed"));
+
+        match prepared.upstream_message {
+            UpstreamMessage::Binary(bytes) => assert_eq!(bytes.as_ref(), b"opaque-ws-frame"),
+            other => panic!("unexpected upstream message: {other:?}"),
+        }
+        assert!(prepared.text.is_empty());
+        assert!(prepared.model.is_none());
     }
 
     #[test]
