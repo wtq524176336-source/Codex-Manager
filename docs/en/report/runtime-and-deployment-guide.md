@@ -49,9 +49,13 @@ service_tier = "fast"
 name = "OpenAI"
 base_url = "http://localhost:48760/v1"
 wire_api = "responses"
+supports_websockets = true
 ```
 
 - If you changed the service port in Settings, update `base_url` accordingly.
+- `supports_websockets = true` makes Codex CLI prefer Responses WebSocket; native Codex WebSocket requests are forwarded as transparently as possible.
+- CodexManager currently accepts WebSocket only when the platform key routes to an official Codex account upstream. Aggregate API / hybrid routing still returns `426`.
+- Do not set `requires_openai_auth = true` here; CodexManager authenticates with the platform key from `OPENAI_API_KEY` in `auth.json`.
 - Restart Codex CLI after changing `auth.json` or `config.toml`.
 
 ## Import and export

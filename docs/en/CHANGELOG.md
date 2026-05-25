@@ -8,8 +8,10 @@ It follows Keep a Changelog with a lightweight adaptation for this repository.
 ### Added
 - Added Codex image-generation compatibility: `/v1/responses` now auto-injects the official `image_generation` tool by default to match Codex behavior, explicit tools are forwarded unchanged, and compatible `/v1/images/generations` plus `/v1/images/edits` endpoints are available with `gpt-image-2` as the default image tool model.
 - Added an `auth.json` step to the Codex CLI first-time setup guide, clarifying how the platform key, `auth.json`, and `config.toml` fit together.
+- Enabled `supports_websockets = true` in the Codex CLI config template for Responses WebSocket.
 
 ### Fixed
+- Fixed native Codex WebSocket transparent mode so it no longer forces local parsing/rewriting of request frames, avoiding interrupted sessions with newer Codex CLI clients.
 - Fixed missing Spark dedicated quota display by continuing to parse official `additional_rate_limits[].rate_limit` buckets.
 - Adjusted the usage-details dialog so multiple additional quota windows can be shown in two columns with scrolling.
 

@@ -41,6 +41,7 @@ struct WsRequestContext {
 #[derive(Clone)]
 struct PreparedClientFrame {
     text: String,
+    upstream_message: UpstreamMessage,
     model: Option<String>,
     reasoning_effort: Option<String>,
     service_tier: Option<String>,
@@ -181,8 +182,8 @@ pub(super) async fn upgrade_responses_websocket(request: HttpRequest<Body>) -> R
 }
 
 async fn run_responses_websocket_session(mut socket: WebSocket, context: WsRequestContext) {
-    let first_text = match receive_initial_request(&mut socket).await {
-        Ok(Some(text)) => text,
+    let first_message = match receive_initial_request(&mut socket).await {
+        Ok(Some(message)) => message,
         Ok(None) => return,
         Err(err) => {
             send_ws_error_and_close(&mut socket, err, context.prefer_raw_errors).await;
@@ -190,7 +191,7 @@ async fn run_responses_websocket_session(mut socket: WebSocket, context: WsReque
         }
     };
 
-    let prepared_first = match rewrite_client_frame(first_text.as_str(), &context) {
+    let prepared_first = match prepare_initial_client_frame(first_message, &context) {
         Ok(prepared) => prepared,
         Err(err) => {
             send_ws_error_and_close(&mut socket, err, context.prefer_raw_errors).await;
@@ -214,9 +215,7 @@ async fn run_responses_websocket_session(mut socket: WebSocket, context: WsReque
 
     if let Err(err) = upstream
         .stream
-        .send(UpstreamMessage::Text(
-            first_pending.prepared.text.clone().into(),
-        ))
+        .send(first_pending.prepared.upstream_message.clone())
         .await
     {
         finalize_ws_request_log(
@@ -274,9 +273,11 @@ async fn run_responses_websocket_session(mut socket: WebSocket, context: WsReque
                                     prepared,
                                     forwarded_upstream_event: false,
                                 };
-                                if let Err(err) = upstream.stream.send(UpstreamMessage::Text(
-                                    current_pending.prepared.text.clone().into(),
-                                )).await {
+                                if let Err(err) = upstream
+                                    .stream
+                                    .send(current_pending.prepared.upstream_message.clone())
+                                    .await
+                                {
                                     finalize_ws_request_log(
                                         &context,
                                         &current_pending.log,
@@ -525,24 +526,19 @@ fn authorize_websocket_request(headers: &HeaderMap) -> Result<WsRequestContext, 
     })
 }
 
-async fn receive_initial_request(socket: &mut WebSocket) -> Result<Option<String>, WsSessionError> {
+async fn receive_initial_request(socket: &mut WebSocket) -> Result<Option<Message>, WsSessionError> {
     loop {
         let Some(message) = socket.recv().await else {
             return Ok(None);
         };
         match message {
-            Ok(Message::Text(text)) => return Ok(Some(text.to_string())),
+            Ok(Message::Text(text)) => return Ok(Some(Message::Text(text))),
+            Ok(Message::Binary(bytes)) => return Ok(Some(Message::Binary(bytes))),
             Ok(Message::Ping(payload)) => {
                 let _ = socket.send(Message::Pong(payload)).await;
             }
             Ok(Message::Pong(_)) => {}
             Ok(Message::Close(_)) => return Ok(None),
-            Ok(Message::Binary(_)) => {
-                return Err(WsSessionError::bad_request_bilingual(
-                    "首个 WebSocket 帧必须是 response.create 文本帧",
-                    "initial websocket frame must be a response.create text frame",
-                ));
-            }
             Err(err) => {
                 return Err(WsSessionError::bad_request_bilingual(
                     "接收首个 WebSocket 帧失败",
@@ -553,49 +549,61 @@ async fn receive_initial_request(socket: &mut WebSocket) -> Result<Option<String
     }
 }
 
+fn prepare_initial_client_frame(
+    message: Message,
+    context: &WsRequestContext,
+) -> Result<PreparedClientFrame, WsSessionError> {
+    match message {
+        Message::Text(text) => rewrite_client_frame(text.as_str(), context),
+        Message::Binary(bytes) if context.transparent_mode => Ok(PreparedClientFrame {
+            text: String::new(),
+            upstream_message: UpstreamMessage::Binary(bytes),
+            model: None,
+            reasoning_effort: None,
+            service_tier: None,
+            effective_service_tier: None,
+            raw_service_tier: None,
+            has_service_tier_field: false,
+        }),
+        Message::Binary(_) => Err(WsSessionError::bad_request_bilingual(
+            "首个 WebSocket 帧必须是 response.create 文本帧",
+            "initial websocket frame must be a response.create text frame",
+        )),
+        Message::Ping(_) | Message::Pong(_) | Message::Close(_) => {
+            Err(WsSessionError::bad_request_bilingual(
+                "首个 WebSocket 数据帧无效",
+                "initial websocket data frame is invalid",
+            ))
+        }
+    }
+}
+
 fn rewrite_client_frame(
     text: &str,
     context: &WsRequestContext,
 ) -> Result<PreparedClientFrame, WsSessionError> {
-    let mut payload = serde_json::from_str::<Value>(text).map_err(|err| {
-        WsSessionError::bad_request_bilingual(
-            "WebSocket JSON 载荷无效",
-            format!("invalid websocket json payload: {err}"),
-        )
-    })?;
     if context.transparent_mode {
-        let Some(object) = payload.as_object() else {
-            return Err(WsSessionError::bad_request_bilingual(
-                "WebSocket 载荷必须是 JSON 对象",
-                "websocket payload must be a JSON object",
-            ));
+        let parsed_payload = serde_json::from_str::<Value>(text).ok();
+        let object = parsed_payload.as_ref().and_then(Value::as_object);
+        let response_object = object
+            .and_then(|object| object.get("response"))
+            .and_then(Value::as_object);
+        let field = |name: &str| -> Option<&Value> {
+            object
+                .and_then(|object| object.get(name))
+                .or_else(|| response_object.and_then(|object| object.get(name)))
         };
-        let message_type = object.get("type").and_then(Value::as_str).ok_or_else(|| {
-            WsSessionError::bad_request_bilingual(
-                "WebSocket 载荷缺少 type=response.create",
-                "websocket payload missing type=response.create",
-            )
-        })?;
-        if message_type != "response.create" {
-            return Err(WsSessionError::bad_request_bilingual(
-                "不支持的 WebSocket 消息类型",
-                format!("unsupported websocket message type: {message_type}"),
-            ));
-        }
         let service_tier_diagnostic =
-            crate::gateway::inspect_service_tier_value(object.get("service_tier"));
-        let reasoning_effort = object
-            .get("reasoning")
+            crate::gateway::inspect_service_tier_value(field("service_tier"));
+        let reasoning_effort = field("reasoning")
             .and_then(|value| value.get("effort"))
             .and_then(Value::as_str)
             .map(str::to_string);
         let effective_service_tier = service_tier_diagnostic.normalized_value.clone();
         return Ok(PreparedClientFrame {
             text: text.to_string(),
-            model: object
-                .get("model")
-                .and_then(Value::as_str)
-                .map(str::to_string),
+            upstream_message: UpstreamMessage::Text(text.to_string().into()),
+            model: field("model").and_then(Value::as_str).map(str::to_string),
             reasoning_effort,
             service_tier: service_tier_diagnostic.normalized_value,
             effective_service_tier,
@@ -603,6 +611,13 @@ fn rewrite_client_frame(
             has_service_tier_field: service_tier_diagnostic.has_field,
         });
     }
+
+    let mut payload = serde_json::from_str::<Value>(text).map_err(|err| {
+        WsSessionError::bad_request_bilingual(
+            "WebSocket JSON 载荷无效",
+            format!("invalid websocket json payload: {err}"),
+        )
+    })?;
     let Some(object) = payload.as_object_mut() else {
         return Err(WsSessionError::bad_request_bilingual(
             "WebSocket 载荷必须是 JSON 对象",
@@ -697,6 +712,7 @@ fn rewrite_client_frame(
         })?;
 
     Ok(PreparedClientFrame {
+        upstream_message: UpstreamMessage::Text(text.clone().into()),
         text,
         model: Some(request.model),
         reasoning_effort,
@@ -1383,6 +1399,9 @@ async fn try_retry_ws_request_after_terminal(
     if terminal.status_code == 200 || pending.forwarded_upstream_event {
         return false;
     }
+    if pending.prepared.text.is_empty() {
+        return false;
+    }
     let mut retry_text = None;
     if is_previous_response_not_found_terminal(terminal) {
         if context.transparent_mode {
@@ -1415,6 +1434,7 @@ async fn try_retry_ws_request_after_terminal(
         .await
     {
         Ok(()) => {
+            pending.prepared.upstream_message = UpstreamMessage::Text(retry_text.clone().into());
             pending.prepared.text = retry_text;
             pending.forwarded_upstream_event = false;
             pending.log.first_response_ms = None;
@@ -2003,6 +2023,46 @@ mod tests {
             .get("x-codex-turn-metadata")
             .is_none());
         assert!(value.get("prompt_cache_key").is_none());
+    }
+
+    #[test]
+    fn websocket_transparent_frame_allows_non_response_create_text() {
+        let context = WsRequestContext {
+            api_key: sample_api_key(),
+            incoming_headers: sample_incoming_headers_with_metadata(),
+            prompt_cache_key: Some("sticky-thread".to_string()),
+            effective_upstream_base: "https://chatgpt.com/backend-api/codex".to_string(),
+            prefer_raw_errors: false,
+            transparent_mode: true,
+        };
+        let text = r#"{"type":"session.update","session":{"trace":"client-controlled"}}"#;
+        let prepared = rewrite_client_frame(text, &context)
+            .unwrap_or_else(|_| panic!("rewrite websocket frame failed"));
+
+        assert_eq!(prepared.text, text);
+        assert!(prepared.model.is_none());
+        assert!(prepared.reasoning_effort.is_none());
+        assert!(prepared.service_tier.is_none());
+    }
+
+    #[test]
+    fn websocket_transparent_frame_allows_non_json_text() {
+        let context = WsRequestContext {
+            api_key: sample_api_key(),
+            incoming_headers: sample_incoming_headers_with_metadata(),
+            prompt_cache_key: Some("sticky-thread".to_string()),
+            effective_upstream_base: "https://chatgpt.com/backend-api/codex".to_string(),
+            prefer_raw_errors: false,
+            transparent_mode: true,
+        };
+        let text = "client-controlled-websocket-text";
+        let prepared = rewrite_client_frame(text, &context)
+            .unwrap_or_else(|_| panic!("rewrite websocket frame failed"));
+
+        assert_eq!(prepared.text, text);
+        assert!(prepared.model.is_none());
+        assert!(prepared.reasoning_effort.is_none());
+        assert!(prepared.service_tier.is_none());
     }
 
     #[test]

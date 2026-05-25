@@ -196,11 +196,17 @@ const GUIDE_CONFIG_LINES = [
     comment: "与本软件网关对接时使用 responses 协议",
     line: 'wire_api = "responses"',
   },
+  {
+    comment: "启用 Codex Responses WebSocket；服务端会对原生 Codex WebSocket 尽量透明转发",
+    line: "supports_websockets = true",
+  },
 ] as const;
 
 const GUIDE_REMINDERS = [
   "`auth.json` 里的 `OPENAI_API_KEY` 应填写平台密钥页面生成的 Key，不要填账号 token。",
   "如果你在设置页改过服务端口，记得同步修改 `base_url`，否则 CLI 会连到旧端口。",
+  "`supports_websockets = true` 仅在平台 Key 命中官方 Codex 账号上游时可用；聚合 API / 混合轮转仍会返回 `426`。",
+  "这里不要配置 `requires_openai_auth = true`；CodexManager 使用平台 Key 鉴权。",
   "如果你在 Web 端想手动替换本地 Codex 缓存，优先用模型管理页右上角的导出按钮；它会下载同名 `models_cache.json` 供你手动放入本地 `.codex` 目录。",
   "如果 CLI 已经有其它 `model_providers` 配置，不需要全删，只要保证 `cm` 这一段完整且名字一致即可。",
   "勾选“下次不再显示这份引导”并点击“保存并关闭”后，软件会把这个状态写入数据库；否则仅在当前窗口会话内关闭提醒。",

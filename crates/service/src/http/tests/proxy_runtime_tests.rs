@@ -668,7 +668,7 @@ async fn hybrid_responses_websocket_returns_426() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn official_responses_websocket_proxies_frames_and_headers() {
+async fn official_responses_websocket_transparently_proxies_frames_and_headers() {
     let _guard = crate::test_env_guard();
     let _org_guard = EnvGuard::set("OPENAI_ORGANIZATION", "org_ws_test");
     let _project_guard = EnvGuard::set("OPENAI_PROJECT", "proj_ws_test");
@@ -741,10 +741,10 @@ async fn official_responses_websocket_proxies_frames_and_headers() {
     let first_payload: serde_json::Value =
         serde_json::from_str(&first_upstream_frame).expect("parse first upstream frame");
     assert_eq!(first_payload["type"], "response.create");
-    assert_eq!(first_payload["model"], "gpt-5.4-mini");
+    assert_eq!(first_payload["model"], "gpt-4.1");
     assert_eq!(first_payload["stream"], false);
     assert_eq!(first_payload["store"], true);
-    assert_eq!(first_payload["service_tier"], "priority");
+    assert_eq!(first_payload["service_tier"], "Fast");
     assert_eq!(first_payload["generate"], false);
     assert!(first_payload.get("prompt_cache_key").is_none());
 
@@ -792,10 +792,9 @@ async fn official_responses_websocket_proxies_frames_and_headers() {
         second_payload["client_metadata"]["source"],
         "proxy-runtime-test"
     );
-    assert_eq!(
-        second_payload["client_metadata"]["x-codex-turn-metadata"],
-        "turn_meta_ws_1"
-    );
+    assert!(second_payload["client_metadata"]
+        .get("x-codex-turn-metadata")
+        .is_none());
     assert!(second_payload.get("prompt_cache_key").is_none());
 
     let second_client_event = tokio::time::timeout(Duration::from_secs(5), client_ws.next())
@@ -829,7 +828,10 @@ async fn official_responses_websocket_proxies_frames_and_headers() {
             .map(String::as_str),
         Some("chatgpt_proxy_runtime_ws")
     );
-    assert_eq!(capture.headers.get("openai-beta").map(String::as_str), None);
+    assert_eq!(
+        capture.headers.get("openai-beta").map(String::as_str),
+        Some("responses_websockets=2026-02-06")
+    );
     assert_eq!(capture.headers.get("version").map(String::as_str), None);
     assert_eq!(
         capture
@@ -873,7 +875,7 @@ async fn official_responses_websocket_proxies_frames_and_headers() {
             .headers
             .get("x-codex-other-limit-name")
             .map(String::as_str),
-        None
+        Some("promo_header_ws")
     );
     assert_eq!(
         capture
@@ -930,8 +932,8 @@ async fn official_responses_websocket_proxies_frames_and_headers() {
         ws_logs
             .iter()
             .filter(|item| item.service_tier.is_none())
-            .any(|item| item.effective_service_tier.as_deref() == Some("fast")),
-        "expected follow-up websocket request to keep effective fast service tier"
+            .any(|item| item.effective_service_tier.is_none()),
+        "expected follow-up websocket request without explicit service tier to stay empty"
     );
 
     client_ws.close(None).await.expect("close client websocket");

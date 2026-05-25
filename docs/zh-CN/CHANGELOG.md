@@ -8,8 +8,10 @@
 ### Added
 - 新增 Codex 图片生成兼容链路：默认按官方 Codex 行为为 `/v1/responses` 自动注入 `image_generation` tool，支持显式 tool 透传，并提供 `/v1/images/generations` 与 `/v1/images/edits` 兼容入口，默认图片工具模型为 `gpt-image-2`。
 - Codex CLI 首次接入引导新增 `auth.json` 配置步骤，明确平台 Key、`auth.json` 与 `config.toml` 的关系。
+- Codex CLI 配置模板启用 `supports_websockets = true`，用于开启 Responses WebSocket。
 
 ### Fixed
+- 修复原生 Codex WebSocket 透明模式仍强制解析/改写请求帧，可能导致新版 Codex CLI 会话中断的问题。
 - 修复官方返回的 Spark 专属额度未展示的问题，附加额度会按 `additional_rate_limits[].rate_limit` 继续解析并显示。
 - 调整额度详情弹窗布局，附加额度较多时可按两列展示并滚动查看。
 
