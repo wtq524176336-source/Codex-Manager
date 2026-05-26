@@ -30,6 +30,7 @@ use crate::http::proxy_response::{text_error_response, text_response};
 use crate::storage_helpers::{hash_platform_key, open_storage};
 
 const RESPONSES_WS_ERROR_CODE: &str = "responses_websocket_error";
+const WEBSOCKET_CONNECTION_LIMIT_REACHED_CODE: &str = "websocket_connection_limit_reached";
 
 fn websocket_text_sha256_16(text: &str) -> String {
     use std::fmt::Write as _;
@@ -2119,7 +2120,20 @@ async fn try_retry_ws_request_after_terminal(
         return false;
     }
     let mut retry_text = None;
-    if context.transparent_mode {
+    if is_websocket_connection_limit_terminal(terminal) {
+        if !try_reconnect_ws_upstream_after_connection_limit(context, upstream, terminal.status_code)
+            .await
+        {
+            return false;
+        }
+        log_ws_terminal_diagnostic(
+            context,
+            upstream,
+            pending,
+            terminal,
+            "connection_limit_reconnected",
+        );
+    } else if context.transparent_mode {
         log_ws_terminal_diagnostic(
             context,
             upstream,
@@ -2128,8 +2142,7 @@ async fn try_retry_ws_request_after_terminal(
             "transparent_passthrough_no_retry",
         );
         return false;
-    }
-    if is_previous_response_not_found_terminal(terminal) {
+    } else if is_previous_response_not_found_terminal(terminal) {
         retry_text = strip_previous_response_id_from_ws_text(pending.prepared.text.as_str());
         if retry_text.is_none() {
             return false;
@@ -2146,7 +2159,7 @@ async fn try_retry_ws_request_after_terminal(
         {
             return false;
         }
-        if upstream.account_id != previous_account_id && !context.transparent_mode {
+        if upstream.account_id != previous_account_id {
             retry_text = strip_previous_response_id_from_ws_text(pending.prepared.text.as_str());
         }
     }
@@ -2173,6 +2186,120 @@ async fn try_retry_ws_request_after_terminal(
             false
         }
     }
+}
+
+async fn try_reconnect_ws_upstream_after_connection_limit(
+    context: &WsRequestContext,
+    upstream: &mut ConnectedUpstreamWebsocket,
+    status_code: u16,
+) -> bool {
+    let current_account_id = upstream.account_id.clone();
+    let (mut account, token) = match load_ws_reconnect_account_and_token(current_account_id.as_str())
+    {
+        Ok(value) => value,
+        Err(err) => {
+            log::warn!(
+                "event=responses_ws_connection_limit_load_account_failed account_id={} status={} err={}",
+                current_account_id,
+                status_code,
+                err
+            );
+            return false;
+        }
+    };
+
+    let (chatgpt_account_id, workspace_id) = crate::usage_account_meta::derive_account_meta(&token);
+    if crate::usage_account_meta::patch_account_meta_in_place(
+        &mut account,
+        chatgpt_account_id,
+        workspace_id,
+    ) {
+        account.updated_at = codexmanager_core::storage::now_ts();
+        if let Some(storage) = open_storage() {
+            let _ = storage.insert_account(&account);
+        }
+    }
+
+    let bearer = match resolve_bearer_token_for_websocket(account.clone(), token).await {
+        Ok(token) => token,
+        Err(err) => {
+            log::warn!(
+                "event=responses_ws_connection_limit_bearer_failed account_id={} status={} err={}",
+                current_account_id,
+                status_code,
+                err
+            );
+            return false;
+        }
+    };
+    let request = match build_upstream_websocket_request(
+        upstream.upstream_url.as_str(),
+        &account,
+        bearer.as_str(),
+        context,
+    ) {
+        Ok(request) => request,
+        Err(err) => {
+            log::warn!(
+                "event=responses_ws_connection_limit_request_failed account_id={} status={} err={}",
+                current_account_id,
+                status_code,
+                err.message
+            );
+            return false;
+        }
+    };
+
+    ensure_rustls_crypto_provider();
+    let replacement = match connect_upstream_websocket_for_account(
+        request,
+        upstream.upstream_url.as_str(),
+        &account,
+        context,
+    )
+    .await
+    {
+        Ok((stream, _)) => ConnectedUpstreamWebsocket {
+            stream,
+            account_id: account.id,
+            upstream_url: upstream.upstream_url.clone(),
+        },
+        Err(err) => {
+            log::warn!(
+                "event=responses_ws_connection_limit_reconnect_failed account_id={} status={} err={}",
+                current_account_id,
+                status_code,
+                err
+            );
+            return false;
+        }
+    };
+
+    let _ = upstream.stream.close(None).await;
+    *upstream = replacement;
+    true
+}
+
+fn load_ws_reconnect_account_and_token(
+    account_id: &str,
+) -> Result<
+    (
+        codexmanager_core::storage::Account,
+        codexmanager_core::storage::Token,
+    ),
+    String,
+> {
+    let storage = open_storage()
+        .ok_or_else(|| crate::gateway::bilingual_error("存储不可用", "storage unavailable"))?;
+    let account = storage
+        .find_account_by_id(account_id)
+        .map_err(|err| format!("load websocket reconnect account failed: {err}"))?
+        .ok_or_else(|| "websocket reconnect account not found".to_string())?;
+    let token = storage
+        .find_token_by_account_id(account_id)
+        .map_err(|err| format!("load websocket reconnect token failed: {err}"))?
+        .ok_or_else(|| "websocket reconnect token not found".to_string())?;
+    Ok((account, token))
 }
 
 async fn try_rotate_ws_upstream_after_terminal(
@@ -2316,6 +2443,13 @@ fn inspect_ws_terminal_event(text: &str) -> Option<WsTerminalEvent> {
         }
         _ => None,
     }
+}
+
+fn is_websocket_connection_limit_terminal(terminal: &WsTerminalEvent) -> bool {
+    terminal
+        .error_code
+        .as_deref()
+        .is_some_and(|code| code == WEBSOCKET_CONNECTION_LIMIT_REACHED_CODE)
 }
 
 fn is_previous_response_not_found_terminal(terminal: &WsTerminalEvent) -> bool {
