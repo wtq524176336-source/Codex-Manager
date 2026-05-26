@@ -1,5 +1,5 @@
 use axum::body::Body;
-use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::extract::ws::{CloseFrame as ClientCloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::extract::FromRequestParts;
 use axum::http::header::{self, HeaderMap, HeaderValue};
 use axum::http::{Request as HttpRequest, Response, StatusCode};
@@ -17,6 +17,8 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::handshake::client::{
     Request as WsClientRequest, Response as WsClientResponse,
 };
+use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode as UpstreamCloseCode;
+use tokio_tungstenite::tungstenite::protocol::CloseFrame as UpstreamCloseFrame;
 use tokio_tungstenite::tungstenite::Message as UpstreamMessage;
 use tokio_tungstenite::{client_async_tls_with_config, connect_async_tls_with_config};
 
@@ -379,8 +381,13 @@ async fn run_responses_websocket_session(mut socket: WebSocket, context: WsReque
                             break;
                         }
                     }
-                    Ok(Message::Close(_)) => {
-                        let _ = upstream.stream.close(None).await;
+                    Ok(Message::Close(frame)) => {
+                        let _ = upstream
+                            .stream
+                            .send(UpstreamMessage::Close(
+                                frame.map(client_close_frame_to_upstream),
+                            ))
+                            .await;
                         break;
                     }
                     Err(err) => {
@@ -476,8 +483,10 @@ async fn run_responses_websocket_session(mut socket: WebSocket, context: WsReque
                     Ok(UpstreamMessage::Pong(payload)) => {
                         let _ = socket.send(Message::Pong(payload)).await;
                     }
-                    Ok(UpstreamMessage::Close(_)) => {
-                        let _ = socket.close().await;
+                    Ok(UpstreamMessage::Close(frame)) => {
+                        let _ = socket
+                            .send(Message::Close(frame.map(upstream_close_frame_to_client)))
+                            .await;
                         break;
                     }
                     Ok(UpstreamMessage::Frame(_)) => {}
@@ -495,6 +504,20 @@ async fn run_responses_websocket_session(mut socket: WebSocket, context: WsReque
                 }
             }
         }
+    }
+}
+
+fn client_close_frame_to_upstream(frame: ClientCloseFrame) -> UpstreamCloseFrame {
+    UpstreamCloseFrame {
+        code: UpstreamCloseCode::from(frame.code),
+        reason: frame.reason.to_string().into(),
+    }
+}
+
+fn upstream_close_frame_to_client(frame: UpstreamCloseFrame) -> ClientCloseFrame {
+    ClientCloseFrame {
+        code: frame.code.into(),
+        reason: frame.reason.to_string().into(),
     }
 }
 
