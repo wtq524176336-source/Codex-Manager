@@ -84,6 +84,7 @@ pub(crate) fn normalize_account_plan_filter(
         "free" => "free",
         "go" => "go",
         "plus" => "plus",
+        "plus/team" => "plus/team",
         "pro" => "pro",
         "team" => "team",
         "business" => "business",
@@ -249,6 +250,9 @@ pub(crate) fn account_matches_plan_filter(
         .ok()
         .flatten();
     match resolve_account_plan(Some(token), snapshot.as_ref()) {
+        Some(plan) if normalized_filter == "plus/team" => {
+            matches!(plan.normalized.as_str(), "plus" | "team")
+        }
         Some(plan) => plan.normalized == normalized_filter,
         None => normalized_filter == "unknown",
     }

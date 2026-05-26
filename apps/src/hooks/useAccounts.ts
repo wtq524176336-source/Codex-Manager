@@ -17,6 +17,10 @@ import { useLocalDayRange } from "@/hooks/useLocalDayRange";
 import { useRuntimeCapabilities } from "@/hooks/useRuntimeCapabilities";
 import { useI18n } from "@/lib/i18n/provider";
 import { useAppStore } from "@/lib/store/useAppStore";
+import {
+  PLUS_TEAM_PLAN_FILTER,
+  normalizePlanFilterValue,
+} from "@/lib/utils/account-plan";
 import { AccountListResult, AccountUsage, StartupSnapshot } from "@/types";
 
 type ImportByDirectoryResult = Awaited<ReturnType<typeof accountClient.importByDirectory>>;
@@ -377,9 +381,8 @@ export function useAccounts() {
     const sortOrder = [
       "free",
       "go",
-      "plus",
+      PLUS_TEAM_PLAN_FILTER,
       "pro",
-      "team",
       "business",
       "enterprise",
       "edu",
@@ -404,7 +407,7 @@ export function useAccounts() {
     };
 
     for (const account of accounts) {
-      const planType = String(account.planType || "").trim().toLowerCase() || "unknown";
+      const planType = normalizePlanFilterValue(account.planType);
       map.set(planType, (map.get(planType) || 0) + 1);
     }
 

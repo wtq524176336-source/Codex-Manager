@@ -204,7 +204,7 @@ test("api key modal displays and submits hybrid rotation", async ({ page }) => {
         service_tier: "default",
         protocol_type: "openai_compat",
         rotation_strategy: "hybrid_rotation",
-        account_plan_filter: "plus",
+        account_plan_filter: "plus/team",
         status: "enabled",
         created_at: 1_770_000_001,
       },
@@ -228,14 +228,14 @@ test("api key modal displays and submits hybrid rotation", async ({ page }) => {
   await expect(dialog.getByRole("heading", { name: "编辑平台密钥" })).toBeVisible();
   await expect(dialog.getByText("混合轮转（账号优先）", { exact: true })).toBeVisible();
   await expect(dialog.getByText("账号组筛选", { exact: true })).toBeVisible();
-  await expect(dialog.getByText("Plus", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("Plus/Team", { exact: true })).toBeVisible();
 
   await dialog.getByRole("button", { name: "完成" }).click();
 
   await expect.poll(() => updatePayloads.length).toBe(1);
   const params = updatePayloads[0]?.params as Record<string, unknown>;
   expect(params.rotationStrategy).toBe("hybrid_rotation");
-  expect(params.accountPlanFilter).toBe("plus");
+  expect(params.accountPlanFilter).toBe("plus/team");
 });
 
 test("api key modal can select hybrid rotation on create", async ({ page }) => {

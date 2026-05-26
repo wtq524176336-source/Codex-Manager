@@ -12,7 +12,7 @@ import { useI18n } from "@/lib/i18n/provider";
 import {
   type AccountEditorState,
   type DeleteDialogState,
-  normalizeAccountPlanKey,
+  accountMatchesPlanFilter,
   normalizeTagsDraft,
   type RtRefreshFailureDeleteItem,
   type StatusFilter,
@@ -200,7 +200,7 @@ export default function AccountsPage() {
         account.name.toLowerCase().includes(search.toLowerCase()) ||
         account.id.toLowerCase().includes(search.toLowerCase());
       const matchPlan =
-        planFilter === "all" || normalizeAccountPlanKey(account) === planFilter;
+        planFilter === "all" || accountMatchesPlanFilter(account, planFilter);
       const matchStatus =
         statusFilter === "all" ||
         (statusFilter === "available" && account.isAvailable) ||
@@ -217,7 +217,7 @@ export default function AccountsPage() {
         account.name.toLowerCase().includes(search.toLowerCase()) ||
         account.id.toLowerCase().includes(search.toLowerCase());
       const matchPlan =
-        planFilter === "all" || normalizeAccountPlanKey(account) === planFilter;
+        planFilter === "all" || accountMatchesPlanFilter(account, planFilter);
       return matchSearch && matchPlan;
     });
   }, [accounts, planFilter, search]);

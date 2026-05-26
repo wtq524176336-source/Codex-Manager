@@ -15,6 +15,10 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import type { Account } from "@/types";
+import {
+  PLUS_TEAM_PLAN_FILTER,
+  accountPlanMatchesFilter,
+} from "@/lib/utils/account-plan";
 
 export type StatusFilter = "all" | "available" | "limited" | "banned";
 export type AccountExportMode = "single" | "multiple";
@@ -35,6 +39,8 @@ export function formatAccountPlanValueLabel(value: string, t: TranslateFn) {
       return "GO";
     case "plus":
       return "PLUS";
+    case PLUS_TEAM_PLAN_FILTER:
+      return "PLUS/TEAM";
     case "pro":
       return "PRO";
     case "team":
@@ -58,6 +64,10 @@ export function normalizeAccountPlanKey(account: Account) {
       .trim()
       .toLowerCase() || "unknown"
   );
+}
+
+export function accountMatchesPlanFilter(account: Account, filter: string) {
+  return accountPlanMatchesFilter(account.planType, filter);
 }
 
 export function formatPlanFilterLabel(value: string, t: TranslateFn) {

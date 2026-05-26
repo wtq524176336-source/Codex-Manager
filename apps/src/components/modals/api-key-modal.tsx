@@ -24,6 +24,10 @@ import { useRuntimeCapabilities } from "@/hooks/useRuntimeCapabilities";
 import { accountClient } from "@/lib/api/account-client";
 import { useAppStore } from "@/lib/store/useAppStore";
 import { useI18n } from "@/lib/i18n/provider";
+import {
+  PLUS_TEAM_PLAN_FILTER,
+  normalizePlanFilterValue,
+} from "@/lib/utils/account-plan";
 import { copyTextToClipboard } from "@/lib/utils/clipboard";
 import { findBestMatchingModel } from "@/lib/api/model-catalog";
 import { toast } from "sonner";
@@ -65,14 +69,31 @@ const ACCOUNT_PLAN_FILTER_LABELS: Record<string, string> = {
   all: "全部账号",
   free: "Free",
   go: "Go",
-  plus: "Plus",
+  [PLUS_TEAM_PLAN_FILTER]: "Plus/Team",
   pro: "Pro",
-  team: "Team",
   business: "Business",
   enterprise: "Enterprise",
   edu: "Edu",
   unknown: "未知计划",
+  plus: "Plus/Team",
+  team: "Plus/Team",
 };
+
+const ACCOUNT_PLAN_FILTER_OPTIONS = [
+  "all",
+  "free",
+  "go",
+  PLUS_TEAM_PLAN_FILTER,
+  "pro",
+  "business",
+  "enterprise",
+  "edu",
+  "unknown",
+];
+
+function normalizeEditableAccountPlanFilter(value?: string | null): string {
+  return String(value || "").trim() ? normalizePlanFilterValue(value) : "all";
+}
 
 interface ApiKeyModalProps {
   open: boolean;
@@ -186,7 +207,7 @@ export function ApiKeyModal({ open, onOpenChange, apiKey }: ApiKeyModalProps) {
     setReasoningEffort(apiKey.reasoningEffort || "");
     setServiceTier(normalizeEditableServiceTier(apiKey.serviceTier));
     setRotationStrategy(apiKey.rotationStrategy || "account_rotation");
-    setAccountPlanFilter(apiKey.accountPlanFilter || "all");
+    setAccountPlanFilter(normalizeEditableAccountPlanFilter(apiKey.accountPlanFilter));
     setGeneratedKey("");
     setUpstreamBaseUrl(apiKey.upstreamBaseUrl || "");
   }, [apiKey, open]);
@@ -368,13 +389,11 @@ export function ApiKeyModal({ open, onOpenChange, apiKey }: ApiKeyModalProps) {
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent align="start">
-                  {Object.entries(ACCOUNT_PLAN_FILTER_LABELS).map(
-                    ([value, label]) => (
-                      <SelectItem key={value} value={value}>
-                        {t(label)}
-                      </SelectItem>
-                    ),
-                  )}
+                  {ACCOUNT_PLAN_FILTER_OPTIONS.map((value) => (
+                    <SelectItem key={value} value={value}>
+                      {t(ACCOUNT_PLAN_FILTER_LABELS[value] || value)}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
               <p className="text-[11px] text-muted-foreground">
