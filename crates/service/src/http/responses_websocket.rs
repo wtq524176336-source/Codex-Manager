@@ -40,6 +40,14 @@ fn websocket_text_sha256_16(text: &str) -> String {
     output
 }
 
+fn fingerprint_or_dash(value: Option<&str>) -> String {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(websocket_text_sha256_16)
+        .unwrap_or_else(|| "-".to_string())
+}
+
 #[derive(Clone)]
 struct WsRequestContext {
     api_key: codexmanager_core::storage::ApiKey,
@@ -88,6 +96,14 @@ struct PendingWsRequestLog {
     effective_service_tier: Option<String>,
     started_at: Instant,
     first_response_ms: Option<i64>,
+}
+
+struct WsFrameDiagnostics {
+    request_type: String,
+    previous_response_id_present: bool,
+    previous_response_id_fp: String,
+    response_id_fp: String,
+    generate: String,
 }
 
 struct WsSessionError {
@@ -232,6 +248,13 @@ async fn run_responses_websocket_session(mut socket: WebSocket, context: WsReque
         prepared: prepared_first.clone(),
         forwarded_upstream_event: false,
     };
+    log_ws_frame_route(
+        &context,
+        &first_pending,
+        upstream.account_id.as_str(),
+        upstream.upstream_url.as_str(),
+        "initial",
+    );
 
     if let Err(err) = upstream
         .stream
@@ -293,6 +316,13 @@ async fn run_responses_websocket_session(mut socket: WebSocket, context: WsReque
                                     prepared,
                                     forwarded_upstream_event: false,
                                 };
+                                log_ws_frame_route(
+                                    &context,
+                                    &current_pending,
+                                    upstream.account_id.as_str(),
+                                    upstream.upstream_url.as_str(),
+                                    "client",
+                                );
                                 if let Err(err) = upstream
                                     .stream
                                     .send(current_pending.prepared.upstream_message.clone())
@@ -375,6 +405,15 @@ async fn run_responses_websocket_session(mut socket: WebSocket, context: WsReque
                 match upstream_result {
                     Ok(UpstreamMessage::Text(text)) => {
                         if let Some(terminal) = inspect_ws_terminal_event(text.as_str()) {
+                            if let Some(pending) = pending_request.as_ref() {
+                                log_ws_terminal_diagnostic(
+                                    &context,
+                                    &upstream,
+                                    pending,
+                                    &terminal,
+                                    "received",
+                                );
+                            }
                             let retry_model = pending_request
                                 .as_ref()
                                 .and_then(|pending| pending.prepared.model.clone());
@@ -793,6 +832,79 @@ fn insert_header_metadata(mapped: &mut HashMap<String, String>, key: &str, value
     }
 }
 
+fn ws_text_field<'a>(value: &'a Value, name: &str) -> Option<&'a str> {
+    value
+        .get(name)
+        .and_then(Value::as_str)
+        .or_else(|| {
+            value
+                .get("response")
+                .and_then(|response| response.get(name))
+                .and_then(Value::as_str)
+        })
+}
+
+fn ws_frame_diagnostics(text: &str) -> WsFrameDiagnostics {
+    let parsed = serde_json::from_str::<Value>(text).ok();
+    let request_type = parsed
+        .as_ref()
+        .and_then(|value| ws_text_field(value, "type"))
+        .unwrap_or("-")
+        .to_string();
+    let previous_response_id = parsed
+        .as_ref()
+        .and_then(|value| ws_text_field(value, "previous_response_id"));
+    let response_id = parsed
+        .as_ref()
+        .and_then(|value| ws_text_field(value, "response_id"));
+    let generate = parsed
+        .as_ref()
+        .and_then(|value| value.get("generate"))
+        .and_then(Value::as_bool)
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "-".to_string());
+
+    WsFrameDiagnostics {
+        request_type,
+        previous_response_id_present: previous_response_id.is_some(),
+        previous_response_id_fp: fingerprint_or_dash(previous_response_id),
+        response_id_fp: fingerprint_or_dash(response_id),
+        generate,
+    }
+}
+
+fn log_ws_frame_route(
+    context: &WsRequestContext,
+    pending: &PendingWsRequestState,
+    account_id: &str,
+    upstream_url: &str,
+    phase: &str,
+) {
+    let diagnostics = ws_frame_diagnostics(pending.prepared.text.as_str());
+    log::info!(
+        "event=responses_ws_frame_route trace_id={} phase={} api_key_id={} account_id={} transparent_mode={} request_type={} model={} previous_response_id_present={} previous_response_id_fp={} response_id_fp={} generate={} turn_state_present={} turn_state_fp={} thread_id_fp={} session_id_fp={} client_request_id_fp={} frame_len={} frame_sha256_16={} upstream_url={}",
+        pending.log.trace_id.as_str(),
+        phase,
+        context.api_key.id.as_str(),
+        account_id,
+        context.transparent_mode,
+        diagnostics.request_type.as_str(),
+        pending.prepared.model.as_deref().unwrap_or("-"),
+        diagnostics.previous_response_id_present,
+        diagnostics.previous_response_id_fp.as_str(),
+        diagnostics.response_id_fp.as_str(),
+        diagnostics.generate.as_str(),
+        context.incoming_headers.turn_state().is_some(),
+        fingerprint_or_dash(context.incoming_headers.turn_state()),
+        fingerprint_or_dash(context.incoming_headers.thread_id()),
+        fingerprint_or_dash(context.incoming_headers.session_id()),
+        fingerprint_or_dash(context.incoming_headers.client_request_id()),
+        pending.prepared.text.len(),
+        websocket_text_sha256_16(pending.prepared.text.as_str()),
+        upstream_url
+    );
+}
+
 fn merge_client_metadata(
     rewritten_metadata: Option<Value>,
     client_metadata: Option<Value>,
@@ -956,25 +1068,40 @@ async fn connect_upstream_websocket_for_account(
     let started_at = Instant::now();
     let connect_timeout_ms = websocket_connect_timeout().as_millis();
     log::info!(
-        "event=responses_ws_upstream_connect_start api_key_id={} account_id={} upstream_url={} proxy_source={} proxy={} transparent_mode={} connect_timeout_ms={}",
+        "event=responses_ws_upstream_connect_start api_key_id={} account_id={} upstream_url={} proxy_source={} proxy={} transparent_mode={} incoming_turn_state_present={} incoming_turn_state_fp={} thread_id_fp={} session_id_fp={} client_request_id_fp={} connect_timeout_ms={}",
         context.api_key.id,
         account.id,
         ws_url,
         proxy.source,
         proxy_log,
         context.transparent_mode,
+        context.incoming_headers.turn_state().is_some(),
+        fingerprint_or_dash(context.incoming_headers.turn_state()),
+        fingerprint_or_dash(context.incoming_headers.thread_id()),
+        fingerprint_or_dash(context.incoming_headers.session_id()),
+        fingerprint_or_dash(context.incoming_headers.client_request_id()),
         connect_timeout_ms
     );
     let result = connect_upstream_websocket_request(request, ws_url, proxy.url.as_deref()).await;
     match &result {
-        Ok(_) => log::info!(
-            "event=responses_ws_upstream_connect_ok api_key_id={} account_id={} upstream_url={} proxy_source={} elapsed_ms={}",
-            context.api_key.id,
-            account.id,
-            ws_url,
-            proxy.source,
-            started_at.elapsed().as_millis()
-        ),
+        Ok((_, response)) => {
+            let upstream_turn_state = response
+                .headers()
+                .get(crate::http::codex_source::X_CODEX_TURN_STATE_HEADER)
+                .and_then(|value| value.to_str().ok());
+            log::info!(
+                "event=responses_ws_upstream_connect_ok api_key_id={} account_id={} upstream_url={} proxy_source={} elapsed_ms={} incoming_turn_state_present={} incoming_turn_state_fp={} upstream_turn_state_present={} upstream_turn_state_fp={}",
+                context.api_key.id,
+                account.id,
+                ws_url,
+                proxy.source,
+                started_at.elapsed().as_millis(),
+                context.incoming_headers.turn_state().is_some(),
+                fingerprint_or_dash(context.incoming_headers.turn_state()),
+                upstream_turn_state.is_some(),
+                fingerprint_or_dash(upstream_turn_state)
+            );
+        }
         Err(err) => log::warn!(
             "event=responses_ws_upstream_connect_failed api_key_id={} account_id={} upstream_url={} proxy_source={} proxy={} elapsed_ms={} err={}",
             context.api_key.id,
@@ -1899,12 +2026,61 @@ fn finalize_ws_request_log(
 
 struct WsTerminalEvent {
     status_code: u16,
+    event_type: String,
+    error_code: Option<String>,
+    error_param: Option<String>,
     usage: crate::gateway::RequestLogUsage,
     error: Option<String>,
 }
 
 fn should_rotate_ws_upstream(status_code: u16) -> bool {
     matches!(status_code, 401 | 403 | 404 | 408 | 409 | 429)
+}
+
+fn log_ws_terminal_diagnostic(
+    context: &WsRequestContext,
+    upstream: &ConnectedUpstreamWebsocket,
+    pending: &PendingWsRequestState,
+    terminal: &WsTerminalEvent,
+    action: &str,
+) {
+    let diagnostics = ws_frame_diagnostics(pending.prepared.text.as_str());
+    let error_fp = fingerprint_or_dash(terminal.error.as_deref());
+    let error_previous_response_id_fp =
+        fingerprint_or_dash(extract_previous_response_id_from_error(terminal.error.as_deref()));
+    let previous_response_not_found = is_previous_response_not_found_terminal(terminal);
+    let message = format!(
+        "event=responses_ws_terminal_diagnostic trace_id={} action={} api_key_id={} account_id={} transparent_mode={} status={} terminal_type={} error_code={} error_param={} error_fp={} error_previous_response_id_fp={} previous_response_not_found={} request_type={} model={} previous_response_id_present={} previous_response_id_fp={} response_id_fp={} turn_state_present={} turn_state_fp={} thread_id_fp={} session_id_fp={} client_request_id_fp={} frame_sha256_16={} upstream_url={}",
+        pending.log.trace_id.as_str(),
+        action,
+        context.api_key.id.as_str(),
+        upstream.account_id.as_str(),
+        context.transparent_mode,
+        terminal.status_code,
+        terminal.event_type.as_str(),
+        terminal.error_code.as_deref().unwrap_or("-"),
+        terminal.error_param.as_deref().unwrap_or("-"),
+        error_fp.as_str(),
+        error_previous_response_id_fp.as_str(),
+        previous_response_not_found,
+        diagnostics.request_type.as_str(),
+        pending.prepared.model.as_deref().unwrap_or("-"),
+        diagnostics.previous_response_id_present,
+        diagnostics.previous_response_id_fp.as_str(),
+        diagnostics.response_id_fp.as_str(),
+        context.incoming_headers.turn_state().is_some(),
+        fingerprint_or_dash(context.incoming_headers.turn_state()),
+        fingerprint_or_dash(context.incoming_headers.thread_id()),
+        fingerprint_or_dash(context.incoming_headers.session_id()),
+        fingerprint_or_dash(context.incoming_headers.client_request_id()),
+        websocket_text_sha256_16(pending.prepared.text.as_str()),
+        upstream.upstream_url.as_str()
+    );
+    if terminal.status_code >= 400 {
+        log::warn!("{}", message);
+    } else {
+        log::info!("{}", message);
+    }
 }
 
 async fn try_retry_ws_request_after_terminal(
@@ -1920,10 +2096,17 @@ async fn try_retry_ws_request_after_terminal(
         return false;
     }
     let mut retry_text = None;
+    if context.transparent_mode {
+        log_ws_terminal_diagnostic(
+            context,
+            upstream,
+            pending,
+            terminal,
+            "transparent_passthrough_no_retry",
+        );
+        return false;
+    }
     if is_previous_response_not_found_terminal(terminal) {
-        if context.transparent_mode {
-            return false;
-        }
         retry_text = strip_previous_response_id_from_ws_text(pending.prepared.text.as_str());
         if retry_text.is_none() {
             return false;
@@ -2089,13 +2272,21 @@ fn inspect_ws_terminal_event(text: &str) -> Option<WsTerminalEvent> {
     match event_type.as_str() {
         "response.completed" | "response.done" => Some(WsTerminalEvent {
             status_code: 200,
+            event_type,
+            error_code: None,
+            error_param: None,
             usage: parse_ws_usage(&value),
             error: None,
         }),
         "response.failed" | "error" => {
             let error = extract_ws_error_message(&value);
+            let error_code = extract_ws_error_string_field(&value, "code");
+            let error_param = extract_ws_error_string_field(&value, "param");
             Some(WsTerminalEvent {
                 status_code: infer_ws_terminal_status(&value, error.as_deref()),
+                event_type,
+                error_code,
+                error_param,
                 usage: parse_ws_usage(&value),
                 error,
             })
@@ -2214,6 +2405,33 @@ fn extract_ws_error_message(value: &Value) -> Option<String> {
                 .filter(|message| !message.is_empty())
                 .map(str::to_string)
         })
+}
+
+fn extract_ws_error_string_field(value: &Value, field: &str) -> Option<String> {
+    value
+        .get("error")
+        .and_then(|error| error.get(field))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            value
+                .get(field)
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+        })
+}
+
+fn extract_previous_response_id_from_error(message: Option<&str>) -> Option<&str> {
+    let message = message?;
+    let marker = "Previous response with id '";
+    let start = message.find(marker)? + marker.len();
+    let tail = &message[start..];
+    let end = tail.find('\'')?;
+    Some(&tail[..end])
 }
 
 fn insert_header(headers: &mut HeaderMap, name: &str, value: &str) -> Result<(), WsSessionError> {
