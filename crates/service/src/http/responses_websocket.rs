@@ -2121,8 +2121,12 @@ async fn try_retry_ws_request_after_terminal(
     }
     let mut retry_text = None;
     if is_websocket_connection_limit_terminal(terminal) {
-        if !try_reconnect_ws_upstream_after_connection_limit(context, upstream, terminal.status_code)
-            .await
+        if !try_reconnect_ws_upstream_after_connection_limit(
+            context,
+            upstream,
+            terminal.status_code,
+        )
+        .await
         {
             return false;
         }
@@ -2194,21 +2198,22 @@ async fn try_reconnect_ws_upstream_after_connection_limit(
     status_code: u16,
 ) -> bool {
     let current_account_id = upstream.account_id.clone();
-    let (mut account, token) = match load_ws_reconnect_account_and_token(current_account_id.as_str())
-    {
-        Ok(value) => value,
-        Err(err) => {
-            log::warn!(
-                "event=responses_ws_connection_limit_load_account_failed account_id={} status={} err={}",
-                current_account_id,
-                status_code,
-                err
-            );
-            return false;
-        }
-    };
+    let (mut account, token) =
+        match load_ws_reconnect_account_and_token(current_account_id.as_str()) {
+            Ok(value) => value,
+            Err(err) => {
+                log::warn!(
+                    "event=responses_ws_connection_limit_load_account_failed account_id={} status={} err={}",
+                    current_account_id,
+                    status_code,
+                    err
+                );
+                return false;
+            }
+        };
 
-    let (chatgpt_account_id, workspace_id) = crate::usage_account_meta::derive_account_meta(&token);
+    let (chatgpt_account_id, workspace_id) =
+        crate::usage_account_meta::derive_account_meta(&token);
     if crate::usage_account_meta::patch_account_meta_in_place(
         &mut account,
         chatgpt_account_id,
@@ -2672,9 +2677,10 @@ impl From<String> for WsSessionError {
 mod tests {
     use super::{
         build_socks5_connect_request, infer_ws_terminal_status, inspect_ws_terminal_event,
-        is_previous_response_not_found_terminal, merge_client_metadata, parse_websocket_target,
-        prepare_initial_client_frame, proxy_basic_auth_header, rewrite_client_frame,
-        strip_previous_response_id_from_ws_text, WsRequestContext,
+        is_previous_response_not_found_terminal, is_websocket_connection_limit_terminal,
+        merge_client_metadata, parse_websocket_target, prepare_initial_client_frame,
+        proxy_basic_auth_header, rewrite_client_frame, strip_previous_response_id_from_ws_text,
+        WsRequestContext,
     };
     use axum::extract::ws::Message;
     use axum::http::{HeaderMap, HeaderValue};
@@ -2783,6 +2789,23 @@ mod tests {
         .expect("terminal event");
 
         assert_eq!(event.status_code, 429);
+    }
+
+    #[test]
+    fn inspect_ws_terminal_event_marks_connection_limit_terminal() {
+        let payload = json!({
+            "type": "error",
+            "status": 400,
+            "error": {
+                "code": "websocket_connection_limit_reached",
+                "message": "Responses websocket connection limit reached (60 minutes). Create a new websocket connection to continue."
+            }
+        })
+        .to_string();
+        let event = inspect_ws_terminal_event(payload.as_str()).expect("terminal event");
+
+        assert_eq!(event.status_code, 400);
+        assert!(is_websocket_connection_limit_terminal(&event));
     }
 
     #[test]
