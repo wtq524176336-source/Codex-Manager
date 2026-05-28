@@ -234,10 +234,6 @@ fn is_inference_path(path: &str) -> bool {
         || path.starts_with("/v1/messages")
 }
 
-fn is_compact_request_path(path: &str) -> bool {
-    path == "/v1/responses/compact" || path.starts_with("/v1/responses/compact?")
-}
-
 fn should_write_gateway_error_fallback(status_code: Option<u16>, error: Option<&str>) -> bool {
     let Some(status_code) = status_code else {
         return false;
@@ -382,17 +378,12 @@ pub(crate) fn write_request_log_with_attempts(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or("http");
-    let compact_output_text =
-        if is_compact_request_path(request_path) || request_type.eq_ignore_ascii_case("compact") {
-            usage
-                .output_text
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(str::to_string)
-        } else {
-            None
-        };
+    let compact_output_text = usage
+        .output_text
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
     let created_at = now_ts();
     let estimated_cost_usd =
         estimate_cost_usd(model, input_tokens, cached_input_tokens, output_tokens);

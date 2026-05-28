@@ -1,9 +1,19 @@
-use rusqlite::{params, params_from_iter, types::Value, Result, Row};
+use rusqlite::{params, params_from_iter, types::Value, Connection, Result, Row};
 
 use super::{
     request_log_query, RequestLog, RequestLogQuerySummary, RequestLogTodaySummary,
     RequestTokenStat, Storage,
 };
+
+const REQUEST_LOG_RETENTION_LIMIT: i64 = 100;
+const PRUNE_REQUEST_LOGS_SQL: &str = "
+    DELETE FROM request_logs
+    WHERE id NOT IN (
+        SELECT id
+        FROM request_logs
+        ORDER BY created_at DESC, id DESC
+        LIMIT ?1
+    )";
 
 impl Storage {
     /// 函数 `ensure_request_logs_indexes`
@@ -100,7 +110,9 @@ impl Storage {
                 log.created_at,
             ],
         )?;
-        Ok(self.conn.last_insert_rowid())
+        let request_log_id = self.conn.last_insert_rowid();
+        prune_request_logs_to_retention(&self.conn)?;
+        Ok(request_log_id)
     }
 
     /// 函数 `insert_request_log_with_token_stat`
@@ -188,6 +200,7 @@ impl Storage {
             .err()
             .map(|err| err.to_string());
 
+        prune_request_logs_to_retention(&*tx)?;
         tx.commit()?;
         Ok((request_log_id, token_stat_error))
     }
@@ -1025,6 +1038,11 @@ fn append_status_filter_clause(
         }
         _ => {}
     }
+}
+
+fn prune_request_logs_to_retention(conn: &Connection) -> Result<()> {
+    conn.execute(PRUNE_REQUEST_LOGS_SQL, params![REQUEST_LOG_RETENTION_LIMIT])?;
+    Ok(())
 }
 
 #[cfg(test)]

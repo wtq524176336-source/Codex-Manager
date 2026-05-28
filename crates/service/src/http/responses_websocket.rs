@@ -99,6 +99,7 @@ struct PendingWsRequestLog {
     effective_service_tier: Option<String>,
     started_at: Instant,
     first_response_ms: Option<i64>,
+    output_text: String,
 }
 
 struct WsFrameDiagnostics {
@@ -412,6 +413,12 @@ async fn run_responses_websocket_session(mut socket: WebSocket, context: WsReque
                 };
                 match upstream_result {
                     Ok(UpstreamMessage::Text(text)) => {
+                        if let Some(pending) = pending_request.as_mut() {
+                            collect_ws_output_text_from_frame(
+                                &mut pending.log.output_text,
+                                text.as_str(),
+                            );
+                        }
                         if let Some(terminal) = inspect_ws_terminal_event(text.as_str()) {
                             if let Some(pending) = pending_request.as_ref() {
                                 log_ws_terminal_diagnostic(
@@ -1982,6 +1989,7 @@ fn begin_ws_request_log(
         effective_service_tier: prepared.effective_service_tier.clone(),
         started_at: Instant::now(),
         first_response_ms: None,
+        output_text: String::new(),
     }
 }
 
@@ -2013,6 +2021,10 @@ fn finalize_ws_request_log(
     };
     if usage.first_response_ms.is_none() {
         usage.first_response_ms = pending.first_response_ms;
+    }
+    let output_text = pending.output_text.trim();
+    if !output_text.is_empty() {
+        usage.output_text = Some(output_text.to_string());
     }
     crate::gateway::write_request_log(
         &storage,
@@ -2501,6 +2513,92 @@ fn infer_ws_terminal_status(value: &Value, error_message: Option<&str>) -> u16 {
     502
 }
 
+fn collect_ws_output_text_from_frame(output: &mut String, text: &str) {
+    let Ok(value) = serde_json::from_str::<Value>(text) else {
+        return;
+    };
+    let event_type = value
+        .get("type")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default();
+    match event_type {
+        "response.output_text.delta" => {
+            if let Some(delta) = value.get("delta").and_then(Value::as_str) {
+                output.push_str(delta);
+            }
+        }
+        "response.output_text.done" => {
+            if output.trim().is_empty() {
+                if let Some(done_text) = value.get("text").and_then(Value::as_str) {
+                    output.push_str(done_text);
+                }
+            }
+        }
+        "response.completed" | "response.done" | "response.output_item.done" => {
+            if output.trim().is_empty() {
+                if let Some(done_text) = extract_ws_output_text(&value) {
+                    output.push_str(done_text.as_str());
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn extract_ws_output_text(value: &Value) -> Option<String> {
+    let mut output = String::new();
+    if let Some(response) = value.get("response") {
+        collect_ws_response_output_text(response, &mut output);
+    } else {
+        collect_ws_response_output_text(value, &mut output);
+    }
+    let trimmed = output.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn collect_ws_response_output_text(value: &Value, output: &mut String) {
+    match value {
+        Value::Array(items) => {
+            for item in items {
+                collect_ws_response_output_text(item, output);
+            }
+        }
+        Value::Object(map) => {
+            if let Some(text) = map.get("output_text").and_then(Value::as_str) {
+                output.push_str(text);
+                return;
+            }
+            if matches!(
+                map.get("type").and_then(Value::as_str),
+                Some("output_text" | "text")
+            ) {
+                if let Some(text) = map.get("text").and_then(Value::as_str) {
+                    output.push_str(text);
+                    return;
+                }
+            }
+            if let Some(output_value) = map.get("output") {
+                collect_ws_response_output_text(output_value, output);
+            }
+            if let Some(content) = map.get("content") {
+                collect_ws_response_output_text(content, output);
+            }
+            if let Some(item) = map.get("item") {
+                collect_ws_response_output_text(item, output);
+            }
+            if let Some(output_item) = map.get("output_item") {
+                collect_ws_response_output_text(output_item, output);
+            }
+        }
+        _ => {}
+    }
+}
+
 fn parse_ws_usage(value: &Value) -> crate::gateway::RequestLogUsage {
     let top_usage = value.get("usage").and_then(Value::as_object);
     let response_usage = value
@@ -2547,7 +2645,7 @@ fn parse_ws_usage(value: &Value) -> crate::gateway::RequestLogUsage {
                     .and_then(Value::as_i64)
             }),
         first_response_ms: None,
-        output_text: None,
+        output_text: extract_ws_output_text(value),
     }
 }
 

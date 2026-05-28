@@ -502,7 +502,7 @@ function isCompactRequestLog(log: RequestLog): boolean {
   return paths.some(isCompactRequestPath);
 }
 
-function getCompactOutputText(log: RequestLog | null): string {
+function getDetailOutputText(log: RequestLog | null): string {
   return String(log?.compactOutputText || "").trim();
 }
 
@@ -1215,7 +1215,7 @@ function ErrorInfoCell({ error }: { error: string }) {
   );
 }
 
-function CompactDetailCell({
+function RequestDetailCell({
   log,
   onOpen,
 }: {
@@ -1223,8 +1223,11 @@ function CompactDetailCell({
   onOpen: (log: RequestLog) => void;
 }) {
   const { t } = useI18n();
-  if (!isCompactRequestLog(log)) {
-    return null;
+  const detailText = getDetailOutputText(log);
+  if (!detailText) {
+    return (
+      <span className="font-mono text-xs text-muted-foreground">-</span>
+    );
   }
 
   return (
@@ -1428,12 +1431,12 @@ function LogsPageContent() {
   const [gatewayPage, setGatewayPage] = useState(1);
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
   const [clearGatewayConfirmOpen, setClearGatewayConfirmOpen] = useState(false);
-  const [compactDetailLog, setCompactDetailLog] = useState<RequestLog | null>(null);
+  const [detailLog, setDetailLog] = useState<RequestLog | null>(null);
   const [activeTab, setActiveTab] = useState<LogsTab>("requests");
   const [gatewayStageFilter, setGatewayStageFilter] = useState("all");
   const pageSizeNumber = Number(pageSize) || 10;
   const gatewayPageSizeNumber = Number(gatewayPageSize) || 10;
-  const compactDetailText = getCompactOutputText(compactDetailLog);
+  const detailText = getDetailOutputText(detailLog);
   const startTs = useMemo(
     () => fromDateTimeLocalValue(startTimeInput),
     [startTimeInput],
@@ -2133,7 +2136,7 @@ function LogsPageContent() {
                       <ErrorInfoCell error={log.error} />
                     </TableCell>
                     <TableCell className="px-2 py-3 text-left align-top">
-                      <CompactDetailCell log={log} onOpen={setCompactDetailLog} />
+                      <RequestDetailCell log={log} onOpen={setDetailLog} />
                     </TableCell>
                   </TableRow>
                 ))
@@ -2163,7 +2166,7 @@ function LogsPageContent() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {["5", "10", "20", "50", "100", "200"].map((value) => (
+                    {["5", "10", "20", "50", "100"].map((value) => (
                       <SelectItem key={value} value={value}>
                         {value}
                       </SelectItem>
@@ -2534,26 +2537,26 @@ function LogsPageContent() {
       </Tabs>
 
       <Dialog
-        open={Boolean(compactDetailLog)}
+        open={Boolean(detailLog)}
         onOpenChange={(open) => {
-          if (!open) setCompactDetailLog(null);
+          if (!open) setDetailLog(null);
         }}
       >
         <DialogContent className="glass-card w-[calc(100vw-2rem)] max-w-[calc(100vw-2rem)] overflow-hidden border-none p-0 sm:max-w-[min(1200px,calc(100vw-3rem))] lg:max-w-[min(1320px,calc(100vw-4rem))]">
           <div className="flex max-h-[88vh] min-w-0 flex-col overflow-hidden">
             <DialogHeader className="min-w-0 shrink-0 border-b border-border/60 px-6 py-5 pr-12">
-              <DialogTitle className="truncate">{t("压缩后请求")}</DialogTitle>
+              <DialogTitle className="truncate">{t("输出内容")}</DialogTitle>
               <DialogDescription className="truncate">
-                {compactDetailLog
-                  ? `${formatTsFromSeconds(compactDetailLog.createdAt, t("未知时间"))} · ${
-                      compactDetailLog.model || "-"
+                {detailLog
+                  ? `${formatTsFromSeconds(detailLog.createdAt, t("未知时间"))} · ${
+                      detailLog.model || "-"
                     }`
                   : ""}
               </DialogDescription>
             </DialogHeader>
             <div className="min-h-0 min-w-0 flex-1 overflow-hidden px-6 py-5">
               <pre className="max-h-[68vh] w-full min-w-0 max-w-full overflow-auto whitespace-pre-wrap break-all rounded-md border border-border/70 bg-muted/40 p-4 font-mono text-xs leading-6 text-foreground [overflow-wrap:anywhere]">
-                {compactDetailText || t("暂无压缩内容")}
+                {detailText || t("暂无输出内容")}
               </pre>
             </div>
             <div className="flex shrink-0 items-center justify-end gap-2 border-t border-border/60 px-6 py-4">
@@ -2562,10 +2565,10 @@ function LogsPageContent() {
                 variant="outline"
                 size="sm"
                 className="gap-2"
-                disabled={!compactDetailText}
+                disabled={!detailText}
                 onClick={async () => {
                   try {
-                    await copyTextToClipboard(compactDetailText);
+                    await copyTextToClipboard(detailText);
                     toast.success(t("已复制"));
                   } catch (error) {
                     toast.error(error instanceof Error ? error.message : t("复制失败"));
