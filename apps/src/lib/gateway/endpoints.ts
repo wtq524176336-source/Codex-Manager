@@ -51,10 +51,6 @@ function buildGatewayRootEndpoint(origin: string): string {
   return normalized.replace(/\/(?:v1|v1alpha|v1beta)$/i, "");
 }
 
-export function buildClaudeCodeGatewayEndpoint(origin: string): string {
-  return buildGatewayRootEndpoint(origin);
-}
-
 export function buildGeminiGatewayEndpoint(origin: string): string {
   return buildGatewayRootEndpoint(origin);
 }

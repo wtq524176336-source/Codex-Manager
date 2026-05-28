@@ -7,7 +7,7 @@ export type JsonRpcFetcher = (
   options?: RequestOptions
 ) => Promise<Response>;
 
-export function buildJsonRpcRequestBody(
+function buildJsonRpcRequestBody(
   method: string,
   params: Record<string, unknown> = {}
 ): string {

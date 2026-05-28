@@ -61,17 +61,6 @@ async function loadRpcHttpModule() {
 
 const rpcHttp = await loadRpcHttpModule();
 
-test("buildJsonRpcRequestBody 生成标准 JSON-RPC envelope", () => {
-  const payload = JSON.parse(
-    rpcHttp.buildJsonRpcRequestBody("demo/method", { foo: "bar" })
-  );
-
-  assert.equal(payload.jsonrpc, "2.0");
-  assert.equal(payload.method, "demo/method");
-  assert.deepEqual(payload.params, { foo: "bar" });
-  assert.equal(typeof payload.id, "number");
-});
-
 test("postJsonRpc 统一通过 fetcher 发送并解包结果", async () => {
   const calls = [];
   const result = await rpcHttp.postJsonRpc(
@@ -97,6 +86,11 @@ test("postJsonRpc 统一通过 fetcher 发送并解包结果", async () => {
   assert.equal(calls[0].options.retries, 0);
   assert.equal(calls[0].init.method, "POST");
   assert.equal(calls[0].init.headers["Content-Type"], "application/json");
+  const payload = JSON.parse(calls[0].init.body);
+  assert.equal(payload.jsonrpc, "2.0");
+  assert.equal(payload.method, "demo/method");
+  assert.deepEqual(payload.params, { foo: "bar" });
+  assert.equal(typeof payload.id, "number");
 });
 
 test("postJsonRpc 对非 2xx 响应会带出服务端错误详情与链路标识", async () => {

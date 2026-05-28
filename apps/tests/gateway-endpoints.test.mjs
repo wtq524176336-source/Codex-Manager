@@ -62,13 +62,6 @@ test("buildOpenAiGatewayEndpoint 只追加一次 /v1", () => {
   );
 });
 
-test("buildClaudeCodeGatewayEndpoint 返回 Claude Code 使用的根地址", () => {
-  assert.equal(
-    endpoints.buildClaudeCodeGatewayEndpoint("http://localhost:48760/v1"),
-    "http://localhost:48760",
-  );
-});
-
 test("buildGeminiGatewayEndpoint 返回 Gemini CLI 使用的根地址", () => {
   assert.equal(
     endpoints.buildGeminiGatewayEndpoint("http://localhost:48760/v1beta"),
