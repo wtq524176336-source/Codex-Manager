@@ -1,5 +1,5 @@
 export const DEFAULT_APPEARANCE_PRESET = "classic";
-export const APPEARANCE_PRESET_STORAGE_KEY =
+const APPEARANCE_PRESET_STORAGE_KEY =
   "codexmanager.ui.appearance-preset";
 
 export const APPEARANCE_PRESETS = [

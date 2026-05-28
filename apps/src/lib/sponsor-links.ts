@@ -26,7 +26,7 @@ function normalizeOptionalText(value: unknown): string | undefined {
   return normalized || undefined;
 }
 
-export function cloneSponsorLinkItems(
+function cloneSponsorLinkItems(
   items: readonly SponsorLinkItem[],
 ): SponsorLinkItem[] {
   return items.map((item) => ({ ...item }));
@@ -52,16 +52,4 @@ export function normalizeSponsorLinkItems(
       imageAlt: normalizeOptionalText(source.imageAlt),
     } satisfies SponsorLinkItem;
   });
-}
-
-export function createEmptySponsorLinkItem(prefix: string): SponsorLinkItem {
-  return {
-    key: `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    name: "",
-    description: "",
-    href: "",
-    actionLabel: "",
-    imageSrc: "",
-    imageAlt: "",
-  };
 }

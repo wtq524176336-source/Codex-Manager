@@ -2,7 +2,7 @@
 
 import { normalizeRoutePath } from "@/lib/utils/static-routes";
 
-export const TOP_LEVEL_ROUTE_CONFIG = [
+const TOP_LEVEL_ROUTE_CONFIG = [
   { path: "/accounts", label: "账号管理" },
   { path: "/aggregate-api", label: "聚合API" },
   { path: "/apikeys", label: "平台密钥" },
@@ -20,7 +20,7 @@ const TOP_LEVEL_ROUTE_SET = new Set<TopLevelRoutePath>(
   TOP_LEVEL_ROUTE_CONFIG.map((route) => route.path),
 );
 
-export function isTopLevelRoutePath(path: string): path is TopLevelRoutePath {
+function isTopLevelRoutePath(path: string): path is TopLevelRoutePath {
   return TOP_LEVEL_ROUTE_SET.has(normalizeRoutePath(path) as TopLevelRoutePath);
 }
 

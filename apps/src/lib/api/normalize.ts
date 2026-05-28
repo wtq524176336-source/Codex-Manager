@@ -13,7 +13,6 @@ import {
   ApiKeyUsageStat,
   AppSettings,
   BackgroundTaskSettings,
-  DeviceAuthInfo,
   EnvOverrideCatalogItem,
   GatewayErrorLog,
   GatewayErrorLogListResult,
@@ -298,7 +297,7 @@ export function normalizeUsageList(payload: unknown): AccountUsage[] {
  * # 返回
  * 返回函数执行结果
  */
-export function buildUsageMap(usages: AccountUsage[]): Map<string, AccountUsage> {
+function buildUsageMap(usages: AccountUsage[]): Map<string, AccountUsage> {
   return new Map(usages.map((item) => [item.accountId, item]));
 }
 
@@ -376,7 +375,7 @@ export function normalizeTodaySummary(payload: unknown): RequestLogTodaySummary 
  * # 返回
  * 返回函数执行结果
  */
-export function normalizeAccount(item: unknown, usage?: AccountUsage | null): Account | null {
+function normalizeAccount(item: unknown, usage?: AccountUsage | null): Account | null {
   const source = asObject(item);
   const id = asString(source.id);
   if (!id) return null;
@@ -705,7 +704,7 @@ export function normalizeManagedModelCatalog(payload: unknown): ManagedModelCata
  * # 返回
  * 返回函数执行结果
  */
-export function normalizeApiKey(item: unknown): ApiKey | null {
+function normalizeApiKey(item: unknown): ApiKey | null {
   const source = asObject(item);
   const id = asString(source.id);
   if (!id) return null;
@@ -787,7 +786,7 @@ export function normalizeApiKeyCreateResult(payload: unknown): ApiKeyCreateResul
  * # 返回
  * 返回函数执行结果
  */
-export function normalizeAggregateApi(item: unknown): AggregateApi | null {
+function normalizeAggregateApi(item: unknown): AggregateApi | null {
   const source = asObject(item);
   const id = asString(source.id);
   if (!id) return null;
@@ -950,7 +949,7 @@ export function normalizeApiKeyUsageStats(payload: unknown): ApiKeyUsageStat[] {
  * # 返回
  * 返回函数执行结果
  */
-export function normalizePluginCatalogTask(payload: unknown): PluginCatalogTask | null {
+function normalizePluginCatalogTask(payload: unknown): PluginCatalogTask | null {
   const source = asObject(payload);
   const id = asString(source.id);
   if (!id) return null;
@@ -979,7 +978,7 @@ export function normalizePluginCatalogTask(payload: unknown): PluginCatalogTask 
  * # 返回
  * 返回函数执行结果
  */
-export function normalizePluginCatalogEntry(payload: unknown): PluginCatalogEntry | null {
+function normalizePluginCatalogEntry(payload: unknown): PluginCatalogEntry | null {
   const source = asObject(payload);
   const id = asString(source.id);
   if (!id) return null;
@@ -1041,7 +1040,7 @@ export function normalizePluginCatalogResult(payload: unknown): PluginCatalogRes
  * # 返回
  * 返回函数执行结果
  */
-export function normalizeInstalledPlugin(payload: unknown): InstalledPluginSummary | null {
+function normalizeInstalledPlugin(payload: unknown): InstalledPluginSummary | null {
   const source = asObject(payload);
   const pluginId = asString(source.pluginId ?? source.plugin_id);
   if (!pluginId) return null;
@@ -1104,7 +1103,7 @@ export function normalizePluginInstalledList(payload: unknown): InstalledPluginS
  * # 返回
  * 返回函数执行结果
  */
-export function normalizePluginTask(payload: unknown): PluginTaskSummary | null {
+function normalizePluginTask(payload: unknown): PluginTaskSummary | null {
   const source = asObject(payload);
   const id = asString(source.id);
   const pluginId = asString(source.pluginId ?? source.plugin_id);
@@ -1160,7 +1159,7 @@ export function normalizePluginTaskList(payload: unknown): PluginTaskSummary[] {
  * # 返回
  * 返回函数执行结果
  */
-export function normalizePluginRunLog(payload: unknown): PluginRunLogSummary | null {
+function normalizePluginRunLog(payload: unknown): PluginRunLogSummary | null {
   const source = asObject(payload);
   const id = asInteger(source.id, 0, 0);
   if (!id) return null;
@@ -1202,32 +1201,6 @@ export function normalizePluginRunLogList(payload: unknown): PluginRunLogSummary
 }
 
 /**
- * 函数 `normalizeDeviceAuthInfo`
- *
- * 作者: gaohongshun
- *
- * 时间: 2026-04-02
- *
- * # 参数
- * - payload: 参数 payload
- *
- * # 返回
- * 返回函数执行结果
- */
-export function normalizeDeviceAuthInfo(payload: unknown): DeviceAuthInfo | null {
-  const source = asObject(payload);
-  const verificationUrl = asString(source.verificationUrl ?? source.verification_url);
-  if (!verificationUrl) return null;
-
-  return {
-    userCodeUrl: asString(source.userCodeUrl ?? source.user_code_url),
-    tokenUrl: asString(source.tokenUrl ?? source.token_url),
-    verificationUrl,
-    redirectUri: asString(source.redirectUri ?? source.redirect_uri),
-  };
-}
-
-/**
  * 函数 `normalizeLoginStartResult`
  *
  * 作者: gaohongshun
@@ -1265,7 +1238,7 @@ export function normalizeLoginStartResult(payload: unknown): LoginStartResult {
  * # 返回
  * 返回函数执行结果
  */
-export function normalizeRequestLog(item: unknown): RequestLog | null {
+function normalizeRequestLog(item: unknown): RequestLog | null {
   const source = asObject(item);
   const createdAt = toNullableNumber(source.createdAt ?? source.created_at);
   const traceId = asString(source.traceId ?? source.trace_id);
@@ -1371,7 +1344,7 @@ export function normalizeRequestLog(item: unknown): RequestLog | null {
  * # 返回
  * 返回函数执行结果
  */
-export function normalizeRequestLogs(payload: unknown): RequestLog[] {
+function normalizeRequestLogs(payload: unknown): RequestLog[] {
   const source = asObject(payload);
   const items = asArray(source.items ?? payload);
   return items
@@ -1403,7 +1376,7 @@ export function normalizeRequestLogListResult(payload: unknown): RequestLogListR
   };
 }
 
-export function normalizeGatewayErrorLogs(payload: unknown): GatewayErrorLog[] {
+function normalizeGatewayErrorLogs(payload: unknown): GatewayErrorLog[] {
   const source = asObject(payload);
   const items = asArray(source.items ?? payload);
   return items.reduce<GatewayErrorLog[]>((result, item) => {
@@ -1566,7 +1539,7 @@ export function normalizeBackgroundTasks(payload: unknown): BackgroundTaskSettin
  * # 返回
  * 返回函数执行结果
  */
-export function normalizeEnvOverrideCatalog(payload: unknown): EnvOverrideCatalogItem[] {
+function normalizeEnvOverrideCatalog(payload: unknown): EnvOverrideCatalogItem[] {
   return asArray(payload).reduce<EnvOverrideCatalogItem[]>((result, item) => {
     const source = asObject(item);
     const key = asString(source.key);

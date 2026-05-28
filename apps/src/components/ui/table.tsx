@@ -79,32 +79,6 @@ function TableBody({ className, ...props }: React.ComponentProps<"tbody">) {
 }
 
 /**
- * 函数 `TableFooter`
- *
- * 作者: gaohongshun
- *
- * 时间: 2026-04-02
- *
- * # 参数
- * - params: 参数 params
- *
- * # 返回
- * 返回函数执行结果
- */
-function TableFooter({ className, ...props }: React.ComponentProps<"tfoot">) {
-  return (
-    <tfoot
-      data-slot="table-footer"
-      className={cn(
-        "border-t bg-[var(--table-footer-bg)] font-medium [&>tr]:last:border-b-0",
-        className
-      )}
-      {...props}
-    />
-  )
-}
-
-/**
  * 函数 `TableRow`
  *
  * 作者: gaohongshun
@@ -179,39 +153,11 @@ function TableCell({ className, ...props }: React.ComponentProps<"td">) {
   )
 }
 
-/**
- * 函数 `TableCaption`
- *
- * 作者: gaohongshun
- *
- * 时间: 2026-04-02
- *
- * # 参数
- * - params: 参数 params
- *
- * # 返回
- * 返回函数执行结果
- */
-function TableCaption({
-  className,
-  ...props
-}: React.ComponentProps<"caption">) {
-  return (
-    <caption
-      data-slot="table-caption"
-      className={cn("mt-4 text-sm text-muted-foreground", className)}
-      {...props}
-    />
-  )
-}
-
 export {
   Table,
   TableHeader,
   TableBody,
-  TableFooter,
   TableHead,
   TableRow,
   TableCell,
-  TableCaption,
 }

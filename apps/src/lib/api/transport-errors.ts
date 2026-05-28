@@ -77,7 +77,7 @@ function normalizeKnownAppErrorMessage(message: string): string {
  * # 返回
  * 返回函数执行结果
  */
-export function resolveRpcErrorMessage(error: unknown): string {
+function resolveRpcErrorMessage(error: unknown): string {
   if (typeof error === "string") return normalizeKnownAppErrorMessage(error);
   const record = asRecord(error);
   if (record?.message && typeof record.message === "string") {
@@ -99,7 +99,7 @@ export function resolveRpcErrorMessage(error: unknown): string {
  * # 返回
  * 返回函数执行结果
  */
-export function resolveBusinessErrorMessage(payload: unknown): string {
+function resolveBusinessErrorMessage(payload: unknown): string {
   const source = asRecord(payload);
   if (!source) return "";
   const error = source.error;
@@ -133,7 +133,7 @@ export function resolveBusinessErrorMessage(payload: unknown): string {
  * # 返回
  * 返回函数执行结果
  */
-export function throwIfBusinessError(payload: unknown): void {
+function throwIfBusinessError(payload: unknown): void {
   const message = resolveBusinessErrorMessage(payload);
   if (message) {
     throw new Error(message);

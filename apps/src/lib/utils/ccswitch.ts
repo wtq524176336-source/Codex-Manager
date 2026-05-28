@@ -1,4 +1,4 @@
-export const CCSWITCH_PROVIDER_IMPORT_BASE = "ccswitch://v1/import";
+const CCSWITCH_PROVIDER_IMPORT_BASE = "ccswitch://v1/import";
 
 export interface CcSwitchProviderImportOptions {
   app?: "claude" | "codex" | "gemini" | "opencode" | "openclaw";
@@ -34,7 +34,7 @@ function appendV1Path(url: URL): string {
   return url.toString().replace(/\/$/, "");
 }
 
-export function normalizeCodexManagerGatewayPublicEndpoint(
+function normalizeCodexManagerGatewayPublicEndpoint(
   publicOrigin?: string | null,
 ): string | null {
   const raw = normalizeText(publicOrigin);

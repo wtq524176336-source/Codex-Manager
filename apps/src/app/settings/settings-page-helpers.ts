@@ -108,7 +108,7 @@ export const WORKER_PRESET_KEYS = [
   "httpStreamWorkerMin",
 ] as const;
 
-export type WorkerPresetKey = (typeof WORKER_PRESET_KEYS)[number];
+type WorkerPresetKey = (typeof WORKER_PRESET_KEYS)[number];
 
 export type WorkerPreset = {
   key: string;
@@ -224,7 +224,7 @@ export function stringifyNumber(value: number | null | undefined): string {
   return value == null ? "" : String(value);
 }
 
-export function readNumberField(
+function readNumberField(
   source: Record<string, unknown>,
   key: string,
   fallback = 0,
@@ -233,7 +233,7 @@ export function readNumberField(
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
-export function asRecord(value: unknown): Record<string, unknown> | null {
+function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;

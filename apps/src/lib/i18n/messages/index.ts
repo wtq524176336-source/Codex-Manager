@@ -27,5 +27,3 @@ export function translate(
     normalizedMessage;
   return interpolate(template, values);
 }
-
-export type { MessageCatalog, TranslationValues } from "./types";

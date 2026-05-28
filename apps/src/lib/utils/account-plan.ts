@@ -1,10 +1,10 @@
 export const PLUS_TEAM_PLAN_FILTER = "plus/team";
 
-export function normalizePlanText(value?: string | null): string {
+function normalizePlanText(value?: string | null): string {
   return String(value || "").trim().toLowerCase();
 }
 
-export function isPlusTeamPlan(value?: string | null): boolean {
+function isPlusTeamPlan(value?: string | null): boolean {
   const normalized = normalizePlanText(value);
   return normalized === "plus" || normalized === "team" || normalized === PLUS_TEAM_PLAN_FILTER;
 }

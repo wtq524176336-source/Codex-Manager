@@ -105,7 +105,7 @@ function serializeTruncationPolicy(
   };
 }
 
-export function extractManagedModelExtraFields(
+function extractManagedModelExtraFields(
   model: Partial<ManagedModelInfo> | Partial<ModelInfo> | null | undefined
 ): Record<string, unknown> {
   if (!model || typeof model !== "object") {

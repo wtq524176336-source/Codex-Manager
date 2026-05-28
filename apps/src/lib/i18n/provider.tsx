@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { appClient } from "@/lib/api/app-client";
 import { getAppErrorMessage } from "@/lib/api/transport";
 import { useAppStore } from "@/lib/store/useAppStore";
-import { AppLocale, DEFAULT_LOCALE, LOCALE_LABELS, normalizeLocale, SUPPORTED_LOCALES } from "./config";
+import { AppLocale, DEFAULT_LOCALE, normalizeLocale, SUPPORTED_LOCALES } from "./config";
 import { translate } from "./messages";
 
 type TranslationValues = Record<string, string | number>;
@@ -83,8 +83,4 @@ export function useI18n() {
     };
   }
   return context;
-}
-
-export function getLocaleLabel(locale: AppLocale): string {
-  return LOCALE_LABELS[locale];
 }

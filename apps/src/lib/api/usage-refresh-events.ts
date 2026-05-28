@@ -1,8 +1,8 @@
 import { isTauriRuntime } from "./transport";
 
-export const USAGE_REFRESH_COMPLETED_EVENT = "usage-refresh-completed";
+const USAGE_REFRESH_COMPLETED_EVENT = "usage-refresh-completed";
 
-export interface UsageRefreshCompletedPayload {
+interface UsageRefreshCompletedPayload {
   source?: string;
   processed?: number;
   total?: number;

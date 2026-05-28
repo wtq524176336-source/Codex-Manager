@@ -75,13 +75,6 @@ export function isTauriRuntime(): boolean {
   );
 }
 
-export function getCachedRuntimeCapabilities(): RuntimeCapabilities | null {
-  if (isTauriRuntime()) {
-    return runtimeCapabilitiesCache ?? buildDesktopRuntimeCapabilities();
-  }
-  return runtimeCapabilitiesCache;
-}
-
 export async function loadRuntimeCapabilities(
   force = false
 ): Promise<RuntimeCapabilities> {

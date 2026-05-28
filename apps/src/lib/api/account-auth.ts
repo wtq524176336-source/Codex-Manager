@@ -62,7 +62,7 @@ export function readLoginStatusResult(payload: unknown): LoginStatusResult {
   };
 }
 
-export function readCurrentAccessTokenAccount(
+function readCurrentAccessTokenAccount(
   payload: unknown
 ): CurrentAccessTokenAccount | null {
   const source = asRecord(payload);

@@ -3,13 +3,6 @@ export interface LoginStatusResult {
   error: string;
 }
 
-export interface DeviceAuthInfo {
-  userCodeUrl: string;
-  tokenUrl: string;
-  verificationUrl: string;
-  redirectUri: string;
-}
-
 export interface LoginStartResult {
   type: string;
   authUrl?: string | null;

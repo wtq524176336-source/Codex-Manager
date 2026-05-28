@@ -10,7 +10,7 @@ type ResolveGatewayOriginOptions = {
   serviceAddr?: string | null;
 };
 
-export function normalizeGatewayOrigin(value: string | null | undefined): string {
+function normalizeGatewayOrigin(value: string | null | undefined): string {
   const normalized = String(value || "").trim().replace(/\/+$/, "");
   if (!normalized) {
     return "";

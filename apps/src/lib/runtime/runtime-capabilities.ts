@@ -1,6 +1,6 @@
 import type { RuntimeCapabilities, RuntimeMode } from "@/types";
 
-export const DEFAULT_WEB_RPC_BASE_URL = "/api/rpc";
+const DEFAULT_WEB_RPC_BASE_URL = "/api/rpc";
 export const DEFAULT_UNSUPPORTED_WEB_REASON =
   "当前页面缺少 CodexManager Web 运行壳，无法访问管理 RPC。请通过 codexmanager-web 打开，或在反向代理中转发 /api/rpc。";
 const CONFIGURED_AUTHOR_CONTENT_URL =
@@ -77,7 +77,7 @@ function asBoolean(value: unknown, fallback = false): boolean {
   return typeof value === "boolean" ? value : fallback;
 }
 
-export function normalizeAuthorContentUrl(
+function normalizeAuthorContentUrl(
   value: string | null | undefined
 ): string {
   const normalized = asString(value);
@@ -123,7 +123,7 @@ export function normalizeRpcBaseUrl(value: string | null | undefined): string {
  * # 返回
  * 返回函数执行结果
  */
-export function isRuntimeMode(value: string): value is RuntimeMode {
+function isRuntimeMode(value: string): value is RuntimeMode {
   return (
     value === "desktop-tauri" ||
     value === "web-gateway" ||

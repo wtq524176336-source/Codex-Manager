@@ -25,23 +25,6 @@ function Dialog({ ...props }: DialogPrimitive.Root.Props) {
 }
 
 /**
- * 函数 `DialogTrigger`
- *
- * 作者: gaohongshun
- *
- * 时间: 2026-04-02
- *
- * # 参数
- * - params: 参数 params
- *
- * # 返回
- * 返回函数执行结果
- */
-function DialogTrigger({ ...props }: DialogPrimitive.Trigger.Props) {
-  return <DialogPrimitive.Trigger data-slot="dialog-trigger" {...props} />
-}
-
-/**
  * 函数 `DialogPortal`
  *
  * 作者: gaohongshun
@@ -280,8 +263,5 @@ export {
   DialogDescription,
   DialogFooter,
   DialogHeader,
-  DialogOverlay,
-  DialogPortal,
   DialogTitle,
-  DialogTrigger,
 }

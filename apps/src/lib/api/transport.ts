@@ -2,22 +2,13 @@ import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { fetchWithRetry, runWithControl, RequestOptions } from "../utils/request";
 import { DEFAULT_UNSUPPORTED_WEB_REASON } from "../runtime/runtime-capabilities";
 import { useAppStore } from "../store/useAppStore";
-import {
-  getAppErrorMessage,
-  isCommandMissingError,
-  unwrapRpcPayload,
-} from "./transport-errors";
-export { getAppErrorMessage, isCommandMissingError } from "./transport-errors";
+import { isCommandMissingError, unwrapRpcPayload } from "./transport-errors";
+export { getAppErrorMessage } from "./transport-errors";
 import { createWebCommandMap } from "./transport-web-commands";
 import type { InvokeParams, WebCommandDescriptor } from "./transport-web-commands";
 import { postJsonRpc } from "./rpc-http";
-import {
-  getCachedRuntimeCapabilities,
-  isTauriRuntime,
-  loadRuntimeCapabilities,
-} from "./transport-runtime";
+import { isTauriRuntime, loadRuntimeCapabilities } from "./transport-runtime";
 export {
-  getCachedRuntimeCapabilities,
   isTauriRuntime,
   loadRuntimeCapabilities,
 } from "./transport-runtime";
@@ -184,59 +175,4 @@ export async function invoke<T>(
     options
   );
   return unwrapRpcPayload<T>(response);
-}
-
-/**
- * 函数 `requestlogListViaHttpRpc`
- *
- * 作者: gaohongshun
- *
- * 时间: 2026-04-02
- *
- * # 参数
- * - params: 参数 params
- * - addr: 参数 addr
- * - options: 参数 options
- *
- * # 返回
- * 返回函数执行结果
- */
-export async function requestlogListViaHttpRpc<T>(
-  params: {
-    query?: string;
-    statusFilter?: string;
-    page?: number;
-    pageSize?: number;
-  },
-  addr: string,
-  options: RequestOptions = {}
-): Promise<T> {
-  // Desktop environment should use Tauri invoke for reliability
-  if (isTauriRuntime()) {
-    return invoke<T>(
-      "service_requestlog_list",
-      {
-        query: params.query || "",
-        statusFilter: params.statusFilter || "all",
-        page: params.page ?? 1,
-        pageSize: params.pageSize ?? 20,
-        addr,
-      },
-      options
-    );
-  }
-
-  // Fallback for web mode if needed (though not primary for this app)
-  return postJsonRpc<T>(
-    fetchWithRetry,
-    `http://${addr}/rpc`,
-    "requestlog/list",
-    {
-      query: params.query || "",
-      statusFilter: params.statusFilter || "all",
-      page: params.page ?? 1,
-      pageSize: params.pageSize ?? 20,
-    },
-    options
-  );
 }

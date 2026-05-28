@@ -283,7 +283,7 @@ export function isBannedAccount(
  * # 返回
  * 返回函数执行结果
  */
-export function remainingPercent(value: number | null | undefined): number | null {
+function remainingPercent(value: number | null | undefined): number | null {
   const parsed = toNullableNumber(value);
   if (parsed == null) return null;
   return Math.max(0, Math.min(100, Math.round(100 - parsed)));
@@ -521,7 +521,7 @@ function isFreePlanUsage(raw: string | null | undefined): boolean {
  * # 返回
  * 返回函数执行结果
  */
-export function getUsageWindowDisplayMode(
+function getUsageWindowDisplayMode(
   usage?: Partial<AccountUsage> | null
 ): UsageWindowDisplayMode {
   const hasPrimarySignal =
@@ -750,7 +750,7 @@ export function isLowQuotaUsage(usage?: Partial<AccountUsage> | null): boolean {
  * # 返回
  * 返回函数执行结果
  */
-export function canParticipateInRouting(level: AvailabilityLevel): boolean {
+function canParticipateInRouting(level: AvailabilityLevel): boolean {
   return level !== "warn" && level !== "bad";
 }
 

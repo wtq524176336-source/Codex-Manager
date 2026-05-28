@@ -41,7 +41,7 @@ function readStringArrayField(payload: unknown, key: string): string[] {
     : [];
 }
 
-export interface AccountImportError {
+interface AccountImportError {
   index: number;
   message: string;
 }
@@ -76,7 +76,7 @@ export interface DeleteAccountsByStatusesResult {
   deletedAccountIds?: string[];
 }
 
-export interface AccountWarmupItemResult {
+interface AccountWarmupItemResult {
   accountId: string;
   accountName: string;
   ok: boolean;

@@ -58,7 +58,7 @@ export function formatAccountPlanValueLabel(value: string, t: TranslateFn) {
   }
 }
 
-export function normalizeAccountPlanKey(account: Account) {
+function normalizeAccountPlanKey(account: Account) {
   return (
     String(account.planType || "")
       .trim()
@@ -93,7 +93,7 @@ export function formatStatusFilterLabel(value: string, t: TranslateFn) {
   }
 }
 
-export interface QuotaProgressProps {
+interface QuotaProgressProps {
   label: string;
   remainPercent: number | null;
   resetsAt: number | null;
@@ -233,7 +233,7 @@ export function formatAccountSubscriptionStatusLabel(
   return t("未知");
 }
 
-export function getAccountPlanBadgeClassName(planLabel: string | null): string {
+function getAccountPlanBadgeClassName(planLabel: string | null): string {
   switch (planLabel) {
     case "FREE":
       return "bg-slate-500/10 text-slate-700 dark:text-slate-300";
@@ -254,13 +254,6 @@ export function getAccountPlanBadgeClassName(planLabel: string | null): string {
     default:
       return "bg-accent/50";
   }
-}
-
-export function formatAccountTags(tags: string[]): string {
-  return tags
-    .map((tag) => String(tag || "").trim())
-    .filter(Boolean)
-    .join("、");
 }
 
 function formatAccountWindowCostUsd(value: number): string {

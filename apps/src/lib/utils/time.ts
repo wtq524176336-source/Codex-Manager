@@ -22,7 +22,7 @@ function getPreferredLocale(): string | undefined {
   return undefined;
 }
 
-export function getBrowserTimeZone(): string | null {
+function getBrowserTimeZone(): string | null {
   try {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || null;
   } catch {

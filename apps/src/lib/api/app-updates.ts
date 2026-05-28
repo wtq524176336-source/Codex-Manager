@@ -62,7 +62,7 @@ export interface UpdatePrepareResult {
   downloaded: boolean;
 }
 
-export interface PendingUpdateResult extends UpdatePrepareResult {
+interface PendingUpdateResult extends UpdatePrepareResult {
   installerPath: string | null;
   stagingDir: string | null;
   preparedAtUnixSecs: number;
@@ -115,7 +115,7 @@ export function readUpdatePrepareResult(payload: unknown): UpdatePrepareResult {
   };
 }
 
-export function readPendingUpdateResult(payload: unknown): PendingUpdateResult | null {
+function readPendingUpdateResult(payload: unknown): PendingUpdateResult | null {
   const source = asRecord(payload);
   if (!source) {
     return null;
