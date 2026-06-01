@@ -72,12 +72,13 @@ fn try_refresh_chatgpt_access_token(
         account.issuer.clone()
     };
     let client_id = super::super::super::runtime_config::token_exchange_client_id();
-    crate::usage_token_refresh::refresh_and_persist_access_token(
+    crate::usage_token_refresh::refresh_and_persist_access_token_with_source(
         storage,
         token,
         issuer.as_str(),
         client_id.as_str(),
         token_refresh_ahead_secs(),
+        "gateway_upstream_401_retry",
     )?;
     let refreshed = token.access_token.trim();
     if refreshed.is_empty() {

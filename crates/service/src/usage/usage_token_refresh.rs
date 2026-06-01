@@ -1,5 +1,5 @@
 use codexmanager_core::auth::{extract_client_id_claim, extract_token_exp, DEFAULT_CLIENT_ID};
-use codexmanager_core::storage::{now_ts, Storage, Token};
+use codexmanager_core::storage::{now_ts, Event, Storage, Token};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -31,12 +31,48 @@ pub(crate) fn refresh_and_persist_access_token(
     client_id: &str,
     refresh_ahead_secs: i64,
 ) -> Result<(), String> {
+    refresh_and_persist_access_token_with_source(
+        storage,
+        token,
+        issuer,
+        client_id,
+        refresh_ahead_secs,
+        "unspecified",
+    )
+}
+
+pub(crate) fn refresh_and_persist_access_token_with_source(
+    storage: &Storage,
+    token: &mut Token,
+    issuer: &str,
+    client_id: &str,
+    refresh_ahead_secs: i64,
+    source: &str,
+) -> Result<(), String> {
+    let source = normalize_refresh_source(source);
+    record_token_refresh_event(storage, &token.account_id, source, "start", None);
+    if !is_manual_refresh_all_source(source) {
+        let err = "automatic AT/RT refresh disabled; use manual refresh all AT/RT".to_string();
+        record_token_refresh_event(
+            storage,
+            &token.account_id,
+            source,
+            "blocked",
+            Some("reason=automatic_refresh_disabled"),
+        );
+        return Err(err);
+    }
     let original_access_token = token.access_token.clone();
     let original_refresh_token = token.refresh_token.clone();
     let refresh_lock = token_refresh_lock_for_account(&token.account_id);
-    let _refresh_guard = refresh_lock
-        .lock()
-        .map_err(|_| "token refresh lock poisoned".to_string())?;
+    let _refresh_guard = match refresh_lock.lock() {
+        Ok(guard) => guard,
+        Err(_) => {
+            let err = "token refresh lock poisoned".to_string();
+            record_token_refresh_event(storage, &token.account_id, source, "failed", Some(&err));
+            return Err(err);
+        }
+    };
 
     if let Some(latest) = storage
         .find_token_by_account_id(&token.account_id)
@@ -46,6 +82,13 @@ pub(crate) fn refresh_and_persist_access_token(
             || latest.refresh_token != original_refresh_token
         {
             *token = latest;
+            record_token_refresh_event(
+                storage,
+                &token.account_id,
+                source,
+                "reused_latest",
+                Some("token_changed_before_refresh"),
+            );
             return Ok(());
         }
         *token = latest;
@@ -61,8 +104,22 @@ pub(crate) fn refresh_and_persist_access_token(
                 &original_refresh_token,
                 err.as_str(),
             )? {
+                record_token_refresh_event(
+                    storage,
+                    &token.account_id,
+                    source,
+                    "recovered_latest",
+                    Some(classify_refresh_failure_for_log(&err).as_str()),
+                );
                 return Ok(());
             }
+            record_token_refresh_event(
+                storage,
+                &token.account_id,
+                source,
+                "failed",
+                Some(&refresh_failure_message_for_log(&err)),
+            );
             return Err(err);
         }
     };
@@ -85,7 +142,75 @@ pub(crate) fn refresh_and_persist_access_token(
     let access_exp = extract_token_exp(&token.access_token);
     let next_refresh_at = next_refresh_at_from_token(token, refresh_ahead_secs);
     let _ = storage.update_token_refresh_schedule(&token.account_id, access_exp, next_refresh_at);
+    let detail = format!(
+        "access_exp={} next_refresh_at={} access_changed={} refresh_rotated={} api_key_token={}",
+        access_exp
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "-".to_string()),
+        next_refresh_at
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "-".to_string()),
+        token.access_token != original_access_token,
+        token.refresh_token != original_refresh_token,
+        token.api_key_access_token
+            .as_deref()
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(false)
+    );
+    record_token_refresh_event(storage, &token.account_id, source, "success", Some(&detail));
     Ok(())
+}
+
+fn normalize_refresh_source(source: &str) -> &str {
+    let source = source.trim();
+    if source.is_empty() {
+        "unspecified"
+    } else {
+        source
+    }
+}
+
+fn is_manual_refresh_all_source(source: &str) -> bool {
+    source == "manual_all_at_rt"
+}
+
+fn classify_refresh_failure_for_log(err: &str) -> String {
+    refresh_token_auth_error_reason_from_message(err)
+        .map(|reason| reason.as_code().to_string())
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+fn refresh_failure_message_for_log(err: &str) -> String {
+    let class = classify_refresh_failure_for_log(err);
+    let compact = err.split_whitespace().collect::<Vec<_>>().join(" ");
+    let snippet = compact.chars().take(240).collect::<String>();
+    format!("class={} err={}", class, snippet)
+}
+
+fn record_token_refresh_event(
+    storage: &Storage,
+    account_id: &str,
+    source: &str,
+    status: &str,
+    detail: Option<&str>,
+) {
+    let message = if let Some(detail) = detail.filter(|value| !value.trim().is_empty()) {
+        format!("source={source} status={status} {detail}")
+    } else {
+        format!("source={source} status={status}")
+    };
+    let event = Event {
+        account_id: Some(account_id.to_string()),
+        event_type: "account_token_refresh".to_string(),
+        message: message.clone(),
+        created_at: now_ts(),
+    };
+    let _ = storage.insert_event(&event);
+    if status == "failed" {
+        log::warn!("account token refresh: account_id={} {}", account_id, message);
+    } else {
+        log::info!("account token refresh: account_id={} {}", account_id, message);
+    }
 }
 
 pub(crate) fn token_refresh_ahead_secs() -> i64 {

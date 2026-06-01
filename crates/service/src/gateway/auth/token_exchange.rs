@@ -274,12 +274,13 @@ pub(super) fn resolve_openai_bearer_token(
             }
 
             if !token.refresh_token.trim().is_empty() {
-                match crate::usage_token_refresh::refresh_and_persist_access_token(
+                match crate::usage_token_refresh::refresh_and_persist_access_token_with_source(
                     storage,
                     token,
                     &issuer,
                     &client_id,
                     crate::usage_token_refresh::token_refresh_ahead_secs(),
+                    "gateway_bearer_exchange",
                 ) {
                     Ok(()) => {
                         if let Some(existing) = token

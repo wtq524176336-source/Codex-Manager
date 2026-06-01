@@ -24,7 +24,9 @@ use crate::usage_scheduler::{
     MIN_USAGE_POLL_INTERVAL_SECS,
 };
 use crate::usage_snapshot_store::store_usage_snapshot;
-use crate::usage_token_refresh::{refresh_and_persist_access_token, token_refresh_ahead_secs};
+use crate::usage_token_refresh::{
+    refresh_and_persist_access_token_with_source, token_refresh_ahead_secs,
+};
 
 mod batch;
 mod errors;
@@ -537,12 +539,13 @@ fn refresh_usage_for_token(
             }
             // 中文注释：token 刷新与持久化独立封装，避免轮询流程继续膨胀；
             // 不下沉会让后续 async 迁移时刷新链路与业务编排强耦合，回归范围扩大。
-            if let Err(refresh_err) = refresh_and_persist_access_token(
+            if let Err(refresh_err) = refresh_and_persist_access_token_with_source(
                 storage,
                 &mut current,
                 &issuer,
                 &client_id,
                 token_refresh_ahead_secs(),
+                "usage_refresh_retry",
             ) {
                 mark_usage_unreachable_if_needed(storage, &current.account_id, &refresh_err);
                 return Err(refresh_err);
@@ -852,12 +855,13 @@ fn run_token_refresh_task(
         );
         return false;
     }
-    match refresh_and_persist_access_token(
+    match refresh_and_persist_access_token_with_source(
         storage,
         token,
         issuer,
         client_id,
         token_refresh_ahead_secs(),
+        "token_refresh_polling",
     ) {
         Ok(_) => true,
         Err(err) => {
