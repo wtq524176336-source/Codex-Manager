@@ -1,77 +1,79 @@
 # apps 前端与桌面端说明
 
-`apps/` 是 CodexManager 的前端工作区，承载浏览器管理页面与 Tauri 桌面壳。
+`apps/` 是 CodexManager 的前端与 Tauri 桌面壳工作区。
 
 ## 技术栈
 
-- Next.js App Router
+- Vue 3
+- Vite
 - TypeScript
-- Tailwind CSS v4
-- shadcn/ui
-- TanStack Query
-- Zustand
+- Vue Router
+- Pinia
+- Axios
+- Element Plus
+- SCSS
 - Tauri v2
+- npm
+
+## 页面范围
+
+当前前端只保留 6 个页面：
+
+```text
+账号管理
+聚合API
+平台密钥
+模型管理
+请求日志
+设置
+```
 
 ## 目录结构
 
 ```text
 apps/
-├─ src/                # Web UI、页面、hooks、API client、store
-├─ src-tauri/          # Tauri 桌面端壳、Rust 命令、打包配置
-├─ public/             # 静态资源
-├─ tests/              # Playwright 与导航回归测试
-└─ out/                # 静态导出产物
+├─ src-vue/           # Vue 前端源码
+├─ src-tauri/         # Tauri 桌面壳、Rust 命令、打包配置
+├─ index.html         # Vite HTML 入口
+├─ vite.config.ts     # Vite 配置
+├─ package.json       # npm 脚本与依赖
+├─ package-lock.json  # npm 锁文件
+└─ out/               # Vite 静态构建产物
 ```
 
 ## 常用命令
 
 ```powershell
-pnpm install
-pnpm dev
-pnpm dev:desktop
-pnpm run build:desktop
-pnpm exec playwright test
+npm install
+npm run dev:desktop
+npm run build:desktop
 ```
 
 说明：
 
-- `pnpm dev`：启动前端开发服务器。
-- `pnpm dev:desktop`：启动前端 + Tauri 桌面端。
-- `pnpm run build:desktop`：桌面端静态导出检查，也是前端改动的默认验证命令。
-- `pnpm exec playwright test`：执行端到端回归。
+- `npm run dev:desktop`：启动 Vite 前端开发服务器，默认端口 `3005`。
+- `npm run build:desktop`：执行 `vue-tsc --noEmit && vite build`，产物输出到 `out/`。
+- Tauri 构建读取 `src-tauri/tauri.conf.json` 中的 `frontendDist: "../out"`。
 
-## Web 与桌面端差异
+## API 与 IPC
 
-### 桌面端
+- 桌面端通过 Tauri `invoke` 调用本地命令。
+- 前端 API 封装集中在 `src-vue/api/`。
+- 服务类命令继续使用 `withAddr()` 注入服务地址。
+- 前端不直接使用 Tailwind、shadcn、TanStack Query、Next.js 或 React。
 
-- 通过 Tauri `invoke` 调用本地命令，不走浏览器 `fetch` IPC。
-- 模型管理页在保存模型、删除模型、远端并入，或首次成功加载目录后，会自动把当前完整目录覆盖写入本地 `~/.codex/models_cache.json`。
-- 因此桌面端不再显示“导出到本地 Codex 缓存”按钮。
+## GitHub Release
 
-### Web 部署
+`release-all.yml` 只保留 Windows 桌面与 Windows service 打包链路：
 
-- 必须通过 `codexmanager-web` 提供页面壳与 `/api/runtime`、`/api/rpc` 代理。
-- 只启动前端静态页面，或者只跑一个普通 Next 开发服务器，不足以支撑完整管理页面。
-- Web 端的模型管理页会显示“导出到本地 Codex 缓存”按钮，供用户手动下载 `models_cache.json` 并放入本地 `~/.codex/` 目录。
-
-## 当前前端重点
-
-- 模型管理页维护结构化模型目录，并区分 `supportedInApi` 与 `visibility`。
-- 平台密钥页默认优先展示 `supportedInApi = true` 的模型。
-- 所有主要列表页的“操作”列都已做右侧冻结，横向滚动时不会丢失操作入口。
-- 页面切换使用 keep-alive 缓存与整区加载遮罩，减少桌面端与 Web 版回访时的重载体感。
-- 首次接入引导会展示 `auth.json` 与 `config.toml` 示例，帮助用户把 Codex CLI / ccswitch 接入到本地网关。
-- 设置页网关配置包含上游代理、请求总超时、流式空闲超时与 SSE 保活间隔。
-
-## 开发约定
-
-- 新增桌面命令后，必须同步更新 `src/lib/api/` 下的调用封装。
-- 与桌面端 IPC 交互时，优先使用统一 transport，不要直接写裸 `fetch()`。
-- 前端交互改动完成后，至少验证一条关键路径；默认先跑 `pnpm run build:desktop`。
-
-## 相关文档
-
-- 根项目说明：[../README.md](../README.md)
-- 中文文档索引：[../docs/zh-CN/README.md](../docs/zh-CN/README.md)
-- 运行与部署指南：[../docs/zh-CN/report/运行与部署指南.md](../docs/zh-CN/report/运行与部署指南.md)
-- 环境变量与运行配置：[../docs/zh-CN/report/环境变量与运行配置说明.md](../docs/zh-CN/report/环境变量与运行配置说明.md)
+```text
+npm ci
+  ↓
+npm run build:desktop
+  ↓
+上传 apps/out 前端产物
+  ↓
+Windows Tauri nsis 打包
+  ↓
+上传 exe 产物
+```

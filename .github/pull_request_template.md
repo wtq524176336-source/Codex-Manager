@@ -17,9 +17,7 @@
 
 ## 验证
 
-- [ ] `pnpm -C apps run test`
-- [ ] `pnpm -C apps run build`
-- [ ] `pnpm -C apps run test:ui`
+- [ ] `npm --prefix apps run build:desktop`
 - [ ] `cargo test --workspace`
 - [ ] 其他本地验证已说明
 

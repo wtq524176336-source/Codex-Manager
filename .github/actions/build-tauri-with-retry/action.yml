@@ -38,11 +38,11 @@ runs:
         while ($attempt -lt $maxAttempts -and -not $succeeded) {
           $attempt++
           Write-Host "Build attempt $attempt/$maxAttempts ..."
-          $args = @('dlx', "@tauri-apps/cli@${{ inputs.tauri-cli-version }}", 'build', '--bundles', '${{ inputs.bundles }}')
+          $args = @('-y', "@tauri-apps/cli@${{ inputs.tauri-cli-version }}", 'build', '--bundles', '${{ inputs.bundles }}')
           if ("${{ inputs.target }}".Trim().Length -gt 0) {
             $args += @('--target', '${{ inputs.target }}')
           }
-          pnpm @args
+          npx @args
           if ($LASTEXITCODE -eq 0) {
             $succeeded = $true
             break
@@ -81,11 +81,11 @@ runs:
         attempt=1
         while [ "$attempt" -le "$max_attempts" ]; do
           echo "Build attempt $attempt/$max_attempts ..."
-          args=(dlx "@tauri-apps/cli@${{ inputs.tauri-cli-version }}" build --bundles "${{ inputs.bundles }}")
+          args=(-y "@tauri-apps/cli@${{ inputs.tauri-cli-version }}" build --bundles "${{ inputs.bundles }}")
           if [ -n "${{ inputs.target }}" ]; then
             args+=(--target "${{ inputs.target }}")
           fi
-          if pnpm "${args[@]}"; then
+          if npx "${args[@]}"; then
             exit 0
           fi
           if [ "$attempt" -lt "$max_attempts" ]; then

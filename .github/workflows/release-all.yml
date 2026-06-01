@@ -45,14 +45,16 @@ jobs:
 
       - name: Setup release environment
         uses: ./.github/actions/setup-release-env
+        with:
+          enable-rust: "false"
 
       - name: Install frontend dependencies
         working-directory: apps
-        run: pnpm install --frozen-lockfile
+        run: npm ci
 
       - name: Build frontend dist
         working-directory: apps
-        run: pnpm run build:desktop
+        run: npm run build:desktop
 
       - name: Pack frontend dist artifact
         shell: bash

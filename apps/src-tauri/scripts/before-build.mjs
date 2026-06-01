@@ -1,4 +1,4 @@
-import { existsSync, rmSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import net from "node:net";
@@ -62,10 +62,6 @@ async function hasReusableDesktopDevServer() {
   } catch {
     return false;
   }
-}
-
-function getDesktopDevLockPath(dir) {
-  return resolve(dir, ".next", "dev", "lock");
 }
 
 function sleep(ms) {
@@ -174,15 +170,16 @@ function isDesktopDevProcess(pid) {
     }
 
     const normalizedCommandLine = processInfo.CommandLine.toLowerCase();
-    const isNextProcess =
-      normalizedCommandLine.includes("next dev") ||
-      normalizedCommandLine.includes("\\next\\dist\\bin\\next") ||
-      normalizedCommandLine.includes("start-server.js");
+    const isViteProcess =
+      normalizedCommandLine.includes("vite") ||
+      normalizedCommandLine.includes("\\vite\\bin\\openchrome.applescript") ||
+      normalizedCommandLine.includes("\\vite\\bin\\vite.js");
     const matchesDesktopPort =
       normalizedCommandLine.includes(`-p ${desktopDevPort}`) ||
+      normalizedCommandLine.includes(`--port ${desktopDevPort}`) ||
       normalizedCommandLine.includes(`:${desktopDevPort}`);
 
-    if (isNextProcess && (matchesDesktopPort || index > 0)) {
+    if (isViteProcess && (matchesDesktopPort || index > 0)) {
       return true;
     }
 
@@ -221,9 +218,9 @@ async function cleanupStaleDesktopDevState() {
       process.exit(1);
     }
 
-    console.log(`检测到未响应的 Next.js 开发进程，准备终止: PID ${pid}`);
+    console.log(`检测到未响应的 Vite 开发进程，准备终止: PID ${pid}`);
     if (!terminateWindowsProcessTree(pid)) {
-      console.error(`终止残留 Next.js 开发进程失败: PID ${pid}`);
+      console.error(`终止残留 Vite 开发进程失败: PID ${pid}`);
       process.exit(1);
     }
   }
@@ -235,32 +232,17 @@ async function cleanupStaleDesktopDevState() {
       process.exit(1);
     }
   }
-
-  const desktopDevLockPath = getDesktopDevLockPath(frontendDir);
-  if (existsSync(desktopDevLockPath)) {
-    try {
-      rmSync(desktopDevLockPath, { force: true });
-      console.log(`已清理未响应的 Next.js 开发锁文件: ${desktopDevLockPath}`);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error(`清理 Next.js 开发锁文件失败: ${message}`);
-      process.exit(1);
-    }
-  }
 }
 
-function resolvePnpmCommand() {
-  const baseArgs = ["--dir", frontendDir, "run", task];
+function resolveNpmCommand() {
+  const baseArgs = ["--prefix", frontendDir, "run", task];
   const nodeBinDir = dirname(process.execPath);
   const windowsCandidates = [
-    { command: resolve(nodeBinDir, "pnpm.cmd"), args: baseArgs },
-    { command: resolve(nodeBinDir, "corepack.cmd"), args: ["pnpm", ...baseArgs] },
-    { command: "pnpm.cmd", args: baseArgs },
-    { command: "corepack.cmd", args: ["pnpm", ...baseArgs] },
+    { command: resolve(nodeBinDir, "npm.cmd"), args: baseArgs },
+    { command: "npm.cmd", args: baseArgs },
   ];
   const defaultCandidates = [
-    { command: "pnpm", args: baseArgs },
-    { command: "corepack", args: ["pnpm", ...baseArgs] },
+    { command: "npm", args: baseArgs },
   ];
 
   const candidates = process.platform === "win32" ? windowsCandidates : defaultCandidates;
@@ -284,14 +266,9 @@ if (task === "dev:desktop") {
     process.exit(0);
   }
 
-  const desktopDevLockPath = getDesktopDevLockPath(frontendDir);
-  const hasDesktopDevLock = existsSync(desktopDevLockPath);
   const hasDesktopDevPortListener = await canConnect(desktopDevHost, desktopDevPort, 300);
-  if (hasDesktopDevLock || hasDesktopDevPortListener) {
-    const staleState = [hasDesktopDevLock ? "锁文件" : null, hasDesktopDevPortListener ? "端口占用" : null]
-      .filter(Boolean)
-      .join(" / ");
-    console.log(`检测到 Next.js 开发态残留（${staleState}），等待现有实例就绪: ${desktopDevLockPath}`);
+  if (hasDesktopDevPortListener) {
+    console.log(`检测到 Vite 开发端口占用，等待现有实例就绪: ${desktopDevHost}:${desktopDevPort}`);
 
     if (await waitForReusableDesktopDevServer()) {
       console.log(`检测到现有前端开发服务，直接复用: http://${desktopDevHost}:${desktopDevPort}`);
@@ -302,7 +279,7 @@ if (task === "dev:desktop") {
   }
 }
 
-const packageManager = resolvePnpmCommand();
+const packageManager = resolveNpmCommand();
 console.log(`执行前端任务: ${packageManager.command} ${packageManager.args.join(" ")}`);
 const needsShell = process.platform === "win32" && /\.cmd$/i.test(packageManager.command);
 const result = spawnSync(packageManager.command, packageManager.args, {
