@@ -1,0 +1,122 @@
+@use "element-plus/theme-chalk/src/index.scss" as *;
+
+:root {
+  --app-bg: #eef4fb;
+  --sidebar-bg: rgba(255, 255, 255, 0.92);
+  --header-bg: rgba(255, 255, 255, 0.72);
+  --card-bg: rgba(255, 255, 255, 0.9);
+  --primary: #2f6cf6;
+  --text-primary: #111827;
+  --text-secondary: #6b7280;
+  --border-subtle: rgba(15, 23, 42, 0.08);
+  --menu-active-bg: rgba(15, 23, 42, 0.06);
+  --shadow-card: 0 12px 32px rgba(15, 23, 42, 0.08);
+  --el-color-primary: #2f6cf6;
+  --el-border-radius-base: 6px;
+  --el-font-family: Inter, "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  overflow: hidden;
+  font-family: Inter, "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+.page {
+  display: grid;
+  gap: 16px;
+}
+
+.page-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.page-card {
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--card-bg);
+  box-shadow: var(--shadow-card);
+}
+
+.page-card__body {
+  padding: 16px;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.summary-card {
+  padding: 18px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--card-bg);
+  box-shadow: var(--shadow-card);
+
+  &__label {
+    color: var(--text-secondary);
+    font-size: 12px;
+  }
+
+  &__value {
+    margin-top: 8px;
+    font-size: 26px;
+    font-weight: 700;
+  }
+}
+
+.table-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.muted {
+  color: var(--text-secondary);
+}
+
+@media (max-width: 1180px) {
+  .summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .page-toolbar {
+    align-items: stretch;
+
+    .el-input,
+    .table-actions {
+      width: 100%;
+      max-width: none;
+    }
+  }
+
+  .summary-grid {
+    grid-template-columns: 1fr;
+  }
+}
