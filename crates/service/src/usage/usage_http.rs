@@ -25,6 +25,8 @@ const REFRESH_TOKEN_INVALIDATED_MESSAGE: &str =
     "Your access token could not be refreshed because your refresh token was revoked. Please log out and sign in again.";
 const REFRESH_TOKEN_INVALID_GRANT_MESSAGE: &str =
     "Your access token could not be refreshed because your refresh token is no longer valid. Please log out and sign in again.";
+const APP_SESSION_TERMINATED_MESSAGE: &str =
+    "Your session has ended. Please log in again.";
 const REFRESH_TOKEN_UNKNOWN_MESSAGE: &str =
     "Your access token could not be refreshed. Please log out and sign in again.";
 const REFRESH_TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
@@ -43,6 +45,7 @@ pub(crate) enum RefreshTokenAuthErrorReason {
     Reused,
     Invalidated,
     InvalidGrant,
+    AppSessionTerminated,
     Unknown401,
 }
 
@@ -64,6 +67,7 @@ impl RefreshTokenAuthErrorReason {
             Self::Reused => "refresh_token_reused",
             Self::Invalidated => "refresh_token_invalidated",
             Self::InvalidGrant => "invalid_grant",
+            Self::AppSessionTerminated => "app_session_terminated",
             Self::Unknown401 => "refresh_token_unknown_401",
         }
     }
@@ -85,6 +89,7 @@ impl RefreshTokenAuthErrorReason {
             Self::Reused => REFRESH_TOKEN_REUSED_MESSAGE,
             Self::Invalidated => REFRESH_TOKEN_INVALIDATED_MESSAGE,
             Self::InvalidGrant => REFRESH_TOKEN_INVALID_GRANT_MESSAGE,
+            Self::AppSessionTerminated => APP_SESSION_TERMINATED_MESSAGE,
             Self::Unknown401 => REFRESH_TOKEN_UNKNOWN_MESSAGE,
         }
     }
@@ -296,6 +301,7 @@ fn classify_refresh_token_auth_error_reason_from_code(
         Some("refresh_token_reused") => RefreshTokenAuthErrorReason::Reused,
         Some("refresh_token_invalidated") => RefreshTokenAuthErrorReason::Invalidated,
         Some("invalid_grant") => RefreshTokenAuthErrorReason::InvalidGrant,
+        Some("app_session_terminated") => RefreshTokenAuthErrorReason::AppSessionTerminated,
         _ => RefreshTokenAuthErrorReason::Unknown401,
     }
 }
@@ -337,12 +343,22 @@ fn classify_refresh_token_auth_error_reason_with_headers(
     _headers: Option<&HeaderMap>,
     body: &str,
 ) -> Option<RefreshTokenAuthErrorReason> {
-    if status != reqwest::StatusCode::UNAUTHORIZED {
-        return None;
+    let code = extract_refresh_token_error_code(body);
+    if status == reqwest::StatusCode::UNAUTHORIZED {
+        return Some(classify_refresh_token_auth_error_reason_from_code(
+            code.as_deref(),
+        ));
     }
-    Some(classify_refresh_token_auth_error_reason_from_code(
-        extract_refresh_token_error_code(body).as_deref(),
-    ))
+    if status == reqwest::StatusCode::BAD_REQUEST {
+        return match code.as_deref() {
+            Some("invalid_grant") => Some(RefreshTokenAuthErrorReason::InvalidGrant),
+            Some("app_session_terminated") => {
+                Some(RefreshTokenAuthErrorReason::AppSessionTerminated)
+            }
+            _ => None,
+        };
+    }
+    None
 }
 
 /// 函数 `refresh_token_auth_error_reason_from_message`
@@ -361,13 +377,20 @@ pub(crate) fn refresh_token_auth_error_reason_from_message(
 ) -> Option<RefreshTokenAuthErrorReason> {
     let normalized = message.trim();
     let is_401 = normalized.contains("refresh token failed with status 401");
-    let is_400_invalid_grant = normalized.contains("refresh token failed with status 400")
-        && normalized.contains("invalid_grant");
-    if !is_401 && !is_400_invalid_grant {
+    let is_400 = normalized.contains("refresh token failed with status 400");
+    if !is_401 && !is_400 {
         return None;
     }
-    if is_400_invalid_grant {
-        return Some(RefreshTokenAuthErrorReason::InvalidGrant);
+    if is_400 {
+        if normalized.contains("app_session_terminated")
+            || normalized.contains(APP_SESSION_TERMINATED_MESSAGE)
+        {
+            return Some(RefreshTokenAuthErrorReason::AppSessionTerminated);
+        }
+        if normalized.contains("invalid_grant") {
+            return Some(RefreshTokenAuthErrorReason::InvalidGrant);
+        }
+        return None;
     }
     if normalized.contains(REFRESH_TOKEN_EXPIRED_MESSAGE) {
         return Some(RefreshTokenAuthErrorReason::Expired);
