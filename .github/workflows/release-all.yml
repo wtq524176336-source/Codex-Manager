@@ -141,7 +141,6 @@ jobs:
           compression-level: 0
 
   build_windows_service:
-    needs: build_frontend_dist
     runs-on: windows-latest
 
     steps:
@@ -150,8 +149,14 @@ jobs:
         with:
           ref: ${{ github.event.inputs.ref || 'main' }}
 
-      - name: Setup release environment
-        uses: ./.github/actions/setup-release-env
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-all-platforms-rust-stable-v1
+          cache-targets: true
 
       - name: Build service binaries
         shell: pwsh
