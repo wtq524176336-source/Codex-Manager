@@ -21,13 +21,12 @@ fn first_header_value<'a>(headers: &'a reqwest::header::HeaderMap, name: &str) -
 fn should_treat_as_challenge_for_retry(
     status: reqwest::StatusCode,
     upstream_content_type: Option<&reqwest::header::HeaderValue>,
-    upstream_cf_ray: Option<&str>,
+    _upstream_cf_ray: Option<&str>,
 ) -> bool {
     if !matches!(status.as_u16(), 401 | 403) {
         return false;
     }
     super::super::super::is_upstream_challenge_response(status.as_u16(), upstream_content_type)
-        || upstream_cf_ray.is_some()
 }
 
 fn should_failover_immediately_for_cloudflare(
@@ -969,7 +968,7 @@ mod tests {
     }
 
     #[test]
-    fn cloudflare_cf_ray_directly_failovers_without_same_account_retry() {
+    fn cf_ray_without_html_challenge_keeps_upstream_response() {
         let storage = Storage::open_in_memory().expect("open storage");
         storage.init().expect("init storage");
         let now = now_ts();
@@ -1052,7 +1051,7 @@ mod tests {
         join.join().expect("join server");
         assert_eq!(hit_count.load(Ordering::SeqCst), 1);
         match decision {
-            PostRetryFlowDecision::Failover => {}
+            PostRetryFlowDecision::RespondUpstream(resp) => assert_eq!(resp.status(), 403),
             _ => panic!("unexpected decision"),
         }
     }
