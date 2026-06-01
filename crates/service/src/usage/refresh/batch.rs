@@ -1,5 +1,6 @@
 use codexmanager_core::storage::{Account, Storage, Token};
 use crossbeam_channel::unbounded;
+use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -53,10 +54,16 @@ pub(crate) fn refresh_usage_for_all_accounts() -> Result<(), String> {
 pub(crate) fn refresh_usage_for_polling_batch() -> Result<(), String> {
     let storage = open_storage().ok_or_else(|| "storage unavailable".to_string())?;
     let accounts = storage.list_accounts().map_err(|e| e.to_string())?;
-    let all_tasks = build_usage_refresh_tasks(
-        storage.list_tokens().map_err(|e| e.to_string())?,
-        &accounts,
-    );
+    let tokens = storage.list_tokens().map_err(|e| e.to_string())?;
+    let account_ids = tokens
+        .iter()
+        .map(|token| token.account_id.clone())
+        .collect::<Vec<_>>();
+    let latest_status_reasons = storage
+        .latest_account_status_reasons(&account_ids)
+        .map_err(|e| e.to_string())?;
+    let all_tasks =
+        build_polling_usage_refresh_tasks(tokens, &accounts, &latest_status_reasons);
     if all_tasks.is_empty() {
         return Ok(());
     }
@@ -139,6 +146,45 @@ fn build_usage_refresh_tasks(
             }
         })
         .collect()
+}
+
+fn build_polling_usage_refresh_tasks(
+    tokens: Vec<Token>,
+    accounts: &[Account],
+    latest_status_reasons: &HashMap<String, String>,
+) -> Vec<UsageRefreshBatchTask> {
+    let account_map = accounts
+        .iter()
+        .map(|account| (account.id.as_str(), account))
+        .collect::<HashMap<_, _>>();
+    let tokens = tokens
+        .into_iter()
+        .filter(|token| {
+            account_map
+                .get(token.account_id.as_str())
+                .map(|account| should_poll_usage_for_account(account))
+                .unwrap_or(false)
+                && latest_status_reasons
+                    .get(&token.account_id)
+                    .map(|reason| !is_refresh_token_invalid_reason(reason))
+                    .unwrap_or(true)
+        })
+        .collect::<Vec<_>>();
+    build_usage_refresh_tasks(tokens, accounts)
+}
+
+fn should_poll_usage_for_account(account: &Account) -> bool {
+    !matches!(
+        account.status.trim().to_ascii_lowercase().as_str(),
+        "unavailable" | "banned" | "disabled" | "inactive"
+    )
+}
+
+fn is_refresh_token_invalid_reason(reason: &str) -> bool {
+    reason
+        .trim()
+        .to_ascii_lowercase()
+        .starts_with("refresh_token_invalid:")
 }
 
 /// 函数 `run_usage_refresh_tasks`

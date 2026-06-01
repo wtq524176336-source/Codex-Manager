@@ -1027,6 +1027,12 @@ fn load_selected_websocket_account_and_token() -> Result<
                 "selected upstream account not found",
             )
         })?;
+    if is_unavailable_websocket_account_status(&account.status) {
+        return Err(WsSessionError::service_unavailable_bilingual(
+            "当前上游账号不可用",
+            format!("selected upstream account is unavailable: {}", account.id),
+        ));
+    }
     let token = storage
         .find_token_by_account_id(account_id.as_str())
         .map_err(|err| {
@@ -1052,6 +1058,13 @@ fn load_selected_websocket_account_and_token() -> Result<
         let _ = storage.insert_account(&account);
     }
     Ok((account, token))
+}
+
+fn is_unavailable_websocket_account_status(status: &str) -> bool {
+    matches!(
+        status.trim().to_ascii_lowercase().as_str(),
+        "unavailable" | "limited" | "banned" | "disabled" | "inactive"
+    )
 }
 
 async fn resolve_bearer_token_for_websocket(

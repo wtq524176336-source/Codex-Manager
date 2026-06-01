@@ -6,7 +6,6 @@ use codexmanager_core::storage::{now_ts, Account, Storage, Token};
 
 use crate::account_status::mark_account_unavailable_for_auth_error;
 use crate::auth_tokens;
-use crate::usage_http::refresh_access_token;
 
 const ACCOUNT_TOKEN_EXCHANGE_LOCK_TTL_SECS: i64 = 30 * 60;
 const ACCOUNT_TOKEN_EXCHANGE_LOCK_CLEANUP_INTERVAL_SECS: i64 = 60;
@@ -211,6 +210,10 @@ fn should_mark_account_unavailable_after_refresh_failure_for_bearer_exchange(
     }
 }
 
+fn can_fallback_to_access_token_without_refresh(token: &Token) -> bool {
+    !should_mark_account_unavailable_after_refresh_failure_for_bearer_exchange(token)
+}
+
 /// 函数 `resolve_openai_bearer_token`
 ///
 /// 作者: gaohongshun
@@ -254,7 +257,8 @@ pub(super) fn resolve_openai_bearer_token(
     }
 
     let fallback_client_id = super::runtime_config::token_exchange_client_id();
-    let client_id = crate::usage_token_refresh::token_refresh_client_id(token, &fallback_client_id);
+    let client_id =
+        crate::usage_token_refresh::token_refresh_client_id(token, &fallback_client_id);
     let issuer_env = super::runtime_config::token_exchange_default_issuer();
     let issuer = if account.issuer.trim().is_empty() {
         issuer_env
@@ -265,31 +269,38 @@ pub(super) fn resolve_openai_bearer_token(
     match exchange_and_persist_api_key_access_token(storage, token, &issuer, &client_id) {
         Ok(token) => return Ok(token),
         Err(exchange_err) => {
-            if !token.refresh_token.trim().is_empty() {
-                match refresh_access_token(&issuer, &client_id, &token.refresh_token) {
-                    Ok(refreshed) => {
-                        token.access_token = refreshed.access_token;
-                        if let Some(refresh_token) = refreshed.refresh_token {
-                            token.refresh_token = refresh_token;
-                        }
-                        if let Some(id_token) = refreshed.id_token {
-                            token.id_token = id_token;
-                        }
-                        let _ = storage.insert_token(token);
+            if can_fallback_to_access_token_without_refresh(token) {
+                return fallback_to_access_token(token, &exchange_err);
+            }
 
-                        if !token.id_token.trim().is_empty() {
-                            let refreshed_client_id =
-                                crate::usage_token_refresh::token_refresh_client_id(
-                                    token, &client_id,
-                                );
-                            if let Ok(exchanged) = exchange_and_persist_api_key_access_token(
-                                storage,
-                                token,
-                                &issuer,
-                                &refreshed_client_id,
-                            ) {
-                                return Ok(exchanged);
-                            }
+            if !token.refresh_token.trim().is_empty() {
+                match crate::usage_token_refresh::refresh_and_persist_access_token(
+                    storage,
+                    token,
+                    &issuer,
+                    &client_id,
+                    crate::usage_token_refresh::token_refresh_ahead_secs(),
+                ) {
+                    Ok(()) => {
+                        if let Some(existing) = token
+                            .api_key_access_token
+                            .as_deref()
+                            .and_then(usable_api_key_access_token)
+                        {
+                            return Ok(existing);
+                        }
+
+                        let refreshed_client_id =
+                            crate::usage_token_refresh::token_refresh_client_id(
+                                token, &client_id,
+                            );
+                        if let Ok(exchanged) = exchange_and_persist_api_key_access_token(
+                            storage,
+                            token,
+                            &issuer,
+                            &refreshed_client_id,
+                        ) {
+                            return Ok(exchanged);
                         }
                     }
                     Err(refresh_err) => {
