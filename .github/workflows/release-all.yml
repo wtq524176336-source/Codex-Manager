@@ -144,13 +144,14 @@ jobs:
           if (-not $source) {
             $source = $portableCandidates | Sort-Object FullName | Select-Object -First 1
           }
-          if (-not $source) {
-            throw "portable source binary not found. searched release dirs: $($releaseDirs -join ', ')"
+          $portableBinary = $null
+          if ($source) {
+            $portableBinary = Join-Path $portableDir "CodexManager-portable.exe"
+            Copy-Item -Force $source.FullName $portableBinary
+            Write-Host "portable binary: $portableBinary"
+          } else {
+            Write-Warning "portable source binary not found. searched release dirs: $($releaseDirs -join ', ')"
           }
-
-          $portableBinary = Join-Path $portableDir "CodexManager-portable.exe"
-          Copy-Item -Force $source.FullName $portableBinary
-          Write-Host "portable binary: $portableBinary"
 
           $bundleDirs = @(
             $releaseDirs | ForEach-Object { Join-Path $_ "bundle" }
@@ -168,7 +169,9 @@ jobs:
 
           $installerTarget = Join-Path $desktopAssetsDir "CodexManager_${version}_${arch}-setup.exe"
           Copy-Item -Force $installerSource.FullName $installerTarget
-          Copy-Item -Force $portableBinary (Join-Path $desktopAssetsDir "CodexManager-portable.exe")
+          if ($portableBinary) {
+            Copy-Item -Force $portableBinary (Join-Path $desktopAssetsDir "CodexManager-portable.exe")
+          }
           Get-ChildItem -Path $desktopAssetsDir -File | ForEach-Object {
             Write-Host "desktop asset: $($_.FullName)"
           }
