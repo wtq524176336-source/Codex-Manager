@@ -16,6 +16,7 @@ use crate::storage_helpers::open_storage;
 pub(crate) fn update_account(
     account_id: &str,
     preferred: Option<bool>,
+    status: Option<&str>,
     label: Option<&str>,
     note: Option<&str>,
     tags: Option<&str>,
@@ -29,9 +30,11 @@ pub(crate) fn update_account(
     let normalized_label = normalize_optional_label(label)?;
     let normalized_note = normalize_optional_text(note);
     let normalized_tags = normalize_optional_tags(tags);
+    let normalized_status = normalize_optional_status(status)?;
     let metadata_requested = note.is_some() || tags.is_some();
 
     if preferred.is_none()
+        && normalized_status.is_none()
         && normalized_label.is_none()
         && !metadata_requested
     {
@@ -61,6 +64,26 @@ pub(crate) fn update_account(
             account_id: Some(normalized_account_id.to_string()),
             event_type: "account_preferred_update".to_string(),
             message: format!("preferred={preferred}"),
+            created_at: now,
+        });
+        crate::gateway::invalidate_candidate_cache();
+    }
+
+    if let Some(status) = normalized_status {
+        let found = storage
+            .find_account_by_id(normalized_account_id)
+            .map_err(|err| err.to_string())?
+            .is_some();
+        if !found {
+            return Err("account not found".to_string());
+        }
+        storage
+            .update_account_status(normalized_account_id, &status)
+            .map_err(|e| e.to_string())?;
+        let _ = storage.insert_event(&Event {
+            account_id: Some(normalized_account_id.to_string()),
+            event_type: "account_status_update".to_string(),
+            message: format!("status={status}"),
             created_at: now,
         });
         crate::gateway::invalidate_candidate_cache();
@@ -124,6 +147,18 @@ fn normalize_optional_label(label: Option<&str>) -> Result<Option<&str>, String>
         return Err("label cannot be empty".to_string());
     }
     Ok(Some(trimmed))
+}
+
+fn normalize_optional_status(status: Option<&str>) -> Result<Option<String>, String> {
+    let Some(status) = status else {
+        return Ok(None);
+    };
+    let normalized = status.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "" => Ok(None),
+        "active" | "disabled" => Ok(Some(normalized)),
+        _ => Err("status must be active or disabled".to_string()),
+    }
 }
 
 /// 函数 `normalize_optional_text`

@@ -81,9 +81,11 @@ pub(super) fn try_handle(req: &JsonRpcRequest) -> Option<JsonRpcResponse> {
             let label = super::string_param(req, "label");
             let note = super::string_param(req, "note");
             let tags = super::string_param(req, "tags");
+            let status = super::string_param(req, "status");
             super::ok_or_error(account_update::update_account(
                 account_id,
                 preferred,
+                status.as_deref(),
                 label.as_deref(),
                 note.as_deref(),
                 tags.as_deref(),

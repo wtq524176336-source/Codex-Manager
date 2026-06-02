@@ -1,25 +1,56 @@
 <template>
   <div class="page accounts-page">
-    <div class="page-hero">
-      <div>
-        <h2 class="page-hero__title">账号管理</h2>
-        <p class="page-hero__desc">
-          管理 ChatGPT 账号、刷新用量、导入导出账号文件，并按状态批量清理不可用账号。
-        </p>
+    <div class="account-summary-grid">
+      <div
+        v-for="item in accountMetricCards"
+        :key="item.label"
+        class="account-metric-card"
+      >
+        <div class="account-metric-card__head">
+          <span>{{ item.label }}</span>
+          <el-icon :class="item.iconClass">
+            <component :is="item.icon" />
+          </el-icon>
+        </div>
+        <div class="account-metric-card__value">{{ item.value }}</div>
+        <div class="account-metric-card__hint">{{ item.hint }}</div>
       </div>
-      <div class="table-actions">
+    </div>
+
+    <div class="account-toolbar">
+      <div class="account-toolbar__filters">
+        <el-input v-model="keyword" clearable placeholder="搜索账号名 / 编号..." />
+        <el-select v-model="planFilter" placeholder="全部类型">
+          <el-option label="全部类型" value="all" />
+          <el-option v-for="plan in planTypes" :key="plan" :label="plan" :value="plan" />
+        </el-select>
+        <el-select v-model="statusFilter" placeholder="全部">
+          <el-option label="全部" value="all" />
+          <el-option label="正常" value="available" />
+          <el-option label="异常" value="unavailable" />
+          <el-option label="低额度" value="limited" />
+          <el-option label="封禁" value="banned" />
+        </el-select>
+      </div>
+      <div class="account-toolbar__actions">
         <el-button
+          class="mode-button"
           :disabled="!activeApiKey"
           :loading="switchingApiKeyMode"
           @click="toggleActiveApiKeyMode"
         >
-          密钥模式：{{ activeApiKeyModeLabel }}
+          <span>当前</span>
+          <strong>{{ activeApiKeyModeLabel }}</strong>
+          <el-icon><Switch /></el-icon>
         </el-button>
-        <el-button :loading="loading" @click="loadData">刷新列表</el-button>
+        <el-button :loading="warming" @click="runWarmup(selectedIds)">
+          <el-icon><Lightning /></el-icon>
+          预热
+        </el-button>
         <el-dropdown trigger="click" @command="handleAccountCommand">
-          <el-button type="primary">
+          <el-button>
             账号操作
-            <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+            <el-icon class="el-icon--right"><MoreFilled /></el-icon>
           </el-button>
           <template #dropdown>
             <el-dropdown-menu>
@@ -36,170 +67,94 @@
       </div>
     </div>
 
-    <div class="summary-grid">
-      <div class="summary-card">
-        <div class="summary-card__label">今日 Token</div>
-        <div class="summary-card__value">{{ compactNumber(tokenStats.todayTokens) }}</div>
-        <div class="summary-card__hint">输入 + 输出合计</div>
+    <div class="account-table-card" v-loading="loading">
+      <div class="account-table account-table--head">
+        <div>
+          <el-checkbox
+            :model-value="allPageSelected"
+            :indeterminate="somePageSelected && !allPageSelected"
+            @change="togglePageSelection"
+          />
+        </div>
+        <div>账号信息</div>
+        <div>是否启用</div>
+        <div>额度详情</div>
+        <div>账号状态</div>
+        <div>操作</div>
       </div>
-      <div class="summary-card">
-        <div class="summary-card__label">缓存 Token</div>
-        <div class="summary-card__value">{{ compactNumber(tokenStats.cachedInputTokens) }}</div>
-        <div class="summary-card__hint">上下文缓存命中</div>
-      </div>
-      <div class="summary-card">
-        <div class="summary-card__label">推理 Token</div>
-        <div class="summary-card__value">{{ compactNumber(tokenStats.reasoningOutputTokens) }}</div>
-        <div class="summary-card__hint">大模型思考过程</div>
-      </div>
-      <div class="summary-card">
-        <div class="summary-card__label">预计费用</div>
-        <div class="summary-card__value summary-card__value--small">{{ formatUsd(tokenStats.estimatedCost) }}</div>
-        <div class="summary-card__hint">今日请求日志估算</div>
-      </div>
-    </div>
-
-    <div class="summary-grid">
-      <div class="summary-card">
-        <div class="summary-card__label">账号总数</div>
-        <div class="summary-card__value">{{ accounts.length }}</div>
-        <div class="summary-card__hint">当前列表</div>
-      </div>
-      <div class="summary-card">
-        <div class="summary-card__label">可用账号</div>
-        <div class="summary-card__value">{{ availableCount }}</div>
-        <div class="summary-card__hint">可参与轮转</div>
-      </div>
-      <div class="summary-card">
-        <div class="summary-card__label">异常账号</div>
-        <div class="summary-card__value">{{ unavailableCount }}</div>
-        <div class="summary-card__hint">不可用 / 封禁 / 受限</div>
-      </div>
-      <div class="summary-card">
-        <div class="summary-card__label">已选择</div>
-        <div class="summary-card__value">{{ selectedIds.length }}</div>
-        <div class="summary-card__hint">批量操作对象</div>
-      </div>
-    </div>
-
-    <div class="page-card">
-      <div class="page-card__body">
-        <div class="filter-bar accounts-filter">
-          <el-input v-model="keyword" clearable placeholder="搜索账号名 / 编号 / 标签" />
-          <el-select v-model="planFilter" placeholder="全部类型">
-            <el-option label="全部类型" value="all" />
-            <el-option v-for="plan in planTypes" :key="plan" :label="plan" :value="plan" />
-          </el-select>
-          <el-select v-model="statusFilter" placeholder="全部状态">
-            <el-option label="全部状态" value="all" />
-            <el-option label="可用" value="available" />
-            <el-option label="异常" value="unavailable" />
-            <el-option label="低额度" value="limited" />
-            <el-option label="封禁" value="banned" />
-          </el-select>
-          <div class="table-actions">
-            <el-button :loading="refreshing" @click="refreshUsage()">刷新用量</el-button>
-            <el-button :loading="refreshingTokens" @click="refreshTokens()">刷新 AT/RT</el-button>
-            <el-button
-              type="danger"
-              :disabled="!selectedIds.length"
-              :loading="deleting"
-              @click="confirmDeleteSelected"
-            >
-              删除选中
+      <div v-if="pagedAccounts.length" class="account-table__body">
+        <div v-for="row in pagedAccounts" :key="row.id" class="account-table account-table--row">
+          <div>
+            <el-checkbox
+              :model-value="selectedIds.includes(row.id)"
+              @change="toggleAccountSelection(row.id)"
+            />
+          </div>
+          <div class="account-info">
+            <div class="account-info__title">
+              <strong>{{ row.label || row.name || row.id }}</strong>
+              <span class="account-badge">{{ displayPlan(row) }}</span>
+              <span v-if="row.preferred" class="account-badge">启用</span>
+            </div>
+            <div class="account-info__id">{{ shortAccountId(row.id) }}</div>
+            <div class="account-info__meta">最近刷新: {{ formatDateMinute(row.lastRefreshAt) }}</div>
+            <div class="account-info__meta">订阅到期: {{ formatDateMinute(row.subscriptionExpiresAt || row.subscriptionRenewsAt) }}</div>
+          </div>
+          <div>
+            <el-switch
+              :model-value="row.isAvailable !== false"
+              :disabled="rowLoadingId === row.id"
+              @change="toggleAccountEnabled(row, $event)"
+            />
+          </div>
+          <div class="quota-detail">
+            <div class="quota-row">
+              <span>{{ primaryWindowLabel(row) }}</span>
+              <span>{{ formatQuotaCost(row.primaryWindowCostUsd || row.currentWindowCostUsd) }}</span>
+              <div class="quota-bar">
+                <span class="quota-bar__fill quota-bar__fill--green" :style="{ width: `${primaryUsagePercent(row)}%` }" />
+              </div>
+              <span>{{ primaryUsagePercent(row) }}%</span>
+              <span>{{ resetAfterLabel(row.usage?.resetsAt, row.lastRefreshAt) }}</span>
+            </div>
+            <div class="quota-row">
+              <span>{{ secondaryWindowLabel(row) }}</span>
+              <span>{{ formatQuotaCost(row.secondaryWindowCostUsd) }}</span>
+              <div class="quota-bar">
+                <span class="quota-bar__fill quota-bar__fill--blue" :style="{ width: `${secondaryUsagePercent(row)}%` }" />
+              </div>
+              <span>{{ secondaryUsagePercent(row) }}%</span>
+              <span>{{ resetAfterLabel(row.usage?.secondaryResetsAt, row.lastRefreshAt) }}</span>
+            </div>
+          </div>
+          <div>
+            <span :class="['account-state', row.isAvailable === false ? 'account-state--danger' : '']">
+              {{ formatAccountStatus(row) }}
+            </span>
+          </div>
+          <div class="row-actions">
+            <el-button link type="danger" :loading="deleting && rowLoadingId === row.id" @click="confirmDelete(row)">
+              <el-icon><Delete /></el-icon>
             </el-button>
           </div>
         </div>
+      </div>
+      <div v-else class="empty-hint">暂无账号</div>
+    </div>
 
-        <div class="table-scroll">
-          <el-table
-            v-loading="loading"
-            :data="pagedAccounts"
-            class="data-table"
-            row-key="id"
-            @selection-change="handleSelectionChange"
-          >
-            <el-table-column type="selection" width="44" />
-            <el-table-column label="账号 / 标签" min-width="260">
-              <template #default="{ row }">
-                <div class="name-cell">
-                  <strong>
-                    <el-tag v-if="row.preferred" size="small" effect="plain">首选</el-tag>
-                    {{ row.label || row.name || row.id }}
-                  </strong>
-                  <span class="mono">{{ row.id }}</span>
-                  <span v-if="row.tags?.length" class="pill-list">
-                    <el-tag v-for="tag in row.tags" :key="tag" size="small" type="info">
-                      {{ tag }}
-                    </el-tag>
-                  </span>
-                </div>
-              </template>
-            </el-table-column>
-            <el-table-column label="类型" width="150">
-              <template #default="{ row }">
-                <el-tag effect="light">{{ row.planType || row.subscriptionPlan || "unknown" }}</el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="状态" width="150">
-              <template #default="{ row }">
-                <el-tag :type="row.isAvailable === false ? 'danger' : 'success'" effect="light">
-                  {{ formatAccountStatus(row) }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="主额度" width="180">
-              <template #default="{ row }">
-                <el-progress
-                  :percentage="readUsedPercent(row)"
-                  :stroke-width="8"
-                  :show-text="false"
-                  :status="readUsedPercent(row) >= 90 ? 'exception' : undefined"
-                />
-                <span class="muted">{{ readUsedPercent(row) }}%</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="备注" min-width="180" show-overflow-tooltip>
-              <template #default="{ row }">{{ row.note || "-" }}</template>
-            </el-table-column>
-            <el-table-column label="最后刷新" width="170">
-              <template #default="{ row }">{{ formatTime(row.lastRefreshAt) }}</template>
-            </el-table-column>
-            <el-table-column label="操作" width="230" fixed="right" align="right">
-              <template #default="{ row }">
-                <el-button link type="primary" :loading="rowLoadingId === row.id" @click="refreshUsage(row.id)">
-                  刷新
-                </el-button>
-                <el-button link type="primary" @click="openEditor(row)">编辑</el-button>
-                <el-dropdown trigger="click" @command="handleRowCommand($event, row)">
-                  <el-button link type="primary">更多</el-button>
-                  <template #dropdown>
-                    <el-dropdown-menu>
-                      <el-dropdown-item command="rt">刷新 AT/RT</el-dropdown-item>
-                      <el-dropdown-item command="preferred">
-                        {{ row.preferred ? "取消首选" : "设为首选" }}
-                      </el-dropdown-item>
-                      <el-dropdown-item command="warmup">预热此账号</el-dropdown-item>
-                      <el-dropdown-item divided command="delete">删除账号</el-dropdown-item>
-                    </el-dropdown-menu>
-                  </template>
-                </el-dropdown>
-              </template>
-            </el-table-column>
-          </el-table>
-        </div>
-
-        <div class="table-footer">
-          <span>共 {{ filteredAccounts.length }} 个账号，当前页 {{ pagedAccounts.length }} 个</span>
-          <el-pagination
-            v-model:current-page="page"
-            v-model:page-size="pageSize"
-            :page-sizes="[10, 20, 50, 100]"
-            :total="filteredAccounts.length"
-            layout="sizes, prev, pager, next"
-            small
-          />
-        </div>
+    <div class="account-footer">
+      <span>共 {{ filteredAccounts.length }} 个账号</span>
+      <div class="account-footer__pager">
+        <span>每页显示</span>
+        <el-select v-model="pageSize" class="page-size-select">
+          <el-option :value="10" label="10" />
+          <el-option :value="20" label="20" />
+          <el-option :value="50" label="50" />
+          <el-option :value="100" label="100" />
+        </el-select>
+        <el-button :disabled="page <= 1" @click="page -= 1">上一页</el-button>
+        <strong>第 {{ page }} / {{ totalPages }} 页</strong>
+        <el-button :disabled="page >= totalPages" @click="page += 1">下一页</el-button>
       </div>
     </div>
 
@@ -389,7 +344,7 @@
 </template>
 
 <script setup lang="ts">
-import { ArrowDown } from "@element-plus/icons-vue";
+import { Coin, DataLine, Delete, Lightning, Money, MoreFilled, Switch } from "@element-plus/icons-vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 
@@ -530,14 +485,123 @@ const pagedAccounts = computed(() => {
   const start = (page.value - 1) * pageSize.value;
   return filteredAccounts.value.slice(start, start + pageSize.value);
 });
+const totalPages = computed(() => Math.max(1, Math.ceil(filteredAccounts.value.length / pageSize.value)));
+const allPageSelected = computed(
+  () => pagedAccounts.value.length > 0 && pagedAccounts.value.every((item) => selectedIds.value.includes(item.id)),
+);
+const somePageSelected = computed(() => pagedAccounts.value.some((item) => selectedIds.value.includes(item.id)));
+const accountMetricCards = computed(() => [
+  {
+    label: "今日Token",
+    value: formatMetricNumber(tokenStats.value.todayTokens),
+    hint: "输入 + 输出合计",
+    icon: Lightning,
+    iconClass: "account-metric-card__icon account-metric-card__icon--yellow",
+  },
+  {
+    label: "缓存Token",
+    value: formatMetricNumber(tokenStats.value.cachedInputTokens),
+    hint: "上下文缓存命中",
+    icon: Coin,
+    iconClass: "account-metric-card__icon account-metric-card__icon--blue",
+  },
+  {
+    label: "推理Token",
+    value: formatMetricNumber(tokenStats.value.reasoningOutputTokens),
+    hint: "大模型思考过程",
+    icon: DataLine,
+    iconClass: "account-metric-card__icon account-metric-card__icon--purple",
+  },
+  {
+    label: "预计费用",
+    value: formatUsd(tokenStats.value.estimatedCost),
+    hint: "按官价估算",
+    icon: Money,
+    iconClass: "account-metric-card__icon account-metric-card__icon--green",
+  },
+]);
 
 watch([keyword, planFilter, statusFilter, pageSize], () => {
   page.value = 1;
 });
 
+watch(totalPages, (value) => {
+  if (page.value > value) page.value = value;
+});
+
 function readUsedPercent(row: AccountSummary): number {
   const value = row.usage?.usedPercent;
   return typeof value === "number" && Number.isFinite(value) ? Math.round(value) : 0;
+}
+
+function secondaryUsagePercent(row: AccountSummary): number {
+  const value = row.usage?.secondaryUsedPercent;
+  return typeof value === "number" && Number.isFinite(value) ? Math.round(value) : 0;
+}
+
+function primaryUsagePercent(row: AccountSummary): number {
+  return readUsedPercent(row);
+}
+
+function displayPlan(row: AccountSummary): string {
+  return String(row.planType || row.subscriptionPlan || "TEAM").toUpperCase();
+}
+
+function shortAccountId(value: string): string {
+  const text = String(value || "").trim();
+  if (!text) return "-";
+  return text.length > 24 ? `${text.slice(0, 24)}...` : text;
+}
+
+function formatDateMinute(value?: number | string | null): string {
+  const text = formatTime(value);
+  return text === "-" ? "-" : text.slice(0, 16);
+}
+
+function formatMetricNumber(value: number): string {
+  const numeric = Number(value) || 0;
+  const abs = Math.abs(numeric);
+  if (abs >= 1_000_000) return `${(numeric / 1_000_000).toFixed(2).replace(/\.?0+$/, "")}M`;
+  if (abs >= 1_000) return `${(numeric / 1_000).toFixed(2).replace(/\.?0+$/, "")}K`;
+  return new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 2 }).format(numeric);
+}
+
+function formatQuotaCost(value: unknown): string {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return "($0.00)";
+  return `(${formatUsd(numeric)})`;
+}
+
+function windowLabel(minutes: unknown, fallback: string): string {
+  const numeric = Number(minutes);
+  if (!Number.isFinite(numeric) || numeric <= 0) return fallback;
+  if (numeric < 60) return `${Math.round(numeric)}分钟`;
+  if (numeric < 24 * 60) return `${Math.round(numeric / 60)}小时`;
+  return `${Math.round(numeric / (24 * 60))}周`;
+}
+
+function primaryWindowLabel(row: AccountSummary): string {
+  return windowLabel(row.usage?.windowMinutes, "5小时");
+}
+
+function secondaryWindowLabel(row: AccountSummary): string {
+  return windowLabel(row.usage?.secondaryWindowMinutes, "1周");
+}
+
+function resetAfterLabel(resetsAt?: number | string | null, fallbackAt?: number | string | null): string {
+  const reset = Number(resetsAt);
+  const fallback = Number(fallbackAt);
+  if (!Number.isFinite(reset) || reset <= 0) {
+    return Number.isFinite(fallback) && fallback > 0 ? "已刷新" : "-";
+  }
+  const resetMs = reset > 10_000_000_000 ? reset : reset * 1000;
+  const diffMinutes = Math.max(0, Math.round((resetMs - Date.now()) / 60000));
+  const days = Math.floor(diffMinutes / (24 * 60));
+  const hours = Math.floor((diffMinutes % (24 * 60)) / 60);
+  const minutes = diffMinutes % 60;
+  if (days > 0) return `${days}d${hours}h${minutes}min后刷新`;
+  if (hours > 0) return `${hours}h${minutes}min后刷新`;
+  return `${minutes}min后刷新`;
 }
 
 function formatAccountStatus(row: AccountSummary): string {
@@ -639,6 +703,37 @@ async function toggleActiveApiKeyMode() {
 
 function handleSelectionChange(rows: AccountSummary[]) {
   selectedIds.value = rows.map((item) => item.id);
+}
+
+function toggleAccountSelection(accountId: string) {
+  if (selectedIds.value.includes(accountId)) {
+    selectedIds.value = selectedIds.value.filter((id) => id !== accountId);
+    return;
+  }
+  selectedIds.value = [...selectedIds.value, accountId];
+}
+
+function togglePageSelection(checked: string | number | boolean) {
+  const pageIds = pagedAccounts.value.map((item) => item.id);
+  if (Boolean(checked)) {
+    selectedIds.value = Array.from(new Set([...selectedIds.value, ...pageIds]));
+    return;
+  }
+  selectedIds.value = selectedIds.value.filter((id) => !pageIds.includes(id));
+}
+
+async function toggleAccountEnabled(row: AccountSummary, checked: string | number | boolean) {
+  const enabled = Boolean(checked);
+  rowLoadingId.value = row.id;
+  try {
+    await updateAccountProfile(row.id, { status: enabled ? "active" : "disabled" });
+    ElMessage.success(enabled ? "账号已启用" : "账号已禁用");
+    await loadData();
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error));
+  } finally {
+    rowLoadingId.value = "";
+  }
 }
 
 async function refreshUsage(accountId?: string) {
@@ -1257,6 +1352,264 @@ onUnmounted(() => {
 
 <style scoped lang="scss">
 .accounts-page {
+  gap: 24px;
+
+  .account-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 16px;
+  }
+
+  .account-metric-card {
+    min-height: 128px;
+    padding: 18px 16px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 10px;
+    background: var(--card-solid);
+
+    &__head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: var(--text-primary);
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    &__icon {
+      font-size: 18px;
+
+      &--yellow {
+        color: #f5b400;
+      }
+
+      &--blue {
+        color: #4f7cff;
+      }
+
+      &--purple {
+        color: #9a4dff;
+      }
+
+      &--green {
+        color: #00b578;
+      }
+    }
+
+    &__value {
+      margin-top: 28px;
+      color: #111827;
+      font-size: 25px;
+      font-weight: 800;
+      line-height: 1;
+    }
+
+    &__hint {
+      margin-top: 10px;
+      color: var(--text-secondary);
+      font-size: 12px;
+    }
+  }
+
+  .account-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 16px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 10px;
+    background: var(--card-solid);
+
+    &__filters {
+      display: grid;
+      grid-template-columns: 200px 140px 150px;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    &__actions {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+
+    .mode-button {
+      min-width: 178px;
+      justify-content: space-between;
+
+      span {
+        color: var(--text-secondary);
+        font-size: 11px;
+        line-height: 1;
+      }
+
+      strong {
+        font-size: 13px;
+      }
+    }
+  }
+
+  .account-table-card {
+    overflow-x: auto;
+    border: 1px solid var(--border-subtle);
+    border-radius: 10px;
+    background: var(--card-solid);
+  }
+
+  .account-table {
+    display: grid;
+    grid-template-columns: 48px minmax(360px, 1.35fr) 120px minmax(560px, 1.9fr) 150px 100px;
+    min-width: 1280px;
+    align-items: center;
+    column-gap: 16px;
+    padding: 0 8px;
+
+    &--head {
+      height: 48px;
+      color: var(--text-primary);
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    &--row {
+      min-height: 92px;
+      border-top: 1px solid var(--border-subtle);
+    }
+
+    &__body {
+      display: grid;
+    }
+  }
+
+  .account-info {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+
+    &__title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+
+      strong {
+        overflow: hidden;
+        color: var(--text-primary);
+        font-size: 15px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+    }
+
+    &__id,
+    &__meta {
+      overflow: hidden;
+      color: var(--text-secondary);
+      font-size: 12px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+  }
+
+  .account-badge {
+    flex: 0 0 auto;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: #d7f8ee;
+    color: #008c61;
+    font-size: 10px;
+    font-weight: 800;
+    line-height: 18px;
+  }
+
+  .quota-detail {
+    display: grid;
+    gap: 10px;
+  }
+
+  .quota-row {
+    display: grid;
+    grid-template-columns: 48px 76px minmax(220px, 1fr) 44px 112px;
+    align-items: center;
+    gap: 10px;
+    color: var(--text-secondary);
+    font-size: 12px;
+  }
+
+  .quota-bar {
+    overflow: hidden;
+    height: 4px;
+    border-radius: 999px;
+    background: #dbe7ff;
+
+    &__fill {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+
+      &--green {
+        background: #00c853;
+      }
+
+      &--blue {
+        background: #2f6cf6;
+      }
+    }
+  }
+
+  .account-state {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: #00a650;
+    font-size: 13px;
+
+    &::before {
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: currentColor;
+      content: "";
+    }
+
+    &--danger {
+      color: var(--danger);
+    }
+  }
+
+  .row-actions {
+    display: flex;
+    justify-content: center;
+
+    .el-button {
+      font-size: 17px;
+    }
+  }
+
+  .account-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 0 8px;
+    color: var(--text-secondary);
+    font-size: 13px;
+
+    &__pager {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      color: var(--text-primary);
+    }
+
+    .page-size-select {
+      width: 72px;
+    }
+  }
+
   .accounts-filter {
     grid-template-columns: minmax(220px, 1fr) 150px 150px auto;
     margin-bottom: 16px;
@@ -1366,7 +1719,41 @@ onUnmounted(() => {
 
 @media (max-width: 980px) {
   .accounts-page {
+    .account-summary-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .account-toolbar {
+      align-items: stretch;
+      flex-direction: column;
+
+      &__filters {
+        grid-template-columns: 1fr;
+      }
+
+      &__actions {
+        justify-content: flex-start;
+      }
+    }
+
+    .account-footer {
+      align-items: flex-start;
+      flex-direction: column;
+
+      &__pager {
+        flex-wrap: wrap;
+      }
+    }
+
     .accounts-filter {
+      grid-template-columns: 1fr;
+    }
+  }
+}
+
+@media (max-width: 640px) {
+  .accounts-page {
+    .account-summary-grid {
       grid-template-columns: 1fr;
     }
   }

@@ -95,7 +95,13 @@ export function deleteAccountsByStatuses(statuses: string[]) {
 
 export function updateAccountProfile(
   accountId: string,
-  params: { label?: string | null; note?: string | null; tags?: string[] | string | null; preferred?: boolean },
+  params: {
+    label?: string | null;
+    note?: string | null;
+    tags?: string[] | string | null;
+    preferred?: boolean;
+    status?: string | null;
+  },
 ) {
   return invoke(
     "service_account_update",
@@ -105,6 +111,7 @@ export function updateAccountProfile(
       note: params.note ?? null,
       tags: Array.isArray(params.tags) ? params.tags.join(",") : params.tags ?? null,
       preferred: typeof params.preferred === "boolean" ? params.preferred : null,
+      status: params.status ?? null,
     }),
   );
 }
