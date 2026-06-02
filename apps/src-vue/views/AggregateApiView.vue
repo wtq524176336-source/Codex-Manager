@@ -550,7 +550,10 @@ async function toggleSecret(id: string) {
   loadingSecretId.value = id;
   try {
     const secret = await readAggregateApiSecret(id);
-    if (!secret.key) throw new Error("后端未返回密钥明文");
+    const row = items.value.find((item) => item.id === id);
+    const hasSecret =
+      row?.authType === "userpass" ? Boolean(secret.username || secret.password) : Boolean(secret.key);
+    if (!hasSecret) throw new Error("后端未返回密钥明文");
     revealedSecrets.value = { ...revealedSecrets.value, [id]: secret };
   } catch (error) {
     ElMessage.error(getErrorMessage(error));

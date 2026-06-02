@@ -390,7 +390,9 @@ async function syncCodexCache() {
   try {
     const result = await syncCodexModelsCache(models.value);
     ElMessage.success(
-      result.cachePath
+      result.mode === "browser"
+        ? "Codex 缓存已下载，请保存到 ~/.codex/models_cache.json"
+        : result.cachePath
         ? `已导出到本地 Codex 模型缓存：${result.cachePath}`
         : `已导出 ${result.modelsCount} 个模型到本地 Codex 缓存`,
     );

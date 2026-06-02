@@ -48,6 +48,9 @@ export interface AccountTokenRefreshAllResult {
   results: AccountTokenRefreshItemResult[];
 }
 
+const MAX_IMPORT_RPC_BODY_BYTES = 4 * 1024 * 1024;
+const MAX_IMPORT_ERROR_ITEMS = 50;
+
 export async function listAccounts(params: AccountListParams = {}) {
   const result = await invoke<unknown>(
     "service_account_list",
@@ -106,8 +109,81 @@ export function updateAccountProfile(
   );
 }
 
-export function importAccounts(contents: string[]) {
-  return invoke("service_account_import", withAddr({ contents }));
+function createEmptyImportResult() {
+  return {
+    total: 0,
+    created: 0,
+    updated: 0,
+    failed: 0,
+    errors: [] as Array<{ index?: number; message?: string }>,
+  };
+}
+
+function estimateImportRequestBytes(contents: string[]): number {
+  return new TextEncoder().encode(JSON.stringify({ contents })).length;
+}
+
+function splitImportContents(contents: string[]): string[][] {
+  const chunks: string[][] = [];
+  let current: string[] = [];
+
+  for (const content of contents) {
+    const next = current.concat(content);
+    if (current.length > 0 && estimateImportRequestBytes(next) > MAX_IMPORT_RPC_BODY_BYTES) {
+      chunks.push(current);
+      current = [content];
+      if (estimateImportRequestBytes(current) > MAX_IMPORT_RPC_BODY_BYTES) {
+        throw new Error("单条导入内容过大，请拆分后重试");
+      }
+      continue;
+    }
+    current = next;
+  }
+
+  if (current.length) {
+    chunks.push(current);
+  }
+  return chunks;
+}
+
+function mergeImportResult(
+  target: ReturnType<typeof createEmptyImportResult>,
+  payload: unknown,
+  indexOffset: number,
+) {
+  const source = asObject(payload);
+  target.total += asNumber(source.total);
+  target.created += asNumber(source.created);
+  target.updated += asNumber(source.updated);
+  target.failed += asNumber(source.failed);
+
+  const errors = Array.isArray(source.errors) ? source.errors : [];
+  for (const error of errors) {
+    if (target.errors.length >= MAX_IMPORT_ERROR_ITEMS) {
+      break;
+    }
+    const item = asObject(error);
+    target.errors.push({
+      index: asNumber(item.index) + indexOffset,
+      message: asString(item.message),
+    });
+  }
+}
+
+export async function importAccounts(contents: string[]) {
+  const batches = splitImportContents(contents);
+  if (!batches.length) {
+    return createEmptyImportResult();
+  }
+
+  const merged = createEmptyImportResult();
+  let processed = 0;
+  for (const batch of batches) {
+    const result = await invoke<unknown>("service_account_import", withAddr({ contents: batch }));
+    mergeImportResult(merged, result, processed);
+    processed += batch.length;
+  }
+  return merged;
 }
 
 export function importAccountsByFile() {

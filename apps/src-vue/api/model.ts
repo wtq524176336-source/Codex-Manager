@@ -49,6 +49,7 @@ export interface CodexModelsCacheSyncResult {
   cachePath: string;
   clientVersion: string;
   modelsCount: number;
+  mode: "desktop" | "browser";
 }
 
 const knownModelFieldKeys = new Set([
@@ -256,6 +257,44 @@ function normalizeCodexModelsCacheSyncResult(payload: unknown): CodexModelsCache
     cachePath: asString(source.cachePath ?? source.cache_path),
     clientVersion: asString(source.clientVersion ?? source.client_version),
     modelsCount: Number(source.modelsCount ?? source.models_count) || 0,
+    mode: "desktop",
+  };
+}
+
+function parseCodexCliVersion(userAgent: string): string {
+  const match = String(userAgent || "").match(/codex_cli_rs\/([^\s]+)/);
+  return match?.[1]?.trim() || "";
+}
+
+function downloadJsonFile(fileName: string, content: string) {
+  if (typeof document === "undefined") {
+    throw new Error("当前环境不支持浏览器导出");
+  }
+  const blob = new Blob([content], { type: "application/json;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  anchor.style.display = "none";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+function buildCodexModelsCachePayload(
+  models: Array<Record<string, unknown>>,
+  userAgent: string,
+) {
+  const clientVersion = parseCodexCliVersion(userAgent);
+  if (!clientVersion) {
+    throw new Error("无法从 userAgent 解析 Codex CLI 版本");
+  }
+  return {
+    fetched_at: new Date().toISOString(),
+    etag: null,
+    client_version: clientVersion,
+    models,
   };
 }
 
@@ -273,14 +312,23 @@ async function readCodexUserAgentAndHome() {
 }
 
 export async function syncCodexModelsCache(models: ModelInfo[]) {
-  if (!isDesktopRuntime()) {
-    throw new Error("当前环境不支持写入本地 Codex 模型缓存");
-  }
   const payloadModels = serializeModelsForCodexCache(models);
   if (!payloadModels.length) {
     throw new Error("模型目录为空");
   }
   const { userAgent, codexHome } = await readCodexUserAgentAndHome();
+
+  if (!isDesktopRuntime()) {
+    const payload = buildCodexModelsCachePayload(payloadModels, userAgent);
+    downloadJsonFile("models_cache.json", `${JSON.stringify(payload, null, 2)}\n`);
+    return {
+      cachePath: "",
+      clientVersion: asString(payload.client_version),
+      modelsCount: payloadModels.length,
+      mode: "browser",
+    } satisfies CodexModelsCacheSyncResult;
+  }
+
   const result = await invoke<unknown>("service_sync_codex_models_cache", {
     userAgent,
     models: payloadModels,
@@ -288,5 +336,5 @@ export async function syncCodexModelsCache(models: ModelInfo[]) {
     etag: null,
     fetchedAt: new Date().toISOString(),
   });
-  return normalizeCodexModelsCacheSyncResult(result);
+  return { ...normalizeCodexModelsCacheSyncResult(result), mode: "desktop" };
 }
