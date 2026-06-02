@@ -38,11 +38,13 @@ runs:
         while ($attempt -lt $maxAttempts -and -not $succeeded) {
           $attempt++
           Write-Host "Build attempt $attempt/$maxAttempts ..."
-          $args = @('exec', '--yes', '--package', "@tauri-apps/cli@${{ inputs.tauri-cli-version }}", '--', 'tauri', 'build', '--bundles', '${{ inputs.bundles }}')
+          $npmCommand = if (Get-Command npm.cmd -ErrorAction SilentlyContinue) { 'npm.cmd' } else { 'npm' }
+          $tauriArgs = @('exec', '--yes', '--package', "@tauri-apps/cli@${{ inputs.tauri-cli-version }}", '--', 'tauri', 'build', '--bundles', '${{ inputs.bundles }}')
           if ("${{ inputs.target }}".Trim().Length -gt 0) {
-            $args += @('--target', '${{ inputs.target }}')
+            $tauriArgs += @('--target', '${{ inputs.target }}')
           }
-          npm @args
+          Write-Host "Running: $npmCommand $($tauriArgs -join ' ')"
+          & $npmCommand @tauriArgs
           if ($LASTEXITCODE -eq 0) {
             $succeeded = $true
             break
