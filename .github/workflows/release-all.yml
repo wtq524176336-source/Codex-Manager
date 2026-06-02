@@ -101,30 +101,69 @@ jobs:
         shell: pwsh
         run: |
           $releaseDir = Join-Path "${{ env.CARGO_TARGET_DIR }}" "release"
-          $bundleDir = Join-Path $releaseDir "bundle"
           $portableDir = Join-Path $releaseDir "portable"
           $desktopAssetsDir = Join-Path $releaseDir "release-assets"
           $version = (Get-Content "apps/src-tauri/tauri.conf.json" -Raw | ConvertFrom-Json).version
           $arch = if ("${{ runner.arch }}" -eq "ARM64") { "arm64" } else { "x64" }
+          New-Item -ItemType Directory -Force $releaseDir | Out-Null
           New-Item -ItemType Directory -Force $portableDir | Out-Null
           Remove-Item -Recurse -Force $desktopAssetsDir -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Force $desktopAssetsDir | Out-Null
 
-          $source = Join-Path $releaseDir "CodexManager.exe"
-          if (-not (Test-Path $source -PathType Leaf)) {
-            throw "portable source binary not found: $source"
+          $releaseDirs = @(
+            $releaseDir,
+            "apps/src-tauri/target/release",
+            "apps/target/release"
+          ) | Where-Object { Test-Path $_ -PathType Container } | Select-Object -Unique
+
+          $releaseExeFiles = @(
+            foreach ($dir in $releaseDirs) {
+              Get-ChildItem -Path $dir -Recurse -File -Filter "*.exe" -ErrorAction SilentlyContinue
+            }
+          ) | Sort-Object FullName
+          $releaseExeFiles | ForEach-Object {
+            Write-Host "release exe: $($_.FullName)"
+          }
+
+          $portableCandidates = @(
+            $releaseExeFiles | Where-Object {
+              $_.FullName -notmatch '[\\/]bundle[\\/]' -and
+              $_.FullName -notmatch '[\\/]release-assets[\\/]' -and
+              $_.FullName -notmatch '[\\/]portable[\\/]' -and
+              $_.Name -notlike "*setup.exe" -and
+              $_.Name -notlike "*installer*.exe" -and
+              $_.Name -notlike "Uninstall*.exe"
+            }
+          )
+
+          $source = $null
+          foreach ($name in @("CodexManager.exe", "codexmanager.exe", "Codex-Manager.exe", "codex-manager.exe")) {
+            $source = $portableCandidates | Where-Object { $_.Name -ieq $name } | Select-Object -First 1
+            if ($source) { break }
+          }
+          if (-not $source) {
+            $source = $portableCandidates | Sort-Object FullName | Select-Object -First 1
+          }
+          if (-not $source) {
+            throw "portable source binary not found. searched release dirs: $($releaseDirs -join ', ')"
           }
 
           $portableBinary = Join-Path $portableDir "CodexManager-portable.exe"
-          Copy-Item -Force $source $portableBinary
+          Copy-Item -Force $source.FullName $portableBinary
           Write-Host "portable binary: $portableBinary"
 
-          $installerSource = Get-ChildItem -Path $bundleDir -Recurse -File |
-            Where-Object { $_.Name -like "*-setup.exe" -and $_.Name -notlike "*portable*" } |
-            Sort-Object FullName |
-            Select-Object -First 1
+          $bundleDirs = @(
+            $releaseDirs | ForEach-Object { Join-Path $_ "bundle" }
+          ) | Where-Object { Test-Path $_ -PathType Container }
+          $installerSource = $null
+          if (@($bundleDirs).Count -gt 0) {
+            $installerSource = Get-ChildItem -Path $bundleDirs -Recurse -File -ErrorAction SilentlyContinue |
+              Where-Object { $_.Name -like "*-setup.exe" -and $_.Name -notlike "*portable*" } |
+              Sort-Object FullName |
+              Select-Object -First 1
+          }
           if (-not $installerSource) {
-            throw "windows setup installer not found under: $bundleDir"
+            throw "windows setup installer not found under: $($bundleDirs -join ', ')"
           }
 
           $installerTarget = Join-Path $desktopAssetsDir "CodexManager_${version}_${arch}-setup.exe"
