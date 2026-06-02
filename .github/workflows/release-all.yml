@@ -101,6 +101,7 @@ jobs:
         shell: pwsh
         run: |
           $releaseDir = Join-Path "${{ env.CARGO_TARGET_DIR }}" "release"
+          $workspaceDir = "${{ github.workspace }}"
           $portableDir = Join-Path $releaseDir "portable"
           $desktopAssetsDir = Join-Path $releaseDir "release-assets"
           $version = (Get-Content "apps/src-tauri/tauri.conf.json" -Raw | ConvertFrom-Json).version
@@ -110,6 +111,14 @@ jobs:
           Remove-Item -Recurse -Force $desktopAssetsDir -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Force $desktopAssetsDir | Out-Null
 
+          $searchRoots = @(
+            "${{ env.CARGO_TARGET_DIR }}",
+            "apps/src-tauri/target",
+            "apps/target",
+            "apps/src-tauri",
+            $workspaceDir
+          ) | Where-Object { Test-Path $_ -PathType Container } | Select-Object -Unique
+
           $releaseDirs = @(
             $releaseDir,
             "apps/src-tauri/target/release",
@@ -117,7 +126,7 @@ jobs:
           ) | Where-Object { Test-Path $_ -PathType Container } | Select-Object -Unique
 
           $releaseExeFiles = @(
-            foreach ($dir in $releaseDirs) {
+            foreach ($dir in $searchRoots) {
               Get-ChildItem -Path $dir -Recurse -File -Filter "*.exe" -ErrorAction SilentlyContinue
             }
           ) | Sort-Object FullName
@@ -154,17 +163,19 @@ jobs:
           }
 
           $bundleDirs = @(
-            $releaseDirs | ForEach-Object { Join-Path $_ "bundle" }
-          ) | Where-Object { Test-Path $_ -PathType Container }
-          $installerSource = $null
-          if (@($bundleDirs).Count -gt 0) {
-            $installerSource = Get-ChildItem -Path $bundleDirs -Recurse -File -ErrorAction SilentlyContinue |
-              Where-Object { $_.Name -like "*-setup.exe" -and $_.Name -notlike "*portable*" } |
-              Sort-Object FullName |
-              Select-Object -First 1
+            $searchRoots | ForEach-Object {
+              Get-ChildItem -Path $_ -Directory -Recurse -Filter "bundle" -ErrorAction SilentlyContinue
+            }
+          ) | Sort-Object FullName -Unique
+          $bundleDirs | ForEach-Object {
+            Write-Host "bundle dir: $($_.FullName)"
           }
+          $installerSource = $releaseExeFiles |
+            Where-Object { $_.Name -like "*-setup.exe" -and $_.Name -notlike "*portable*" } |
+            Sort-Object FullName |
+            Select-Object -First 1
           if (-not $installerSource) {
-            throw "windows setup installer not found under: $($bundleDirs -join ', ')"
+            throw "windows setup installer not found. searched roots: $($searchRoots -join ', ')"
           }
 
           $installerTarget = Join-Path $desktopAssetsDir "CodexManager_${version}_${arch}-setup.exe"
