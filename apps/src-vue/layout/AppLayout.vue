@@ -21,14 +21,31 @@ import { Loading } from "@element-plus/icons-vue";
 import { ElMessage } from "element-plus";
 import { onMounted, watch } from "vue";
 
+import { readSettings } from "@/api/settings";
 import Header from "@/layout/Header.vue";
 import Sidebar from "@/layout/Sidebar.vue";
 import { useAppStore } from "@/stores/app";
+import { applyAppearanceSettings } from "@/styles/appearance";
 
 const appStore = useAppStore();
 
+async function bootstrapApp() {
+  await appStore.bootstrap();
+  if (!appStore.serviceReady) return;
+  try {
+    const settings = await readSettings();
+    applyAppearanceSettings({
+      theme: settings.theme,
+      appearancePreset: settings.appearancePreset,
+      lowTransparency: settings.lowTransparency,
+    });
+  } catch {
+    // 外观同步失败不影响服务启动和页面访问。
+  }
+}
+
 onMounted(() => {
-  void appStore.bootstrap();
+  void bootstrapApp();
 });
 
 watch(
