@@ -21,15 +21,21 @@
       <div class="account-toolbar__filters">
         <el-input v-model="keyword" clearable placeholder="搜索账号名 / 编号..." />
         <el-select v-model="planFilter" placeholder="全部类型">
-          <el-option label="全部类型" value="all" />
-          <el-option v-for="plan in planTypes" :key="plan" :label="plan" :value="plan" />
+          <el-option :label="`全部类型 (${accounts.length})`" value="all" />
+          <el-option
+            v-for="plan in planTypes"
+            :key="plan.value"
+            :label="`${formatPlanLabel(plan.value)} (${plan.count})`"
+            :value="plan.value"
+          />
         </el-select>
         <el-select v-model="statusFilter" placeholder="全部">
-          <el-option label="全部" value="all" />
-          <el-option label="正常" value="available" />
-          <el-option label="异常" value="unavailable" />
-          <el-option label="低额度" value="limited" />
-          <el-option label="封禁" value="banned" />
+          <el-option
+            v-for="option in statusFilterOptions"
+            :key="option.value"
+            :label="option.label"
+            :value="option.value"
+          />
         </el-select>
       </div>
       <div class="account-toolbar__actions">
@@ -54,13 +60,23 @@
           </el-button>
           <template #dropdown>
             <el-dropdown-menu>
-              <el-dropdown-item command="login">添加账号</el-dropdown-item>
+              <el-dropdown-item command="refresh-usage">刷新账号用量</el-dropdown-item>
+              <el-dropdown-item command="refresh-rt">刷新全部 AT/RT</el-dropdown-item>
+              <el-dropdown-item command="refresh-list">刷新列表</el-dropdown-item>
+              <el-dropdown-item divided command="login">添加账号</el-dropdown-item>
               <el-dropdown-item command="json">按 JSON 导入</el-dropdown-item>
               <el-dropdown-item command="file">按文件导入</el-dropdown-item>
-              <el-dropdown-item command="directory">导入文件夹</el-dropdown-item>
+              <el-dropdown-item command="cpa-directory">导入 CPA 格式文件夹</el-dropdown-item>
+              <el-dropdown-item command="sub2api-directory">导入 sub2api 格式文件夹</el-dropdown-item>
               <el-dropdown-item command="export">导出账号</el-dropdown-item>
-              <el-dropdown-item command="warmup">预热账号</el-dropdown-item>
-              <el-dropdown-item divided command="cleanup">按状态清理</el-dropdown-item>
+              <el-dropdown-item
+                divided
+                command="delete-selected"
+                :disabled="!selectedIds.length"
+              >
+                删除选中
+              </el-dropdown-item>
+              <el-dropdown-item command="cleanup">按状态清理</el-dropdown-item>
             </el-dropdown-menu>
           </template>
         </el-dropdown>
@@ -102,8 +118,8 @@
           </div>
           <div>
             <el-switch
-              :model-value="row.isAvailable !== false"
-              :disabled="rowLoadingId === row.id"
+              :model-value="Boolean(row.preferred)"
+              :disabled="rowLoadingId === row.id || (!row.preferred && row.isAvailable === false)"
               @change="toggleAccountEnabled(row, $event)"
             />
           </div>
@@ -129,7 +145,7 @@
           </div>
           <div>
             <span :class="['account-state', row.isAvailable === false ? 'account-state--danger' : '']">
-              {{ formatAccountStatus(row) }}
+              {{ formatHealthStatus(row) }}
             </span>
           </div>
           <div class="row-actions">
@@ -448,9 +464,41 @@ const activeApiKeyModeLabel = computed(() => {
   if (strategy === "account_rotation") return "账号模式";
   return "未启用";
 });
-const planTypes = computed(() =>
-  Array.from(new Set(accounts.value.map((item) => item.planType).filter(Boolean) as string[])),
+const planTypes = computed(() => {
+  const counts = new Map<string, number>();
+  for (const item of accounts.value) {
+    const value = normalizePlanValue(item.planType || item.subscriptionPlan || "unknown");
+    counts.set(value, (counts.get(value) || 0) + 1);
+  }
+  return Array.from(counts.entries()).map(([value, count]) => ({ value, count }));
+});
+const statusCountAccounts = computed(() =>
+  accounts.value.filter((item) => {
+    const value = keyword.value.trim().toLowerCase();
+    const matchKeyword =
+      !value ||
+      [item.id, item.name, item.label].some((part) =>
+        String(part || "").toLowerCase().includes(value),
+      );
+    const matchPlan = planFilter.value === "all" || normalizePlanValue(item.planType || item.subscriptionPlan) === planFilter.value;
+    return matchKeyword && matchPlan;
+  }),
 );
+const statusFilterOptions = computed(() => [
+  { value: "all", label: `全部 (${statusCountAccounts.value.length})` },
+  {
+    value: "available",
+    label: `正常 (${statusCountAccounts.value.filter((item) => item.isAvailable !== false).length})`,
+  },
+  {
+    value: "limited",
+    label: `限流 (${statusCountAccounts.value.filter((item) => isLimitedAccount(item)).length})`,
+  },
+  {
+    value: "banned",
+    label: `封禁 (${statusCountAccounts.value.filter((item) => isBannedAccount(item)).length})`,
+  },
+]);
 const filteredAccounts = computed(() => {
   const value = keyword.value.trim().toLowerCase();
   return accounts.value.filter((item) => {
@@ -459,14 +507,12 @@ const filteredAccounts = computed(() => {
       [item.id, item.name, item.label, item.note, ...(item.tags || [])].some((part) =>
         String(part || "").toLowerCase().includes(value),
       );
-    const matchPlan = planFilter.value === "all" || item.planType === planFilter.value;
-    const statusText = `${item.status} ${item.statusReason} ${item.availabilityText}`.toLowerCase();
+    const matchPlan = planFilter.value === "all" || normalizePlanValue(item.planType || item.subscriptionPlan) === planFilter.value;
     const matchStatus =
       statusFilter.value === "all" ||
       (statusFilter.value === "available" && item.isAvailable !== false) ||
-      (statusFilter.value === "unavailable" && item.isAvailable === false) ||
-      (statusFilter.value === "limited" && (item.isLowQuota || statusText.includes("limit"))) ||
-      (statusFilter.value === "banned" && statusText.includes("ban"));
+      (statusFilter.value === "limited" && isLimitedAccount(item)) ||
+      (statusFilter.value === "banned" && isBannedAccount(item));
     return matchKeyword && matchPlan && matchStatus;
   });
 });
@@ -534,28 +580,81 @@ function readUsedPercent(row: AccountSummary): number {
   return typeof value === "number" && Number.isFinite(value) ? Math.round(value) : 0;
 }
 
+function readPercent(value: unknown): number | null {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.max(0, Math.min(100, Math.round(numeric))) : null;
+}
+
 function secondaryUsagePercent(row: AccountSummary): number {
-  const value = row.usage?.secondaryUsedPercent;
-  return typeof value === "number" && Number.isFinite(value) ? Math.round(value) : 0;
+  const remainPercent = readPercent(row.usage?.secondaryRemainPercent);
+  if (remainPercent != null) return remainPercent;
+  const usedPercent = readPercent(row.usage?.secondaryUsedPercent);
+  return usedPercent == null ? 0 : Math.max(0, 100 - usedPercent);
 }
 
 function primaryUsagePercent(row: AccountSummary): number {
-  return readUsedPercent(row);
+  const remainPercent = readPercent(row.usage?.remainPercent);
+  if (remainPercent != null) return remainPercent;
+  const usedPercent = readUsedPercent(row);
+  return Math.max(0, 100 - usedPercent);
 }
 
 function displayPlan(row: AccountSummary): string {
-  return String(row.planType || row.subscriptionPlan || "TEAM").toUpperCase();
+  return formatPlanLabel(row.planType || row.subscriptionPlan || "unknown");
+}
+
+function normalizePlanValue(value: unknown): string {
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized || "unknown";
+}
+
+function formatPlanLabel(value: unknown): string {
+  const normalized = normalizePlanValue(value);
+  switch (normalized) {
+    case "free":
+      return "FREE";
+    case "go":
+      return "GO";
+    case "plus":
+      return "PLUS";
+    case "plus/team":
+      return "PLUS/TEAM";
+    case "pro":
+      return "PRO";
+    case "team":
+      return "TEAM";
+    case "business":
+      return "BUSINESS";
+    case "enterprise":
+      return "ENTERPRISE";
+    case "edu":
+      return "EDU";
+    case "unknown":
+      return "未知";
+    default:
+      return normalized.toUpperCase();
+  }
+}
+
+function isLimitedAccount(row: AccountSummary): boolean {
+  const statusText = `${row.status} ${row.statusReason} ${row.availabilityText}`.toLowerCase();
+  return Boolean(row.isLowQuota || statusText.includes("limit") || statusText.includes("limited"));
+}
+
+function isBannedAccount(row: AccountSummary): boolean {
+  const statusText = `${row.status} ${row.statusReason} ${row.availabilityText}`.toLowerCase();
+  return statusText.includes("ban") || statusText.includes("banned");
 }
 
 function shortAccountId(value: string): string {
   const text = String(value || "").trim();
   if (!text) return "-";
-  return text.length > 24 ? `${text.slice(0, 24)}...` : text;
+  return text.length > 16 ? `${text.slice(0, 16)}...` : text;
 }
 
 function formatDateMinute(value?: number | string | null): string {
   const text = formatTime(value);
-  return text === "-" ? "-" : text.slice(0, 16);
+  return text === "-" ? "未知" : text.slice(0, 16);
 }
 
 function formatMetricNumber(value: number): string {
@@ -569,7 +668,12 @@ function formatMetricNumber(value: number): string {
 function formatQuotaCost(value: unknown): string {
   const numeric = Number(value);
   if (!Number.isFinite(numeric) || numeric <= 0) return "($0.00)";
-  return `(${formatUsd(numeric)})`;
+  return `(${new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: numeric > 0 && numeric < 1 ? 4 : 2,
+  }).format(numeric)})`;
 }
 
 function windowLabel(minutes: unknown, fallback: string): string {
@@ -592,7 +696,7 @@ function resetAfterLabel(resetsAt?: number | string | null, fallbackAt?: number 
   const reset = Number(resetsAt);
   const fallback = Number(fallbackAt);
   if (!Number.isFinite(reset) || reset <= 0) {
-    return Number.isFinite(fallback) && fallback > 0 ? "已刷新" : "-";
+    return Number.isFinite(fallback) && fallback > 0 ? "已刷新" : "未知后刷新";
   }
   const resetMs = reset > 10_000_000_000 ? reset : reset * 1000;
   const diffMinutes = Math.max(0, Math.round((resetMs - Date.now()) / 60000));
@@ -608,6 +712,10 @@ function formatAccountStatus(row: AccountSummary): string {
   if (row.availabilityText) return row.availabilityText;
   if (row.statusReason) return row.statusReason;
   if (row.status) return row.status;
+  return row.isAvailable === false ? "异常" : "正常";
+}
+
+function formatHealthStatus(row: AccountSummary): string {
   return row.isAvailable === false ? "异常" : "正常";
 }
 
@@ -726,8 +834,8 @@ async function toggleAccountEnabled(row: AccountSummary, checked: string | numbe
   const enabled = Boolean(checked);
   rowLoadingId.value = row.id;
   try {
-    await updateAccountProfile(row.id, { status: enabled ? "active" : "disabled" });
-    ElMessage.success(enabled ? "账号已启用" : "账号已禁用");
+    await updateAccountProfile(row.id, { preferred: enabled });
+    ElMessage.success(enabled ? "账号已启用" : "账号已取消启用");
     await loadData();
   } catch (error) {
     ElMessage.error(getErrorMessage(error));
@@ -779,6 +887,15 @@ async function refreshTokens(accountId?: string) {
 
 function handleAccountCommand(command: string | number) {
   switch (command) {
+    case "refresh-usage":
+      void refreshUsage();
+      break;
+    case "refresh-rt":
+      void refreshTokens();
+      break;
+    case "refresh-list":
+      void loadData();
+      break;
     case "login":
       addAccountTab.value = "login";
       addAccountDialogOpen.value = true;
@@ -790,6 +907,8 @@ function handleAccountCommand(command: string | number) {
       void runFileImport();
       break;
     case "directory":
+    case "cpa-directory":
+    case "sub2api-directory":
       void runDirectoryImport();
       break;
     case "export":
@@ -797,6 +916,9 @@ function handleAccountCommand(command: string | number) {
       break;
     case "warmup":
       void runWarmup(selectedIds.value);
+      break;
+    case "delete-selected":
+      void confirmDeleteSelected();
       break;
     case "cleanup":
       cleanupDialogOpen.value = true;

@@ -31,13 +31,24 @@ function toRpcPayload(params: ApiKeyPayload) {
     modelSlug: params.modelSlug || null,
     reasoningEffort: params.reasoningEffort || null,
     serviceTier: params.serviceTier || null,
-    protocolType: params.protocolType || null,
+    protocolType: normalizeProtocolType(params.protocolType),
     upstreamBaseUrl: params.upstreamBaseUrl || null,
     staticHeadersJson: params.staticHeadersJson || null,
     rotationStrategy: params.rotationStrategy || null,
     aggregateApiId: params.aggregateApiId || null,
     accountPlanFilter: params.accountPlanFilter || null,
   };
+}
+
+function normalizeProtocolType(value?: string | null) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized === "codex" || normalized === "claude_code" || normalized === "openai") {
+    return "openai_compat";
+  }
+  if (normalized === "anthropic") return "anthropic_native";
+  if (normalized === "gemini") return "gemini_native";
+  return normalized;
 }
 
 export async function createApiKey(params: ApiKeyPayload) {
