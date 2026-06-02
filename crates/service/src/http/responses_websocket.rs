@@ -30,6 +30,9 @@ use crate::http::proxy_response::{text_error_response, text_response};
 use crate::storage_helpers::{hash_platform_key, open_storage};
 
 const RESPONSES_WS_ERROR_CODE: &str = "responses_websocket_error";
+const RESPONSES_COMPACT_ENDPOINT: &str = "/v1/responses/compact";
+const CODEX_COMPACT_SUBAGENT: &str = "compact";
+const TURN_METADATA_COMPACTION_REQUEST_KIND: &str = "compaction";
 
 fn websocket_text_sha256_16(text: &str) -> String {
     use std::fmt::Write as _;
@@ -64,6 +67,8 @@ struct WsRequestContext {
 struct PreparedClientFrame {
     text: String,
     upstream_message: UpstreamMessage,
+    request_path: &'static str,
+    request_type: &'static str,
     model: Option<String>,
     reasoning_effort: Option<String>,
     service_tier: Option<String>,
@@ -91,6 +96,8 @@ struct WebsocketTarget {
 
 struct PendingWsRequestLog {
     trace_id: String,
+    request_path: &'static str,
+    request_type: &'static str,
     model: Option<String>,
     reasoning_effort: Option<String>,
     service_tier: Option<String>,
@@ -628,6 +635,8 @@ fn prepare_initial_client_frame(
         Message::Binary(bytes) if context.transparent_mode => Ok(PreparedClientFrame {
             text: String::new(),
             upstream_message: UpstreamMessage::Binary(bytes),
+            request_path: RESPONSES_ENDPOINT,
+            request_type: "ws",
             model: None,
             reasoning_effort: None,
             service_tier: None,
@@ -654,6 +663,8 @@ fn rewrite_client_frame(
 ) -> Result<PreparedClientFrame, WsSessionError> {
     if context.transparent_mode {
         let parsed_payload = serde_json::from_str::<Value>(text).ok();
+        let log_route =
+            ws_log_route_for_payload(parsed_payload.as_ref(), &context.incoming_headers);
         let object = parsed_payload.as_ref().and_then(Value::as_object);
         let response_object = object
             .and_then(|object| object.get("response"))
@@ -673,6 +684,8 @@ fn rewrite_client_frame(
         return Ok(PreparedClientFrame {
             text: text.to_string(),
             upstream_message: UpstreamMessage::Text(text.to_string().into()),
+            request_path: log_route.request_path,
+            request_type: log_route.request_type,
             model: field("model").and_then(Value::as_str).map(str::to_string),
             reasoning_effort,
             service_tier: service_tier_diagnostic.normalized_value,
@@ -688,6 +701,7 @@ fn rewrite_client_frame(
             format!("invalid websocket json payload: {err}"),
         )
     })?;
+    let log_route = ws_log_route_for_payload(Some(&payload), &context.incoming_headers);
     let Some(object) = payload.as_object_mut() else {
         return Err(WsSessionError::bad_request_bilingual(
             "WebSocket 载荷必须是 JSON 对象",
@@ -810,6 +824,8 @@ fn rewrite_client_frame(
     Ok(PreparedClientFrame {
         upstream_message: UpstreamMessage::Text(text.clone().into()),
         text,
+        request_path: log_route.request_path,
+        request_type: log_route.request_type,
         model: Some(model),
         reasoning_effort,
         service_tier: explicit_service_tier_for_log,
@@ -837,8 +853,85 @@ fn merge_metadata_value(mapped: &mut HashMap<String, String>, client_metadata: O
 
 fn insert_header_metadata(mapped: &mut HashMap<String, String>, key: &str, value: Option<&str>) {
     if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
-        mapped.insert(key.to_string(), value.to_string());
+        mapped
+            .entry(key.to_string())
+            .or_insert_with(|| value.to_string());
     }
+}
+
+#[derive(Clone, Copy)]
+struct WsLogRoute {
+    request_path: &'static str,
+    request_type: &'static str,
+}
+
+fn ws_log_route_for_payload(
+    payload: Option<&Value>,
+    incoming_headers: &crate::gateway::IncomingHeaderSnapshot,
+) -> WsLogRoute {
+    let frame_turn_metadata =
+        ws_payload_client_metadata_field(payload, X_CODEX_TURN_METADATA_HEADER);
+    let is_compact = if let Some(turn_metadata) = frame_turn_metadata {
+        turn_metadata_is_compaction(turn_metadata)
+    } else {
+        ws_payload_client_metadata_field(payload, X_OPENAI_SUBAGENT_HEADER)
+            .map(is_compact_subagent)
+            .unwrap_or(false)
+            || incoming_headers
+                .turn_metadata()
+                .map(turn_metadata_is_compaction)
+                .unwrap_or(false)
+            || incoming_headers
+                .subagent()
+                .map(is_compact_subagent)
+                .unwrap_or(false)
+    };
+
+    if is_compact {
+        WsLogRoute {
+            request_path: RESPONSES_COMPACT_ENDPOINT,
+            request_type: "compact",
+        }
+    } else {
+        WsLogRoute {
+            request_path: RESPONSES_ENDPOINT,
+            request_type: "ws",
+        }
+    }
+}
+
+fn ws_payload_client_metadata_field<'a>(
+    payload: Option<&'a Value>,
+    key: &str,
+) -> Option<&'a str> {
+    let value = payload?;
+    value
+        .get("client_metadata")
+        .and_then(|metadata| metadata.get(key))
+        .and_then(Value::as_str)
+        .or_else(|| {
+            value
+                .get("response")
+                .and_then(|response| response.get("client_metadata"))
+                .and_then(|metadata| metadata.get(key))
+                .and_then(Value::as_str)
+        })
+}
+
+fn turn_metadata_is_compaction(raw: &str) -> bool {
+    serde_json::from_str::<Value>(raw)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("request_kind")
+                .and_then(Value::as_str)
+                .map(|kind| kind.eq_ignore_ascii_case(TURN_METADATA_COMPACTION_REQUEST_KIND))
+        })
+        .unwrap_or(false)
+}
+
+fn is_compact_subagent(value: &str) -> bool {
+    value.trim().eq_ignore_ascii_case(CODEX_COMPACT_SUBAGENT)
 }
 
 fn ws_text_field<'a>(value: &'a Value, name: &str) -> Option<&'a str> {
@@ -1979,24 +2072,24 @@ fn begin_ws_request_log(
     let trace_id = crate::gateway::next_trace_id();
     let effective_protocol_type = crate::apikey_profile::resolve_gateway_protocol_type(
         context.api_key.protocol_type.as_str(),
-        RESPONSES_ENDPOINT,
+        prepared.request_path,
     );
     crate::gateway::log_request_start(
         trace_id.as_str(),
         context.api_key.id.as_str(),
         "GET",
-        RESPONSES_ENDPOINT,
+        prepared.request_path,
         prepared.model.as_deref(),
         prepared.reasoning_effort.as_deref(),
         prepared.service_tier.as_deref(),
         true,
-        "ws",
+        prepared.request_type,
         effective_protocol_type,
     );
     crate::gateway::log_client_service_tier(
         trace_id.as_str(),
-        "ws",
-        RESPONSES_ENDPOINT,
+        prepared.request_type,
+        prepared.request_path,
         prepared.has_service_tier_field,
         prepared.raw_service_tier.as_deref(),
         prepared.service_tier.as_deref(),
@@ -2025,6 +2118,8 @@ fn begin_ws_request_log(
     );
     PendingWsRequestLog {
         trace_id,
+        request_path: prepared.request_path,
+        request_type: prepared.request_type,
         model: prepared.model.clone(),
         reasoning_effort: prepared.reasoning_effort.clone(),
         service_tier: prepared.service_tier.clone(),
@@ -2071,9 +2166,9 @@ fn finalize_ws_request_log(
         &storage,
         crate::gateway::RequestLogTraceContext {
             trace_id: Some(pending.trace_id.as_str()),
-            original_path: Some(RESPONSES_ENDPOINT),
-            adapted_path: Some(RESPONSES_ENDPOINT),
-            request_type: Some("ws"),
+            original_path: Some(pending.request_path),
+            adapted_path: Some(pending.request_path),
+            request_type: Some(pending.request_type),
             service_tier: pending.service_tier.as_deref(),
             effective_service_tier: pending.effective_service_tier.as_deref(),
             transparent_mode: Some(context.transparent_mode),
@@ -2081,7 +2176,7 @@ fn finalize_ws_request_log(
         },
         Some(context.api_key.id.as_str()),
         account_id,
-        RESPONSES_ENDPOINT,
+        pending.request_path,
         "GET",
         pending.model.as_deref(),
         pending.reasoning_effort.as_deref(),
@@ -2483,7 +2578,7 @@ mod tests {
         build_socks5_connect_request, infer_ws_terminal_status, inspect_ws_terminal_event,
         is_previous_response_not_found_terminal, merge_client_metadata, parse_websocket_target,
         prepare_initial_client_frame, proxy_basic_auth_header, rewrite_client_frame,
-        WsRequestContext,
+        RESPONSES_COMPACT_ENDPOINT, WsRequestContext,
     };
     use axum::extract::ws::Message;
     use axum::http::{HeaderMap, HeaderValue};
@@ -2690,6 +2785,25 @@ mod tests {
     }
 
     #[test]
+    fn websocket_client_metadata_preserves_frame_turn_metadata() {
+        let incoming_headers = sample_incoming_headers_with_metadata();
+        let frame_turn_metadata = r#"{"request_kind":"compaction"}"#;
+        let metadata = merge_client_metadata(
+            None,
+            Some(json!({
+                "x-codex-turn-metadata": frame_turn_metadata
+            })),
+            &incoming_headers,
+        )
+        .expect("merged metadata");
+
+        assert_eq!(
+            metadata["x-codex-turn-metadata"],
+            json!(frame_turn_metadata)
+        );
+    }
+
+    #[test]
     fn websocket_frame_merges_header_metadata_into_client_metadata() {
         let _guard = crate::test_env_guard();
         let context = WsRequestContext {
@@ -2746,6 +2860,33 @@ mod tests {
             .get("x-codex-turn-metadata")
             .is_none());
         assert!(value.get("prompt_cache_key").is_none());
+    }
+
+    #[test]
+    fn websocket_transparent_compaction_frame_uses_compact_log_route() {
+        let context = WsRequestContext {
+            api_key: sample_api_key(),
+            incoming_headers: sample_incoming_headers_with_metadata(),
+            prompt_cache_key: None,
+            effective_upstream_base: "https://chatgpt.com/backend-api/codex".to_string(),
+            prefer_raw_errors: false,
+            transparent_mode: true,
+        };
+        let text = json!({
+            "type": "response.create",
+            "model": "gpt-5.4",
+            "input": "compact me",
+            "client_metadata": {
+                "x-codex-turn-metadata": "{\"request_kind\":\"compaction\",\"compaction\":{\"reason\":\"token_limit\"}}"
+            }
+        })
+        .to_string();
+        let prepared = rewrite_client_frame(text.as_str(), &context)
+            .unwrap_or_else(|_| panic!("rewrite websocket frame failed"));
+
+        assert_eq!(prepared.text, text);
+        assert_eq!(prepared.request_path, RESPONSES_COMPACT_ENDPOINT);
+        assert_eq!(prepared.request_type, "compact");
     }
 
     #[test]
