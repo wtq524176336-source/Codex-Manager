@@ -5,7 +5,7 @@
       <p>{{ subtitle }}</p>
     </div>
     <el-tag :type="serviceReady ? 'success' : 'info'" effect="light">
-      {{ serviceReady ? "服务已连接" : "等待服务" }}
+      {{ serviceText }}
     </el-tag>
   </header>
 </template>
@@ -14,8 +14,16 @@
 import { computed } from "vue";
 import { useRoute } from "vue-router";
 
+import { useAppStore } from "@/stores/app";
+
 const route = useRoute();
-const serviceReady = true;
+const appStore = useAppStore();
+const serviceReady = computed(() => appStore.serviceReady);
+const serviceText = computed(() => {
+  if (appStore.serviceStatus === "ready") return "服务已连接";
+  if (appStore.serviceStatus === "error") return "服务异常";
+  return "启动服务";
+});
 const title = computed(() => String(route.meta.title || "CodexManager"));
 const subtitle = computed(() => {
   switch (route.name) {

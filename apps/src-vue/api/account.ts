@@ -1,11 +1,8 @@
-import { invoke, invokeFirst, withAddr } from "@/api/transport";
+import { invoke, withAddr } from "@/api/transport";
 import { normalizeAccountList } from "@/api/normalize";
 
 export async function listAccounts() {
-  const result = await invokeFirst<unknown>(
-    ["service_account_list", "account_list"],
-    withAddr({ page: 1, pageSize: 500 }),
-  );
+  const result = await invoke<unknown>("service_account_list", withAddr({ page: 1, pageSize: 500 }));
   return normalizeAccountList(result);
 }
 

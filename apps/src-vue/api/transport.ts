@@ -4,8 +4,56 @@ import { http } from "@/api/http";
 
 type Params = Record<string, unknown>;
 
-function readServiceAddr(): string | null {
+const DEFAULT_SERVICE_ADDR = "localhost:48760";
+let runtimeServiceAddr: string | null = null;
+
+function toAppError(error: unknown): Error {
+  if (error instanceof Error) {
+    return error;
+  }
+  if (typeof error === "string" && error.trim()) {
+    return new Error(error);
+  }
   try {
+    return new Error(JSON.stringify(error));
+  } catch {
+    return new Error("请求失败");
+  }
+}
+
+function isCommandMissingError(error: Error): boolean {
+  const message = error.message.toLowerCase();
+  return (
+    (message.includes("command") && message.includes("not found")) ||
+    message.includes("unknown command") ||
+    message.includes("未找到命令")
+  );
+}
+
+export function isDesktopRuntime(): boolean {
+  return isTauri();
+}
+
+export function setServiceAddr(addr: string | null | undefined) {
+  const normalized = typeof addr === "string" ? addr.trim() : "";
+  runtimeServiceAddr = normalized || null;
+  if (runtimeServiceAddr) {
+    localStorage.setItem("codexmanager-service-addr", runtimeServiceAddr);
+  }
+}
+
+function readServiceAddr(): string | null {
+  if (runtimeServiceAddr) {
+    return runtimeServiceAddr;
+  }
+
+  try {
+    const storedAddr = localStorage.getItem("codexmanager-service-addr");
+    if (storedAddr?.trim()) {
+      runtimeServiceAddr = storedAddr.trim();
+      return runtimeServiceAddr;
+    }
+
     const rawSettings = localStorage.getItem("codexmanager-settings");
     if (!rawSettings) {
       return null;
@@ -21,7 +69,7 @@ function readServiceAddr(): string | null {
 
 export function withAddr(params: Params = {}): Params {
   return {
-    addr: readServiceAddr(),
+    addr: readServiceAddr() || DEFAULT_SERVICE_ADDR,
     ...params,
   };
 }
@@ -53,21 +101,30 @@ async function postJsonRpc<T>(method: string, params: Params = {}): Promise<T> {
 }
 
 export async function invoke<T>(method: string, params: Params = {}): Promise<T> {
-  if (isTauri()) {
-    const payload = await tauriInvoke(method, params);
-    return unwrapRpcPayload<T>(payload);
+  try {
+    if (isTauri()) {
+      const payload = await tauriInvoke(method, params);
+      return unwrapRpcPayload<T>(payload);
+    }
+    return postJsonRpc<T>(method, params);
+  } catch (error) {
+    throw toAppError(error);
   }
-  return postJsonRpc<T>(method, params);
 }
 
 export async function invokeFirst<T>(methods: string[], params: Params = {}): Promise<T> {
-  let lastError: unknown;
+  let firstMissingError: Error | null = null;
   for (const method of methods) {
     try {
       return await invoke<T>(method, params);
     } catch (error) {
-      lastError = error;
+      const appError = toAppError(error);
+      if (isCommandMissingError(appError)) {
+        firstMissingError ||= appError;
+        continue;
+      }
+      throw appError;
     }
   }
-  throw lastError instanceof Error ? lastError : new Error("未配置可用命令");
+  throw firstMissingError || new Error("未配置可用命令");
 }
