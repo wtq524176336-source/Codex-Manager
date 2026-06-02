@@ -1,8 +1,8 @@
 <template>
-  <aside class="sidebar">
+  <aside :class="['sidebar', { 'sidebar--collapsed': !sidebarOpen }]">
     <div class="brand">
       <div class="brand-mark">CM</div>
-      <div class="brand-text">
+      <div v-if="sidebarOpen" class="brand-text">
         <div class="brand-name">CodexManager</div>
         <div class="brand-subtitle">账号池 · 用量管理</div>
       </div>
@@ -19,22 +19,56 @@
         <el-icon class="menu-icon">
           <component :is="item.icon" />
         </el-icon>
-        <span>{{ item.label }}</span>
+        <span v-if="sidebarOpen">{{ item.label }}</span>
       </RouterLink>
     </nav>
+
+    <div class="sidebar-footer">
+      <el-button class="collapse-button" text @click="sidebarOpen = !sidebarOpen">
+        <el-icon>
+          <component :is="sidebarOpen ? ArrowLeft : ArrowRight" />
+        </el-icon>
+        <span v-if="sidebarOpen">收起侧边栏</span>
+      </el-button>
+    </div>
   </aside>
 </template>
 
 <script setup lang="ts">
+import { ArrowLeft, ArrowRight } from "@element-plus/icons-vue";
+import { ref } from "vue";
+
 import { sidebarMenus } from "@/layout/menu";
+
+const sidebarOpen = ref(true);
 </script>
 
 <style scoped lang="scss">
 .sidebar {
+  display: flex;
+  flex-direction: column;
   width: 224px;
   flex: 0 0 224px;
   border-right: 1px solid var(--border-subtle);
   background: var(--sidebar-bg);
+  transition:
+    width 0.22s ease,
+    flex-basis 0.22s ease;
+
+  &--collapsed {
+    width: 64px;
+    flex-basis: 64px;
+
+    .brand {
+      justify-content: center;
+      padding: 0 16px;
+    }
+
+    .menu-item {
+      justify-content: center;
+      padding: 0;
+    }
+  }
 }
 
 .brand {
@@ -74,6 +108,8 @@ import { sidebarMenus } from "@/layout/menu";
 
 .menu {
   display: grid;
+  flex: 1;
+  align-content: flex-start;
   gap: 6px;
   padding: 16px 8px;
 }
@@ -103,12 +139,31 @@ import { sidebarMenus } from "@/layout/menu";
   font-size: 16px;
 }
 
+.sidebar-footer {
+  padding: 8px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.collapse-button {
+  width: 100%;
+  justify-content: flex-start;
+  gap: 10px;
+  min-height: 40px;
+  padding: 0 14px;
+  color: var(--text-secondary);
+}
+
 @media (max-width: 860px) {
   .sidebar {
     width: 100%;
     flex-basis: auto;
     border-right: 0;
     border-bottom: 1px solid var(--border-subtle);
+
+    &--collapsed {
+      width: 100%;
+      flex-basis: auto;
+    }
   }
 
   .brand {
@@ -124,6 +179,10 @@ import { sidebarMenus } from "@/layout/menu";
 
   .menu-item {
     flex: 0 0 auto;
+  }
+
+  .sidebar-footer {
+    display: none;
   }
 }
 </style>
