@@ -4,7 +4,7 @@
       <div>
         <h2 class="page-hero__title">系统设置</h2>
         <p class="page-hero__desc">
-          管理应用行为、服务监听、网关策略、界面样式、后台任务和环境覆盖项。
+          管理应用行为、网关策略及后台任务
         </p>
       </div>
       <div class="table-actions">
@@ -37,7 +37,7 @@
     </div>
 
     <el-tabs v-model="activeTab" class="settings-tabs">
-      <el-tab-pane label="基础设置" name="general">
+      <el-tab-pane label="通用" name="general">
         <div class="page-card">
           <div class="page-card__body form-grid">
             <el-input v-model="form.serviceAddr" label="服务地址" placeholder="localhost:48760">
@@ -254,7 +254,7 @@
         </div>
       </el-tab-pane>
 
-      <el-tab-pane label="后台任务" name="tasks">
+      <el-tab-pane label="任务" name="tasks">
         <div class="page-card">
           <div class="page-card__body">
             <h3>后台任务配置</h3>
@@ -317,7 +317,7 @@
         </div>
       </el-tab-pane>
 
-      <el-tab-pane label="环境配置" name="env">
+      <el-tab-pane label="环境" name="env">
         <div class="page-card">
           <div class="page-card__body">
             <div class="filter-bar env-filter">

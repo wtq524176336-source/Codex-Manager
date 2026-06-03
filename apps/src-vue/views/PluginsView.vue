@@ -18,179 +18,180 @@
       </div>
     </section>
 
-    <div class="plugin-stats">
-      <div class="plugin-stat">
-        <span>市场插件</span>
-        <strong>{{ catalog.length }}</strong>
-        <small>内置精选 / 自定义源</small>
-      </div>
-      <div class="plugin-stat">
-        <span>已安装</span>
-        <strong>{{ installed.length }}</strong>
-        <small>当前本地插件</small>
-      </div>
-      <div class="plugin-stat">
-        <span>任务数量</span>
-        <strong>{{ tasks.length }}</strong>
-        <small>手动 / 定时任务</small>
-      </div>
-      <div class="plugin-stat">
-        <span>运行日志</span>
-        <strong>{{ logs.length }}</strong>
-        <small>最近执行记录</small>
-      </div>
-    </div>
-
-    <el-tabs v-model="activeTab" class="plugin-tabs">
-      <el-tab-pane label="插件市场" name="catalog">
-        <div class="plugin-toolbar">
-          <el-input v-model="keyword" clearable placeholder="搜索插件名称 / 描述 / 标签" />
-          <el-segmented v-model="catalogFilter" :options="catalogFilterOptions" />
+    <section class="plugin-market-card">
+      <div class="plugin-market-card__head">
+        <div>
+          <h3>市场层</h3>
+          <p>只保留内置精选和自定义源两种模式。内置模式完全隔离自定义 URL，自定义模式才显示并加载远程 JSON 市场。</p>
         </div>
-        <div v-loading="loading" class="plugin-grid">
-          <div v-for="item in filteredCatalog" :key="item.id" class="plugin-card">
-            <div class="plugin-card__head">
-              <div>
-                <h3>{{ item.name }}</h3>
-                <p>{{ item.description || "暂无描述" }}</p>
-              </div>
-              <el-tag>{{ formatRuntimeKind(item.runtimeKind) }}</el-tag>
-            </div>
-            <div class="plugin-card__meta">
-              <span>v{{ item.version }}</span>
-              <span>{{ formatMarketCategory(item.category) }}</span>
-              <span>{{ item.author || "未知作者" }}</span>
-            </div>
-            <div class="plugin-card__badges">
-              <el-tag v-for="tag in item.tags || []" :key="tag" size="small" type="info">
-                {{ tag }}
-              </el-tag>
-              <el-tag v-for="permission in item.permissions || []" :key="permission" size="small" effect="plain">
-                {{ formatPermissionLabel(permission) }}
-              </el-tag>
-            </div>
-            <div class="plugin-card__footer">
-              <span>{{ item.tasks?.length || 0 }} 个任务</span>
-              <div class="plugin-card__actions">
-                <el-button size="small" @click="openCatalogDetail(item)">详情</el-button>
-                <el-button
-                  size="small"
-                  :type="installedMap[item.id] ? 'default' : 'primary'"
-                  :loading="operatingId === item.id"
-                  @click="installedMap[item.id] ? updateInstalledPlugin(item.id) : installCatalogPlugin(item.id)"
-                >
-                  {{ installedMap[item.id] ? "更新" : "安装" }}
-                </el-button>
-              </div>
-            </div>
-          </div>
-          <div v-if="!filteredCatalog.length" class="empty-hint">暂无插件</div>
-        </div>
-      </el-tab-pane>
+      </div>
+      <div class="market-mode-grid">
+        <button
+          type="button"
+          :class="['market-mode-card', marketMode === 'builtin' ? 'market-mode-card--active' : '']"
+          @click="marketMode = 'builtin'"
+        >
+          <span>内置精选</span>
+          <small>默认使用官方精选插件，适合开箱即用。</small>
+          <el-tag v-if="marketMode === 'builtin'" size="small">已选</el-tag>
+        </button>
+        <button
+          type="button"
+          :class="['market-mode-card', marketMode === 'custom' ? 'market-mode-card--active' : '']"
+          @click="marketMode = 'custom'"
+        >
+          <span>自定义源</span>
+          <small>加载你自己的 JSON 市场文件，适合团队内部分发。</small>
+          <el-tag v-if="marketMode === 'custom'" size="small">已选</el-tag>
+        </button>
+      </div>
+      <div v-if="marketMode === 'custom'" class="market-source-row">
+        <el-input v-model="sourceUrl" placeholder="https://example.com/plugin-market.json" />
+        <el-button type="primary" :loading="savingMarket" @click="saveMarketSettings">保存</el-button>
+        <el-button :loading="loading" @click="loadData(true)">
+          <el-icon><Refresh /></el-icon>
+          刷新
+        </el-button>
+      </div>
+      <div class="market-source-hint">
+        {{ marketMode === "custom" ? customMarketHint : "当前使用内置精选市场，默认只显示官方内置脚本插件。" }}
+      </div>
+    </section>
 
-      <el-tab-pane label="已安装" name="installed">
-        <div v-loading="loading" class="plugin-grid">
+    <section class="plugin-list-card">
+      <div class="plugin-list-card__head">
+        <div>
+          <h3>插件列表</h3>
+          <p>一个面板统一查看插件。未安装看当前市场，已安装看本地插件，更新只显示当前市场里有新版本的已安装插件。</p>
+        </div>
+        <div class="plugin-filter-row">
+          <button
+            v-for="option in pluginViewFilterOptions"
+            :key="option.value"
+            type="button"
+            :class="['plugin-filter-button', catalogFilter === option.value ? 'plugin-filter-button--active' : '']"
+            @click="catalogFilter = option.value"
+          >
+            <span>{{ option.label }}</span>
+            <el-tag size="small" effect="light">{{ pluginFilterCount(option.value) }}</el-tag>
+          </button>
+        </div>
+      </div>
+
+      <div v-loading="loading" class="plugin-grid">
+        <template v-if="catalogFilter === 'installed'">
           <div v-for="item in installed" :key="item.pluginId" class="plugin-card">
             <div class="plugin-card__head">
               <div>
                 <h3>{{ item.name }}</h3>
                 <p>{{ item.description || "暂无描述" }}</p>
               </div>
-              <el-tag :type="item.status === 'enabled' ? 'success' : 'info'">
-                {{ formatPluginStatus(item.status) }}
-              </el-tag>
+              <div class="plugin-card__status">
+                <el-tag effect="light">v{{ item.version }}</el-tag>
+                <el-tag v-if="updatableVersionByPluginId[item.pluginId]" type="primary" effect="light">
+                  可更新 {{ updatableVersionByPluginId[item.pluginId] }}
+                </el-tag>
+                <el-tag effect="plain">已安装</el-tag>
+                <el-tag :type="item.status === 'enabled' ? 'success' : item.status === 'broken' ? 'danger' : 'warning'">
+                  {{ formatPluginStatus(item.status) }}
+                </el-tag>
+              </div>
             </div>
             <div class="plugin-card__meta">
-              <span>v{{ item.version }}</span>
-              <span>{{ item.enabledTaskCount || 0 }}/{{ item.taskCount || 0 }} 任务启用</span>
-              <span>最后运行 {{ formatTime(item.lastRunAt) }}</span>
+              <span v-if="item.author">作者：{{ item.author }}</span>
+              <span>权限 {{ item.permissions?.length || 0 }}</span>
+              <span>任务 {{ item.enabledTaskCount || 0 }}/{{ item.taskCount || 0 }}</span>
+              <el-tag v-if="item.category" size="small" effect="plain">{{ formatMarketCategory(item.category) }}</el-tag>
+              <el-tag size="small" effect="plain">{{ formatRuntimeKind(item.runtimeKind) }}</el-tag>
             </div>
-            <p v-if="item.lastError" class="plugin-error">{{ item.lastError }}</p>
             <div class="plugin-card__footer">
-              <span>{{ formatSource(item.sourceUrl) }}</span>
+              <span>{{ formatInstalledSource(item.sourceUrl) }}</span>
               <div class="plugin-card__actions">
                 <el-button size="small" @click="openInstalledDetail(item)">详情</el-button>
-                <el-button size="small" :loading="operatingId === item.pluginId" @click="togglePlugin(item)">
-                  {{ item.status === "enabled" ? "禁用" : "启用" }}
+                <el-button
+                  v-if="updatableVersionByPluginId[item.pluginId]"
+                  size="small"
+                  type="primary"
+                  :loading="operatingId === item.pluginId"
+                  @click="updateInstalledPlugin(item.pluginId)"
+                >
+                  更新
                 </el-button>
-                <el-button size="small" type="danger" :loading="operatingId === item.pluginId" @click="removePlugin(item)">
-                  卸载
+                <el-button v-else size="small" :loading="operatingId === item.pluginId" @click="togglePlugin(item)">
+                  {{ item.status === "enabled" ? "停用" : "启用" }}
                 </el-button>
               </div>
             </div>
           </div>
-          <div v-if="!installed.length" class="empty-hint">暂无已安装插件</div>
-        </div>
-      </el-tab-pane>
+          <div v-if="!installed.length" class="empty-hint">还没有安装任何插件</div>
+        </template>
 
-      <el-tab-pane label="任务" name="tasks">
-        <div class="plugin-table-card">
-          <el-table v-loading="loading" :data="tasks" class="plugin-table">
-            <el-table-column label="任务" min-width="260">
-              <template #default="{ row }">
-                <div class="plugin-task-name">
-                  <strong>{{ row.name }}</strong>
-                  <span>{{ row.pluginName || row.pluginId }}</span>
-                </div>
-              </template>
-            </el-table-column>
-            <el-table-column label="调度" width="160">
-              <template #default="{ row }">{{ formatSchedule(row) }}</template>
-            </el-table-column>
-            <el-table-column label="状态" width="140">
-              <template #default="{ row }">
-                <el-tag :type="row.enabled ? 'success' : 'info'">{{ row.enabled ? "启用" : "停用" }}</el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="下次运行" width="180">
-              <template #default="{ row }">{{ formatTime(row.nextRunAt) }}</template>
-            </el-table-column>
-            <el-table-column label="上次结果" min-width="180">
-              <template #default="{ row }">
-                <span>{{ row.lastStatus || "-" }}</span>
-                <p v-if="row.lastError" class="plugin-error">{{ row.lastError }}</p>
-              </template>
-            </el-table-column>
-            <el-table-column label="操作" width="120" align="right">
-              <template #default="{ row }">
-                <el-button link type="primary" :loading="operatingId === row.id" @click="runTask(row.id)">
-                  运行
+        <template v-else-if="catalogFilter === 'update'">
+          <div v-for="item in updatableInstalledItems" :key="item.pluginId" class="plugin-card">
+            <div class="plugin-card__head">
+              <div>
+                <h3>{{ item.name }}</h3>
+                <p>{{ item.description || "暂无描述" }}</p>
+              </div>
+              <div class="plugin-card__status">
+                <el-tag effect="light">v{{ item.version }}</el-tag>
+                <el-tag type="primary" effect="light">可更新 {{ updatableVersionByPluginId[item.pluginId] }}</el-tag>
+                <el-tag :type="item.status === 'enabled' ? 'success' : item.status === 'broken' ? 'danger' : 'warning'">
+                  {{ formatPluginStatus(item.status) }}
+                </el-tag>
+              </div>
+            </div>
+            <div class="plugin-card__meta">
+              <span v-if="item.author">作者：{{ item.author }}</span>
+              <span>权限 {{ item.permissions?.length || 0 }}</span>
+              <span>任务 {{ item.enabledTaskCount || 0 }}/{{ item.taskCount || 0 }}</span>
+              <el-tag size="small" effect="plain">{{ formatRuntimeKind(item.runtimeKind) }}</el-tag>
+            </div>
+            <div class="plugin-card__footer">
+              <span>{{ formatInstalledSource(item.sourceUrl) }}</span>
+              <div class="plugin-card__actions">
+                <el-button size="small" @click="openInstalledDetail(item)">详情</el-button>
+                <el-button size="small" type="primary" :loading="operatingId === item.pluginId" @click="updateInstalledPlugin(item.pluginId)">
+                  更新
                 </el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-        </div>
-      </el-tab-pane>
+              </div>
+            </div>
+          </div>
+          <div v-if="!updatableInstalledItems.length" class="empty-hint">当前市场没有可更新插件</div>
+        </template>
 
-      <el-tab-pane label="运行日志" name="logs">
-        <div class="plugin-table-card">
-          <el-table v-loading="loading" :data="logs" class="plugin-table">
-            <el-table-column label="插件 / 任务" min-width="240">
-              <template #default="{ row }">
-                <div class="plugin-task-name">
-                  <strong>{{ row.pluginName || row.pluginId }}</strong>
-                  <span>{{ row.taskName || row.taskId || row.runType }}</span>
-                </div>
-              </template>
-            </el-table-column>
-            <el-table-column label="状态" width="120">
-              <template #default="{ row }">
-                <el-tag :type="row.status === 'success' ? 'success' : 'danger'">{{ row.status }}</el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="开始时间" width="180">
-              <template #default="{ row }">{{ formatTime(row.startedAt) }}</template>
-            </el-table-column>
-            <el-table-column label="耗时" width="120">
-              <template #default="{ row }">{{ row.durationMs != null ? `${row.durationMs}ms` : "-" }}</template>
-            </el-table-column>
-            <el-table-column label="错误" min-width="240" show-overflow-tooltip>
-              <template #default="{ row }">{{ row.error || "-" }}</template>
-            </el-table-column>
-          </el-table>
-        </div>
-      </el-tab-pane>
-    </el-tabs>
+        <template v-else>
+          <div v-for="item in notInstalledCatalogItems" :key="item.id" class="plugin-card">
+            <div class="plugin-card__head">
+              <div>
+                <h3>{{ item.name }}</h3>
+                <p>{{ item.description || "暂无描述" }}</p>
+              </div>
+              <el-tag effect="light">v{{ item.version }}</el-tag>
+            </div>
+            <div class="plugin-card__meta">
+              <span v-if="item.author">作者：{{ item.author }}</span>
+              <span>权限 {{ item.permissions?.length || 0 }}</span>
+              <span>任务 {{ item.tasks?.length || 0 }}</span>
+              <el-tag v-if="item.category" size="small" effect="plain">{{ formatMarketCategory(item.category) }}</el-tag>
+              <el-tag size="small" effect="plain">{{ formatRuntimeKind(item.runtimeKind) }}</el-tag>
+            </div>
+            <div class="plugin-card__footer">
+              <span>{{ formatCatalogSource(item.sourceUrl) }}</span>
+              <div class="plugin-card__actions">
+                <el-button size="small" @click="openCatalogDetail(item)">详情</el-button>
+                <el-button size="small" type="primary" :loading="operatingId === item.id" @click="installCatalogPlugin(item.id)">
+                  安装
+                </el-button>
+              </div>
+            </div>
+          </div>
+          <div v-if="!notInstalledCatalogItems.length" class="empty-hint">
+            {{ marketMode === "custom" && !sourceUrl ? "当前还没有配置自定义源，所以这里不会显示未安装插件。" : "暂无未安装插件" }}
+          </div>
+        </template>
+      </div>
+    </section>
 
     <el-dialog
       v-model="detailOpen"
@@ -329,21 +330,23 @@ import {
   updatePlugin,
 } from "@/api/plugin";
 import { getErrorMessage } from "@/api/http";
+import { readSettings, saveSettings } from "@/api/settings";
 import type { InstalledPluginSummary, PluginCatalogEntry, PluginRunLogSummary, PluginTaskSummary } from "@/types/common";
 
-const activeTab = ref("catalog");
-const keyword = ref("");
 const catalogFilter = ref("installed");
 const loading = ref(false);
+const savingMarket = ref(false);
 const operatingId = ref("");
 const detailOpen = ref(false);
 const selectedPluginId = ref("");
 const selectedPluginKind = ref<"catalog" | "installed">("catalog");
+const marketMode = ref("builtin");
+const sourceUrl = ref("");
 const catalog = ref<PluginCatalogEntry[]>([]);
 const installed = ref<InstalledPluginSummary[]>([]);
 const tasks = ref<PluginTaskSummary[]>([]);
 const logs = ref<PluginRunLogSummary[]>([]);
-const catalogFilterOptions = [
+const pluginViewFilterOptions = [
   { label: "已安装", value: "installed" },
   { label: "未安装", value: "not-installed" },
   { label: "更新", value: "update" },
@@ -360,6 +363,22 @@ const catalogMap = computed<Record<string, PluginCatalogEntry>>(() =>
     result[item.id] = item;
     return result;
   }, {}),
+);
+const installedPluginIds = computed(() => new Set(installed.value.map((item) => item.pluginId)));
+const notInstalledCatalogItems = computed(() =>
+  catalog.value.filter((item) => !installedPluginIds.value.has(item.id)),
+);
+const updatableVersionByPluginId = computed<Record<string, string>>(() =>
+  installed.value.reduce<Record<string, string>>((result, item) => {
+    const catalogItem = catalogMap.value[item.pluginId];
+    if (catalogItem && compareVersion(catalogItem.version, item.version) > 0) {
+      result[item.pluginId] = catalogItem.version;
+    }
+    return result;
+  }, {}),
+);
+const updatableInstalledItems = computed(() =>
+  installed.value.filter((item) => Boolean(updatableVersionByPluginId.value[item.pluginId])),
 );
 const selectedCatalogItem = computed(() => catalogMap.value[selectedPluginId.value] || null);
 const selectedInstalledItem = computed(() => installedMap.value[selectedPluginId.value] || null);
@@ -393,24 +412,47 @@ const hasSelectedUpdate = computed(() => {
   if (!selectedCatalogItem.value || !selectedInstalledItem.value) return false;
   return compareVersion(selectedCatalogItem.value.version, selectedInstalledItem.value.version) > 0;
 });
-const filteredCatalog = computed(() => {
-  const value = keyword.value.trim().toLowerCase();
-  return catalog.value.filter((item) => {
-    const installedItem = installedMap.value[item.id];
-    if (catalogFilter.value === "installed" && !installedItem) return false;
-    if (catalogFilter.value === "not-installed" && installedItem) return false;
-    if (
-      catalogFilter.value === "update" &&
-      (!installedItem || compareVersion(item.version, installedItem.version) <= 0)
-    ) {
-      return false;
-    }
-    if (!value) return true;
-    return [item.id, item.name, item.description, item.author, ...(item.tags || [])].some((part) =>
-      String(part || "").toLowerCase().includes(value),
-    );
-  });
-});
+const customMarketHint = computed(() =>
+  sourceUrl.value
+    ? `当前使用自定义源：${sourceUrl.value}`
+    : "当前使用自定义源，适合接入你自己的 JSON 市场文件。",
+);
+
+function normalizeMarketMode(value: unknown) {
+  return String(value || "").trim() === "custom" ? "custom" : "builtin";
+}
+
+function pluginFilterCount(value: string) {
+  if (value === "installed") return installed.value.length;
+  if (value === "update") return updatableInstalledItems.value.length;
+  return notInstalledCatalogItems.value.length;
+}
+
+async function loadSettings() {
+  try {
+    const settings = await readSettings();
+    marketMode.value = normalizeMarketMode(settings.pluginMarketMode ?? settings.plugin_market_mode);
+    sourceUrl.value = String(settings.pluginMarketSourceUrl ?? settings.plugin_market_source_url ?? "");
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error));
+  }
+}
+
+async function saveMarketSettings() {
+  savingMarket.value = true;
+  try {
+    await saveSettings({
+      pluginMarketMode: normalizeMarketMode(marketMode.value),
+      pluginMarketSourceUrl: sourceUrl.value,
+    });
+    ElMessage.success("插件市场设置已保存");
+    await loadData(true);
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error));
+  } finally {
+    savingMarket.value = false;
+  }
+}
 
 async function loadData(refreshCatalog = false) {
   loading.value = true;
@@ -432,10 +474,11 @@ async function loadData(refreshCatalog = false) {
   }
 }
 
-async function operate(pluginId: string, action: () => Promise<unknown>, message: string) {
+async function operate(pluginId: string, action: () => Promise<unknown>, message: string, afterSuccess?: () => void) {
   operatingId.value = pluginId;
   try {
     await action();
+    afterSuccess?.();
     ElMessage.success(message);
     await loadData(false);
   } catch (error) {
@@ -446,7 +489,9 @@ async function operate(pluginId: string, action: () => Promise<unknown>, message
 }
 
 function installCatalogPlugin(pluginId: string) {
-  void operate(pluginId, () => installPlugin(pluginId), "插件已安装");
+  void operate(pluginId, () => installPlugin(pluginId), "插件已安装", () => {
+    catalogFilter.value = "installed";
+  });
 }
 
 function updateInstalledPlugin(pluginId: string) {
@@ -521,6 +566,22 @@ function formatSource(value?: string | null) {
   return value;
 }
 
+function formatCatalogSource(value?: string | null) {
+  return value === "builtin://codexmanager"
+    ? "来源：内置精选市场"
+    : value
+    ? `来源：${value}`
+    : "内置市场";
+}
+
+function formatInstalledSource(value?: string | null) {
+  return value === "builtin://codexmanager"
+    ? "来源：内置精选市场"
+    : value
+    ? `来源：${value}`
+    : "内置安装";
+}
+
 function formatPluginStatus(status: string) {
   if (status === "enabled") return "启用中";
   if (status === "broken") return "异常";
@@ -560,6 +621,7 @@ function compareVersion(left: string, right: string) {
 }
 
 onMounted(() => {
+  void loadSettings();
   void loadData(false);
 });
 </script>
@@ -602,13 +664,123 @@ onMounted(() => {
     gap: 16px;
   }
 
-  .plugin-stat,
+  .plugin-market-card,
+  .plugin-list-card,
+  .market-mode-card,
+  .plugin-filter-button,
   .plugin-card,
   .plugin-table-card {
     border: 1px solid var(--border-subtle);
     border-radius: 12px;
     background: var(--card-bg);
     box-shadow: var(--shadow-card);
+  }
+
+  .plugin-market-card,
+  .plugin-list-card {
+    display: grid;
+    gap: 16px;
+    padding: 18px;
+
+    &__head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+
+      h3 {
+        margin: 0;
+        font-size: 17px;
+        font-weight: 700;
+      }
+
+      p {
+        max-width: 760px;
+        margin: 6px 0 0;
+        color: var(--text-secondary);
+        font-size: 12px;
+        line-height: 1.7;
+      }
+    }
+  }
+
+  .market-mode-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .market-mode-card {
+    position: relative;
+    display: grid;
+    gap: 6px;
+    min-height: 96px;
+    padding: 16px;
+    color: var(--text-primary);
+    text-align: left;
+    cursor: pointer;
+    transition: 0.2s ease;
+
+    span {
+      font-weight: 700;
+    }
+
+    small {
+      max-width: 520px;
+      color: var(--text-secondary);
+      font-size: 12px;
+      line-height: 1.7;
+    }
+
+    .el-tag {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+    }
+
+    &--active {
+      border-color: rgba(47, 108, 246, 0.35);
+      background: rgba(47, 108, 246, 0.08);
+    }
+  }
+
+  .market-source-row {
+    display: grid;
+    grid-template-columns: minmax(260px, 1fr) auto auto;
+    gap: 10px;
+    align-items: center;
+  }
+
+  .market-source-hint {
+    padding: 14px;
+    border: 1px dashed var(--border-subtle);
+    border-radius: 12px;
+    background: var(--table-section-bg);
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.7;
+  }
+
+  .plugin-filter-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .plugin-filter-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 36px;
+    padding: 0 12px;
+    color: var(--text-secondary);
+    cursor: pointer;
+
+    &--active {
+      border-color: rgba(47, 108, 246, 0.35);
+      background: rgba(47, 108, 246, 0.08);
+      color: var(--primary);
+    }
   }
 
   .plugin-stat {
@@ -656,6 +828,10 @@ onMounted(() => {
       gap: 12px;
       justify-content: space-between;
 
+      > div:first-child {
+        min-width: 0;
+      }
+
       h3 {
         margin: 0;
         font-size: 16px;
@@ -672,7 +848,8 @@ onMounted(() => {
     &__meta,
     &__footer,
     &__badges,
-    &__actions {
+    &__actions,
+    &__status {
       display: flex;
       flex-wrap: wrap;
       align-items: center;
@@ -692,6 +869,12 @@ onMounted(() => {
 
     &__actions {
       justify-content: flex-end;
+    }
+
+    &__status {
+      justify-content: flex-end;
+      flex-shrink: 0;
+      max-width: 240px;
     }
   }
 
@@ -817,6 +1000,11 @@ onMounted(() => {
 
     .plugin-stats {
       grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .market-mode-grid,
+    .market-source-row {
+      grid-template-columns: 1fr;
     }
   }
 }

@@ -279,7 +279,7 @@
         <el-pagination
           v-model:current-page="requestPage"
           v-model:page-size="requestPageSize"
-          :page-sizes="[10, 20, 50, 100]"
+          :page-sizes="[5, 10, 20, 50, 100]"
           :total="requestTotal"
           layout="sizes, prev, pager, next"
           small
@@ -482,7 +482,7 @@ const timePreset = ref<TimePreset>("all");
 const startTime = ref<number | null>(null);
 const endTime = ref<number | null>(null);
 const requestPage = ref(1);
-const requestPageSize = ref(20);
+const requestPageSize = ref(10);
 const requestTotal = ref(0);
 const errorPage = ref(1);
 const errorPageSize = ref(10);
