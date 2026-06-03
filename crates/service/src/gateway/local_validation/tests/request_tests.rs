@@ -479,6 +479,24 @@ fn hybrid_passthrough_fallback_body_uses_aggregate_override_shape() {
 }
 
 #[test]
+fn passthrough_key_without_explicit_upstream_does_not_preinject_image_generation() {
+    let _guard = crate::test_env_guard();
+    let api_key = sample_api_key(
+        crate::apikey_profile::PROTOCOL_OPENAI_COMPAT,
+        None,
+        None,
+        None,
+    );
+    let body = br#"{"model":"gpt-5.5","input":"hi"}"#.to_vec();
+
+    let (rewritten_body, ..) =
+        apply_passthrough_request_overrides("/v1/responses", body, &api_key, None);
+    let payload: Value = serde_json::from_slice(&rewritten_body).expect("json body");
+
+    assert!(payload.get("tools").is_none());
+}
+
+#[test]
 fn native_codex_client_detection_uses_codex_signals_instead_of_client_brand() {
     let native_headers = sample_incoming_headers(
         None,

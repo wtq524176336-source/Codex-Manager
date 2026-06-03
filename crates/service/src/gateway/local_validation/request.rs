@@ -1187,11 +1187,10 @@ fn apply_passthrough_request_overrides(
 ) {
     let (effective_model, effective_reasoning, effective_service_tier) =
         resolve_effective_request_overrides(api_key);
-    let upstream_base_for_rewrite = if api_key.rotation_strategy == ROTATION_AGGREGATE_API {
-        Some(NON_CODEX_REWRITE_UPSTREAM_BASE)
-    } else {
-        api_key.upstream_base_url.as_deref()
-    };
+    let upstream_base_for_rewrite = api_key
+        .upstream_base_url
+        .as_deref()
+        .or(Some(NON_CODEX_REWRITE_UPSTREAM_BASE));
     let rewritten_body =
         super::super::apply_request_overrides_with_service_tier_and_prompt_cache_key_scope(
             path,
