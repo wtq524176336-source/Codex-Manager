@@ -13,6 +13,7 @@ use super::{LocalValidationError, LocalValidationResult};
 
 const CODEX_COMPACT_SUBAGENT: &str = "compact";
 const CODEX_COMPACT_PROMPT_MARKER: &[u8] = b"CONTEXT CHECKPOINT COMPACTION";
+const NON_CODEX_REWRITE_UPSTREAM_BASE: &str = "https://codexmanager.invalid/v1";
 
 /// 函数 `resolve_effective_request_overrides`
 ///
@@ -1186,6 +1187,11 @@ fn apply_passthrough_request_overrides(
 ) {
     let (effective_model, effective_reasoning, effective_service_tier) =
         resolve_effective_request_overrides(api_key);
+    let upstream_base_for_rewrite = if api_key.rotation_strategy == ROTATION_AGGREGATE_API {
+        Some(NON_CODEX_REWRITE_UPSTREAM_BASE)
+    } else {
+        api_key.upstream_base_url.as_deref()
+    };
     let rewritten_body =
         super::super::apply_request_overrides_with_service_tier_and_prompt_cache_key_scope(
             path,
@@ -1193,7 +1199,7 @@ fn apply_passthrough_request_overrides(
             effective_model.as_deref(),
             effective_reasoning.as_deref(),
             effective_service_tier.as_deref(),
-            api_key.upstream_base_url.as_deref(),
+            upstream_base_for_rewrite,
             None,
             false,
         );

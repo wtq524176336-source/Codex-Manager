@@ -352,11 +352,16 @@ fn should_skip_image_generation_tool_for_model(obj: &Map<String, Value>) -> bool
         .is_some_and(|model| model.to_ascii_lowercase().ends_with("spark"))
 }
 
-fn ensure_image_generation_tool(path: &str, obj: &mut Map<String, Value>) -> bool {
+fn ensure_image_generation_tool(
+    path: &str,
+    obj: &mut Map<String, Value>,
+    allow_auto_inject: bool,
+) -> bool {
     if !is_responses_path(path) {
         return false;
     }
-    if !runtime_config::codex_image_generation_enabled()
+    if !allow_auto_inject
+        || !runtime_config::codex_image_generation_enabled()
         || !runtime_config::codex_image_generation_auto_inject_tool_enabled()
         || should_skip_image_generation_tool_for_model(obj)
     {
@@ -385,6 +390,14 @@ fn ensure_image_generation_tool(path: &str, obj: &mut Map<String, Value>) -> boo
         "output_format": "png"
     }));
     true
+}
+
+pub(crate) fn apply_image_generation_auto_inject_rule(
+    path: &str,
+    obj: &mut Map<String, Value>,
+    allow_auto_inject: bool,
+) -> bool {
+    ensure_image_generation_tool(path, obj, allow_auto_inject)
 }
 
 fn ensure_parallel_tool_calls_bool(path: &str, obj: &mut Map<String, Value>) -> bool {
@@ -651,6 +664,7 @@ pub(crate) fn apply_codex_http_request_rules(
     path: &str,
     obj: &mut Map<String, Value>,
     use_codex_compat_rewrite: bool,
+    allow_auto_image_generation_tool: bool,
     prompt_cache_key: Option<&str>,
     force_prompt_cache_key: bool,
     installation_id: Option<&str>,
@@ -722,7 +736,7 @@ pub(crate) fn apply_codex_http_request_rules(
     {
         result.changed = true;
     }
-    if ensure_image_generation_tool(path, obj) {
+    if apply_image_generation_auto_inject_rule(path, obj, allow_auto_image_generation_tool) {
         result.changed = true;
     }
 
@@ -800,6 +814,7 @@ mod tests {
         let result = apply_codex_http_request_rules(
             "/v1/responses",
             &mut obj,
+            true,
             true,
             Some("thread-1"),
             false,

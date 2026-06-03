@@ -493,18 +493,6 @@ const WEB_COMMAND_MAP: Record<string, WebCommandDescriptor> = {
   service_requestlog_clear: { rpcMethod: "requestlog/clear" },
   service_requestlog_error_list: { rpcMethod: "requestlog/error_list" },
   service_requestlog_error_clear: { rpcMethod: "requestlog/error_clear" },
-  service_plugin_catalog_list: { rpcMethod: "plugin/catalog/list" },
-  service_plugin_catalog_refresh: { rpcMethod: "plugin/catalog/refresh" },
-  service_plugin_install: { rpcMethod: "plugin/install" },
-  service_plugin_update: { rpcMethod: "plugin/update" },
-  service_plugin_uninstall: { rpcMethod: "plugin/uninstall" },
-  service_plugin_list: { rpcMethod: "plugin/list" },
-  service_plugin_enable: { rpcMethod: "plugin/enable" },
-  service_plugin_disable: { rpcMethod: "plugin/disable" },
-  service_plugin_tasks_update: { rpcMethod: "plugin/tasks/update" },
-  service_plugin_tasks_list: { rpcMethod: "plugin/tasks/list" },
-  service_plugin_tasks_run: { rpcMethod: "plugin/tasks/run" },
-  service_plugin_logs_list: { rpcMethod: "plugin/logs/list" },
   open_in_browser: {
     direct: async (params) => {
       const url = typeof params?.url === "string" ? params.url.trim() : "";

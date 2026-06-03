@@ -35,18 +35,6 @@ export const router = createRouter({
       meta: { title: "请求日志" },
     },
     {
-      path: "/plugins",
-      name: "plugins",
-      component: () => import("@/views/PluginsView.vue"),
-      meta: { title: "插件管理" },
-    },
-    {
-      path: "/author",
-      name: "author",
-      component: () => import("@/views/AuthorView.vue"),
-      meta: { title: "赞助推荐" },
-    },
-    {
       path: "/settings",
       name: "settings",
       component: () => import("@/views/SettingsView.vue"),

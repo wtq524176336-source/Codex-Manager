@@ -8,8 +8,6 @@ pub const APP_SETTING_UI_THEME_KEY: &str = "ui.theme";
 pub const APP_SETTING_UI_APPEARANCE_PRESET_KEY: &str = "ui.appearance_preset";
 pub const APP_SETTING_UI_LOCALE_KEY: &str = "ui.locale";
 pub const APP_SETTING_SERVICE_ADDR_KEY: &str = "app.service_addr";
-pub const APP_SETTING_AUTHOR_SPONSORS_KEY: &str = "author.sponsors";
-pub const APP_SETTING_AUTHOR_SERVER_RECOMMENDATIONS_KEY: &str = "author.server_recommendations";
 pub const APP_SETTING_GATEWAY_ROUTE_STRATEGY_KEY: &str = "gateway.route_strategy";
 pub const APP_SETTING_GATEWAY_FREE_ACCOUNT_MAX_MODEL_KEY: &str = "gateway.free_account_max_model";
 pub const APP_SETTING_GATEWAY_MODEL_FORWARD_RULES_KEY: &str = "gateway.model_forward_rules";
@@ -27,8 +25,6 @@ pub const APP_SETTING_GATEWAY_UPSTREAM_TOTAL_TIMEOUT_MS_KEY: &str =
 pub const APP_SETTING_GATEWAY_SSE_KEEPALIVE_INTERVAL_MS_KEY: &str =
     "gateway.sse_keepalive_interval_ms";
 pub const APP_SETTING_GATEWAY_BACKGROUND_TASKS_KEY: &str = "gateway.background_tasks";
-pub const APP_SETTING_PLUGIN_MARKET_MODE_KEY: &str = "plugin.market_mode";
-pub const APP_SETTING_PLUGIN_MARKET_SOURCE_URL_KEY: &str = "plugin.market_source_url";
 pub const APP_SETTING_ENV_OVERRIDES_KEY: &str = "app.env_overrides";
 pub const APP_SETTING_WEB_ACCESS_PASSWORD_HASH_KEY: &str = "web.auth.password_hash";
 pub const WEB_ACCESS_SESSION_COOKIE_NAME: &str = "codexmanager_web_auth";

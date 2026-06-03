@@ -84,6 +84,8 @@ fn reload_from_env_updates_timeout_and_proxy() {
     let _request_compression_guard = EnvGuard::set(ENV_ENABLE_REQUEST_COMPRESSION, "0");
     let _image_enabled_guard = EnvGuard::set(ENV_CODEX_IMAGE_GENERATION_ENABLED, "0");
     let _image_auto_inject_guard = EnvGuard::set(ENV_CODEX_IMAGE_GENERATION_AUTO_INJECT_TOOL, "1");
+    let _image_third_party_auto_inject_guard =
+        EnvGuard::set(ENV_CODEX_IMAGE_GENERATION_THIRD_PARTY_AUTO_INJECT_TOOL, "1");
     let _image_main_model_guard = EnvGuard::set(ENV_CODEX_IMAGE_MAIN_MODEL, "gpt-5.4");
     let _image_tool_model_guard = EnvGuard::set(ENV_CODEX_IMAGE_TOOL_MODEL, "gpt-image-2");
     let _client_id_guard = EnvGuard::set(ENV_TOKEN_EXCHANGE_CLIENT_ID, "client-id-123");
@@ -99,6 +101,7 @@ fn reload_from_env_updates_timeout_and_proxy() {
     assert!(!request_compression_enabled());
     assert!(!codex_image_generation_enabled());
     assert!(codex_image_generation_auto_inject_tool_enabled());
+    assert!(codex_image_generation_third_party_auto_inject_tool_enabled());
     assert_eq!(current_codex_image_main_model(), "gpt-5.4");
     assert_eq!(current_codex_image_tool_model(), "gpt-image-2");
     assert_eq!(token_exchange_client_id(), "client-id-123");
@@ -134,6 +137,8 @@ fn reload_from_env_defaults_limits_to_unbounded_codex_friendly_values() {
     let _request_compression_guard = EnvGuard::clear(ENV_ENABLE_REQUEST_COMPRESSION);
     let _image_enabled_guard = EnvGuard::clear(ENV_CODEX_IMAGE_GENERATION_ENABLED);
     let _image_auto_inject_guard = EnvGuard::clear(ENV_CODEX_IMAGE_GENERATION_AUTO_INJECT_TOOL);
+    let _image_third_party_auto_inject_guard =
+        EnvGuard::clear(ENV_CODEX_IMAGE_GENERATION_THIRD_PARTY_AUTO_INJECT_TOOL);
     let _image_main_model_guard = EnvGuard::clear(ENV_CODEX_IMAGE_MAIN_MODEL);
     let _image_tool_model_guard = EnvGuard::clear(ENV_CODEX_IMAGE_TOOL_MODEL);
 
@@ -150,6 +155,7 @@ fn reload_from_env_defaults_limits_to_unbounded_codex_friendly_values() {
     assert!(request_compression_enabled());
     assert!(codex_image_generation_enabled());
     assert!(codex_image_generation_auto_inject_tool_enabled());
+    assert!(!codex_image_generation_third_party_auto_inject_tool_enabled());
     assert_eq!(current_codex_image_main_model(), "gpt-5.4-mini");
     assert_eq!(current_codex_image_tool_model(), "gpt-image-2");
 }

@@ -2,12 +2,9 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
 
-use super::author_links::{
-    normalize_author_link_items, serialize_author_link_items, AuthorLinkItem,
-};
 use super::{
-    save_persisted_app_setting, set_close_to_tray_on_close_setting, set_codex_cli_guide_dismissed,
-    set_env_overrides, set_gateway_background_tasks, set_gateway_free_account_max_model,
+    set_close_to_tray_on_close_setting, set_codex_cli_guide_dismissed, set_env_overrides,
+    set_gateway_background_tasks, set_gateway_free_account_max_model,
     set_gateway_model_forward_rules, set_gateway_originator, set_gateway_residency_requirement,
     set_gateway_route_strategy, set_gateway_sse_keepalive_interval_ms,
     set_gateway_upstream_proxy_url, set_gateway_upstream_stream_timeout_ms,
@@ -15,8 +12,6 @@ use super::{
     set_lightweight_mode_on_close_to_tray_setting, set_saved_service_addr, set_service_bind_mode,
     set_ui_appearance_preset, set_ui_locale, set_ui_low_transparency_enabled, set_ui_theme,
     set_update_auto_check_enabled, BackgroundTasksInput,
-    APP_SETTING_AUTHOR_SERVER_RECOMMENDATIONS_KEY, APP_SETTING_AUTHOR_SPONSORS_KEY,
-    APP_SETTING_PLUGIN_MARKET_MODE_KEY, APP_SETTING_PLUGIN_MARKET_SOURCE_URL_KEY,
 };
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -39,10 +34,6 @@ pub(super) struct AppSettingsPatch {
     gateway_originator: Option<String>,
     gateway_user_agent_version: Option<String>,
     gateway_residency_requirement: Option<String>,
-    plugin_market_mode: Option<String>,
-    plugin_market_source_url: Option<String>,
-    author_sponsors: Option<Vec<AuthorLinkItem>>,
-    author_server_recommendations: Option<Vec<AuthorLinkItem>>,
     upstream_proxy_url: Option<String>,
     upstream_stream_timeout_ms: Option<u64>,
     upstream_total_timeout_ms: Option<u64>,
@@ -133,37 +124,6 @@ pub(super) fn apply_app_settings_patch(patch: AppSettingsPatch) -> Result<(), St
     }
     if let Some(residency_requirement) = patch.gateway_residency_requirement {
         let _ = set_gateway_residency_requirement(Some(&residency_requirement))?;
-    }
-    if let Some(plugin_market_mode) = patch.plugin_market_mode {
-        let _ = save_persisted_app_setting(
-            APP_SETTING_PLUGIN_MARKET_MODE_KEY,
-            if plugin_market_mode.trim().is_empty() {
-                None
-            } else {
-                Some(&plugin_market_mode)
-            },
-        )?;
-    }
-    if let Some(plugin_market_source_url) = patch.plugin_market_source_url {
-        let _ = save_persisted_app_setting(
-            APP_SETTING_PLUGIN_MARKET_SOURCE_URL_KEY,
-            if plugin_market_source_url.trim().is_empty() {
-                None
-            } else {
-                Some(&plugin_market_source_url)
-            },
-        )?;
-    }
-    if let Some(author_sponsors) = patch.author_sponsors {
-        let normalized = normalize_author_link_items(author_sponsors);
-        let raw = serialize_author_link_items(&normalized)?;
-        let _ = save_persisted_app_setting(APP_SETTING_AUTHOR_SPONSORS_KEY, Some(&raw))?;
-    }
-    if let Some(author_server_recommendations) = patch.author_server_recommendations {
-        let normalized = normalize_author_link_items(author_server_recommendations);
-        let raw = serialize_author_link_items(&normalized)?;
-        let _ =
-            save_persisted_app_setting(APP_SETTING_AUTHOR_SERVER_RECOMMENDATIONS_KEY, Some(&raw))?;
     }
     if let Some(proxy_url) = patch.upstream_proxy_url {
         let _ = set_gateway_upstream_proxy_url(Some(&proxy_url))?;

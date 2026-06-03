@@ -14,7 +14,6 @@ mod conversation_bindings;
 mod events;
 mod gateway_error_logs;
 mod model_options;
-mod plugins;
 mod request_log_query;
 mod request_logs;
 mod request_token_stats;
@@ -259,59 +258,6 @@ pub struct AggregateApi {
     pub last_test_at: Option<i64>,
     pub last_test_status: Option<String>,
     pub last_test_error: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct PluginInstall {
-    pub plugin_id: String,
-    pub source_url: Option<String>,
-    pub name: String,
-    pub version: String,
-    pub description: Option<String>,
-    pub author: Option<String>,
-    pub homepage_url: Option<String>,
-    pub script_url: Option<String>,
-    pub script_body: String,
-    pub permissions_json: String,
-    pub manifest_json: String,
-    pub status: String,
-    pub installed_at: i64,
-    pub updated_at: i64,
-    pub last_run_at: Option<i64>,
-    pub last_error: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct PluginTask {
-    pub id: String,
-    pub plugin_id: String,
-    pub name: String,
-    pub description: Option<String>,
-    pub entrypoint: String,
-    pub schedule_kind: String,
-    pub interval_seconds: Option<i64>,
-    pub enabled: bool,
-    pub next_run_at: Option<i64>,
-    pub last_run_at: Option<i64>,
-    pub last_status: Option<String>,
-    pub last_error: Option<String>,
-    pub task_json: String,
-    pub created_at: i64,
-    pub updated_at: i64,
-}
-
-#[derive(Debug, Clone)]
-pub struct PluginRunLog {
-    pub id: Option<i64>,
-    pub plugin_id: String,
-    pub task_id: Option<String>,
-    pub run_type: String,
-    pub status: String,
-    pub started_at: i64,
-    pub finished_at: Option<i64>,
-    pub duration_ms: Option<i64>,
-    pub output_json: Option<String>,
-    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -618,10 +564,6 @@ impl Storage {
             "039_request_logs_aggregate_api_attempt_chain",
             include_str!("../../migrations/039_request_logs_aggregate_api_attempt_chain.sql"),
             |s| s.ensure_request_log_aggregate_api_attempt_chain_columns(),
-        )?;
-        self.apply_sql_migration(
-            "040_plugins",
-            include_str!("../../migrations/040_plugins.sql"),
         )?;
         self.apply_sql_or_compat_migration(
             "041_gateway_error_logs",

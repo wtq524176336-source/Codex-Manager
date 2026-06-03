@@ -649,6 +649,9 @@ fn apply_request_overrides_with_prompt_cache_key_mode(
 ) -> Vec<u8> {
     let use_codex_responses_compat = should_apply_codex_responses_compat(path, upstream_base_url);
     let use_codex_compat_rewrite = allow_codex_compat_rewrite && use_codex_responses_compat;
+    let allow_auto_image_generation_tool = use_codex_responses_compat;
+    let allow_third_party_auto_image_generation_tool = !use_codex_responses_compat
+            && super::super::runtime_config::codex_image_generation_third_party_auto_inject_tool_enabled();
     let normalized_model = model_slug.map(str::trim).filter(|v| !v.is_empty());
     let normalized_reasoning = reasoning_effort
         .and_then(crate::reasoning_effort::normalize_reasoning_effort)
@@ -663,6 +666,7 @@ fn apply_request_overrides_with_prompt_cache_key_mode(
         && normalized_reasoning.is_none()
         && normalized_service_tier.is_none()
         && !use_codex_responses_compat
+        && !allow_third_party_auto_image_generation_tool
         && !super::strict_request_param_allowlist_enabled()
     {
         let is_chat = request_rewrite_shared::path_matches_template(path, "/v1/chat/completions");
@@ -736,6 +740,7 @@ fn apply_request_overrides_with_prompt_cache_key_mode(
                     path,
                     obj,
                     use_codex_compat_rewrite,
+                    allow_auto_image_generation_tool,
                     prompt_cache_key,
                     force_prompt_cache_key,
                     installation_id.as_deref(),
@@ -744,6 +749,10 @@ fn apply_request_overrides_with_prompt_cache_key_mode(
                     changed = true;
                 }
                 dropped_keys.extend(codex_http_result.dropped_keys);
+            } else if allow_third_party_auto_image_generation_tool
+                && responses::apply_image_generation_auto_inject_rule(path, obj, true)
+            {
+                changed = true;
             }
 
             if !dropped_keys.is_empty() {

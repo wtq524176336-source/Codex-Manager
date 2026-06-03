@@ -75,6 +75,13 @@ pub(crate) const ENV_OVERRIDE_CATALOG: &[EnvOverrideCatalogItem] = &[
         "1",
     ),
     EnvOverrideCatalogItem::new(
+        "CODEXMANAGER_CODEX_IMAGE_GENERATION_THIRD_PARTY_AUTO_INJECT_TOOL",
+        "第三方图片 Tool 兼容注入",
+        ENV_OVERRIDE_SCOPE_SERVICE,
+        ENV_OVERRIDE_APPLY_MODE_RUNTIME,
+        "0",
+    ),
+    EnvOverrideCatalogItem::new(
         "CODEXMANAGER_CODEX_IMAGE_GENERATION_ENABLED",
         "Codex 图片生成兼容开关",
         ENV_OVERRIDE_SCOPE_SERVICE,
