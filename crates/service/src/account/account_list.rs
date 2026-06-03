@@ -402,21 +402,15 @@ fn to_account_summaries(
         let current_cost = load_account_window_cost(&storage, account_id, current_window)
             .map_err(|err| format!("load account window cost failed: {err}"))?;
         window_costs.insert(account_id.clone(), current_cost);
-        if let Some(primary_cost) = load_optional_account_window_cost(
-            &storage,
-            account_id,
-            primary_window,
-        )
-        .map_err(|err| format!("load account primary window cost failed: {err}"))?
+        if let Some(primary_cost) =
+            load_optional_account_window_cost(&storage, account_id, primary_window)
+                .map_err(|err| format!("load account primary window cost failed: {err}"))?
         {
             primary_window_costs.insert(account_id.clone(), primary_cost);
         }
-        if let Some(secondary_cost) = load_optional_account_window_cost(
-            &storage,
-            account_id,
-            secondary_window,
-        )
-        .map_err(|err| format!("load account secondary window cost failed: {err}"))?
+        if let Some(secondary_cost) =
+            load_optional_account_window_cost(&storage, account_id, secondary_window)
+                .map_err(|err| format!("load account secondary window cost failed: {err}"))?
         {
             secondary_window_costs.insert(account_id.clone(), secondary_cost);
         }
@@ -526,8 +520,7 @@ fn map_account_summary(
         Some(false)
     } else {
         subscription.map(|value| {
-            value.has_subscription
-                && value.expires_at.map_or(true, |expires_at| expires_at > now)
+            value.has_subscription && value.expires_at.map_or(true, |expires_at| expires_at > now)
         })
     };
     let (fallback_plan_type, plan_type_raw) = match plan {
@@ -570,15 +563,9 @@ fn map_account_summary(
 fn usage_cost_windows(
     snapshot: Option<&UsageSnapshotRecord>,
     now: i64,
-) -> (
-    (i64, i64),
-    Option<(i64, i64)>,
-    Option<(i64, i64)>,
-) {
+) -> ((i64, i64), Option<(i64, i64)>, Option<(i64, i64)>) {
     let primary_window = find_five_hour_resets_at(snapshot)
-        .map(|resets_at| {
-            normalize_window(resets_at, FIVE_HOUR_WINDOW_MINUTES, now)
-        });
+        .map(|resets_at| normalize_window(resets_at, FIVE_HOUR_WINDOW_MINUTES, now));
     let secondary_window = find_long_window_resets_at(snapshot)
         .map(|(resets_at, window_minutes)| normalize_window(resets_at, window_minutes, now));
 

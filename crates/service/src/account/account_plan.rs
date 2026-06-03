@@ -190,9 +190,7 @@ pub(crate) fn is_secondary_only_long_usage_snapshot(snapshot: &UsageSnapshotReco
     let has_primary_signal = snapshot.used_percent.is_some() || snapshot.window_minutes.is_some();
     let has_secondary_signal =
         snapshot.secondary_used_percent.is_some() || snapshot.secondary_window_minutes.is_some();
-    !has_primary_signal
-        && has_secondary_signal
-        && is_long_window(snapshot.secondary_window_minutes)
+    !has_primary_signal && has_secondary_signal && is_long_window(snapshot.secondary_window_minutes)
 }
 
 pub(crate) fn is_free_usage_snapshot(snapshot: &UsageSnapshotRecord) -> bool {
@@ -376,8 +374,7 @@ mod tests {
         account_matches_plan_filter, extract_plan_type_from_credits_json,
         extract_plan_type_from_id_token, is_free_or_single_window_account,
         is_free_plan_from_credits_json, is_free_plan_type, is_secondary_only_long_usage_snapshot,
-        is_single_window_long_usage_snapshot,
-        normalize_plan_type, resolve_account_plan,
+        is_single_window_long_usage_snapshot, normalize_plan_type, resolve_account_plan,
     };
     use codexmanager_core::storage::{now_ts, Account, Storage, Token, UsageSnapshotRecord};
 

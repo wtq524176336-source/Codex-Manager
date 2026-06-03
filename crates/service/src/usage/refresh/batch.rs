@@ -27,10 +27,8 @@ use super::{
 pub(crate) fn refresh_usage_for_all_accounts() -> Result<(), String> {
     let storage = open_storage().ok_or_else(|| "storage unavailable".to_string())?;
     let accounts = storage.list_accounts().map_err(|e| e.to_string())?;
-    let tasks = build_usage_refresh_tasks(
-        storage.list_tokens().map_err(|e| e.to_string())?,
-        &accounts,
-    );
+    let tasks =
+        build_usage_refresh_tasks(storage.list_tokens().map_err(|e| e.to_string())?, &accounts);
     if tasks.is_empty() {
         return Ok(());
     }
@@ -62,8 +60,7 @@ pub(crate) fn refresh_usage_for_polling_batch() -> Result<(), String> {
     let latest_status_reasons = storage
         .latest_account_status_reasons(&account_ids)
         .map_err(|e| e.to_string())?;
-    let all_tasks =
-        build_polling_usage_refresh_tasks(tokens, &accounts, &latest_status_reasons);
+    let all_tasks = build_polling_usage_refresh_tasks(tokens, &accounts, &latest_status_reasons);
     if all_tasks.is_empty() {
         return Ok(());
     }

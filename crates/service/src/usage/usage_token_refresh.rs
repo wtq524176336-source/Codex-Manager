@@ -152,7 +152,8 @@ pub(crate) fn refresh_and_persist_access_token_with_source(
             .unwrap_or_else(|| "-".to_string()),
         token.access_token != original_access_token,
         token.refresh_token != original_refresh_token,
-        token.api_key_access_token
+        token
+            .api_key_access_token
             .as_deref()
             .map(|value| !value.trim().is_empty())
             .unwrap_or(false)
@@ -207,9 +208,17 @@ fn record_token_refresh_event(
     };
     let _ = storage.insert_event(&event);
     if status == "failed" {
-        log::warn!("account token refresh: account_id={} {}", account_id, message);
+        log::warn!(
+            "account token refresh: account_id={} {}",
+            account_id,
+            message
+        );
     } else {
-        log::info!("account token refresh: account_id={} {}", account_id, message);
+        log::info!(
+            "account token refresh: account_id={} {}",
+            account_id,
+            message
+        );
     }
 }
 

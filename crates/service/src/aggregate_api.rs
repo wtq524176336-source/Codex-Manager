@@ -1688,8 +1688,7 @@ pub(crate) fn update_aggregate_api(
         storage
             .update_aggregate_api_protocol_mode(api_id, Some(normalized_protocol_mode.as_str()))
             .map_err(|err| err.to_string())?;
-    } else if next_provider_type != AGGREGATE_API_PROVIDER_CODEX
-        && existing.protocol_mode.is_some()
+    } else if next_provider_type != AGGREGATE_API_PROVIDER_CODEX && existing.protocol_mode.is_some()
     {
         storage
             .update_aggregate_api_protocol_mode(api_id, None)

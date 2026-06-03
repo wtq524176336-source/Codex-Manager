@@ -1,7 +1,7 @@
-#[path = "account_availability.rs"]
-pub(crate) mod availability;
 #[path = "account_auto_switch.rs"]
 pub(crate) mod auto_switch;
+#[path = "account_availability.rs"]
+pub(crate) mod availability;
 #[path = "account_cleanup.rs"]
 pub(crate) mod cleanup;
 #[path = "account_delete.rs"]

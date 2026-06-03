@@ -25,8 +25,7 @@ const REFRESH_TOKEN_INVALIDATED_MESSAGE: &str =
     "Your access token could not be refreshed because your refresh token was revoked. Please log out and sign in again.";
 const REFRESH_TOKEN_INVALID_GRANT_MESSAGE: &str =
     "Your access token could not be refreshed because your refresh token is no longer valid. Please log out and sign in again.";
-const APP_SESSION_TERMINATED_MESSAGE: &str =
-    "Your session has ended. Please log in again.";
+const APP_SESSION_TERMINATED_MESSAGE: &str = "Your session has ended. Please log in again.";
 const REFRESH_TOKEN_UNKNOWN_MESSAGE: &str =
     "Your access token could not be refreshed. Please log out and sign in again.";
 const REFRESH_TOKEN_URL: &str = "https://auth.openai.com/oauth/token";

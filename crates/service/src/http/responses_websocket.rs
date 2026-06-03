@@ -900,10 +900,7 @@ fn ws_log_route_for_payload(
     }
 }
 
-fn ws_payload_client_metadata_field<'a>(
-    payload: Option<&'a Value>,
-    key: &str,
-) -> Option<&'a str> {
+fn ws_payload_client_metadata_field<'a>(payload: Option<&'a Value>, key: &str) -> Option<&'a str> {
     let value = payload?;
     value
         .get("client_metadata")
@@ -935,15 +932,12 @@ fn is_compact_subagent(value: &str) -> bool {
 }
 
 fn ws_text_field<'a>(value: &'a Value, name: &str) -> Option<&'a str> {
-    value
-        .get(name)
-        .and_then(Value::as_str)
-        .or_else(|| {
-            value
-                .get("response")
-                .and_then(|response| response.get(name))
-                .and_then(Value::as_str)
-        })
+    value.get(name).and_then(Value::as_str).or_else(|| {
+        value
+            .get("response")
+            .and_then(|response| response.get(name))
+            .and_then(Value::as_str)
+    })
 }
 
 fn ws_frame_diagnostics(text: &str) -> WsFrameDiagnostics {
@@ -1050,27 +1044,26 @@ async fn connect_upstream_websocket(
         .map_err(|err| {
             WsSessionError::bad_gateway_bilingual(
                 "解析上游账号 Token 失败",
-                format!("resolve bearer token for account {} failed: {err}", account.id),
+                format!(
+                    "resolve bearer token for account {} failed: {err}",
+                    account.id
+                ),
             )
         })?;
     let request =
         build_upstream_websocket_request(ws_url.as_str(), &account, bearer.as_str(), context)?;
-    let (stream, _) = connect_upstream_websocket_for_account(
-        request,
-        ws_url.as_str(),
-        &account,
-        context,
-    )
-    .await
-    .map_err(|err| {
-        WsSessionError::bad_gateway_bilingual(
-            "连接上游 WebSocket 失败",
-            format!(
-                "connect upstream websocket for account {} failed: {err}",
-                account.id
-            ),
-        )
-    })?;
+    let (stream, _) =
+        connect_upstream_websocket_for_account(request, ws_url.as_str(), &account, context)
+            .await
+            .map_err(|err| {
+                WsSessionError::bad_gateway_bilingual(
+                    "连接上游 WebSocket 失败",
+                    format!(
+                        "connect upstream websocket for account {} failed: {err}",
+                        account.id
+                    ),
+                )
+            })?;
 
     Ok(ConnectedUpstreamWebsocket {
         stream,
@@ -1140,8 +1133,7 @@ fn load_selected_websocket_account_and_token() -> Result<
                 "selected upstream account token not found",
             )
         })?;
-    let (chatgpt_account_id, workspace_id) =
-        crate::usage_account_meta::derive_account_meta(&token);
+    let (chatgpt_account_id, workspace_id) = crate::usage_account_meta::derive_account_meta(&token);
     if crate::usage_account_meta::patch_account_meta_in_place(
         &mut account,
         chatgpt_account_id,
@@ -2214,8 +2206,9 @@ fn log_ws_terminal_diagnostic(
 ) {
     let diagnostics = ws_frame_diagnostics(pending.prepared.text.as_str());
     let error_fp = fingerprint_or_dash(terminal.error.as_deref());
-    let error_previous_response_id_fp =
-        fingerprint_or_dash(extract_previous_response_id_from_error(terminal.error.as_deref()));
+    let error_previous_response_id_fp = fingerprint_or_dash(
+        extract_previous_response_id_from_error(terminal.error.as_deref()),
+    );
     let previous_response_not_found = is_previous_response_not_found_terminal(terminal);
     let message = format!(
         "event=responses_ws_terminal_diagnostic trace_id={} action={} api_key_id={} account_id={} transparent_mode={} status={} terminal_type={} error_code={} error_param={} error_fp={} error_previous_response_id_fp={} previous_response_not_found={} request_type={} model={} previous_response_id_present={} previous_response_id_fp={} response_id_fp={} turn_state_present={} turn_state_fp={} thread_id_fp={} session_id_fp={} client_request_id_fp={} frame_sha256_16={} upstream_url={}",
@@ -2578,7 +2571,7 @@ mod tests {
         build_socks5_connect_request, infer_ws_terminal_status, inspect_ws_terminal_event,
         is_previous_response_not_found_terminal, merge_client_metadata, parse_websocket_target,
         prepare_initial_client_frame, proxy_basic_auth_header, rewrite_client_frame,
-        RESPONSES_COMPACT_ENDPOINT, WsRequestContext,
+        WsRequestContext, RESPONSES_COMPACT_ENDPOINT,
     };
     use axum::extract::ws::Message;
     use axum::http::{HeaderMap, HeaderValue};

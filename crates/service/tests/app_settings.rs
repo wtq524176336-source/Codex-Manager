@@ -322,6 +322,43 @@ fn sync_runtime_settings_from_storage_upgrades_legacy_image_auto_inject_default(
 }
 
 #[test]
+fn app_settings_set_preserves_explicit_image_auto_inject_zero() {
+    with_temp_db(|_| {
+        let _env = override_env_vars(&[(CODEX_IMAGE_AUTO_INJECT_TOOL_ENV, None)]);
+
+        let saved = codexmanager_service::app_settings_set(Some(&json!({
+            "envOverrides": {
+                CODEX_IMAGE_AUTO_INJECT_TOOL_ENV: "0"
+            }
+        })))
+        .expect("save explicit image auto inject override");
+
+        assert_eq!(
+            saved
+                .get("envOverrides")
+                .and_then(|value| value.get(CODEX_IMAGE_AUTO_INJECT_TOOL_ENV))
+                .and_then(|value| value.as_str()),
+            Some("0")
+        );
+        assert_eq!(
+            std::env::var(CODEX_IMAGE_AUTO_INJECT_TOOL_ENV)
+                .ok()
+                .as_deref(),
+            Some("0")
+        );
+
+        let snapshot = codexmanager_service::app_settings_get().expect("reload app settings");
+        assert_eq!(
+            snapshot
+                .get("envOverrides")
+                .and_then(|value| value.get(CODEX_IMAGE_AUTO_INJECT_TOOL_ENV))
+                .and_then(|value| value.as_str()),
+            Some("0")
+        );
+    });
+}
+
+#[test]
 fn app_settings_gateway_mode_is_no_longer_a_persisted_runtime_setting() {
     with_temp_db(|db_path| {
         let storage = Storage::open(db_path).expect("open storage");

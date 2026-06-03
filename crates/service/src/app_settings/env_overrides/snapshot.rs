@@ -4,10 +4,17 @@ use std::collections::BTreeMap;
 const CODEX_IMAGE_AUTO_INJECT_TOOL_KEY: &str =
     "CODEXMANAGER_CODEX_IMAGE_GENERATION_AUTO_INJECT_TOOL";
 const LEGACY_CODEX_IMAGE_AUTO_INJECT_TOOL_DEFAULT: &str = "0";
+const ENV_OVERRIDES_MIGRATION_VERSION_KEY: &str = "app.env_overrides_migration_version";
+const ENV_OVERRIDES_MIGRATION_VERSION: &str = "2";
 
-fn migrate_legacy_saved_env_override_value(key: &str, value: String) -> (String, bool) {
+fn migrate_legacy_saved_env_override_value(
+    key: &str,
+    value: String,
+    should_migrate_legacy_defaults: bool,
+) -> (String, bool) {
     if key.eq_ignore_ascii_case(CODEX_IMAGE_AUTO_INJECT_TOOL_KEY)
         && value == LEGACY_CODEX_IMAGE_AUTO_INJECT_TOOL_DEFAULT
+        && should_migrate_legacy_defaults
     {
         if let Some(item) = super::catalog::env_override_catalog_item(key) {
             // 中文注释：旧版本会把当时的默认 0 写入快照；默认值升到 1 后需要随 catalog 自动升级。
@@ -78,6 +85,9 @@ fn persisted_env_overrides(mut normalized: BTreeMap<String, String>) -> BTreeMap
         return normalized;
     };
 
+    let should_migrate_legacy_defaults =
+        super::get_persisted_app_setting(ENV_OVERRIDES_MIGRATION_VERSION_KEY).as_deref()
+            != Some(ENV_OVERRIDES_MIGRATION_VERSION);
     let mut should_save_migrated_snapshot = false;
     for (raw_key, raw_value) in parsed {
         let normalized_key = raw_key.trim().to_ascii_uppercase();
@@ -92,7 +102,11 @@ fn persisted_env_overrides(mut normalized: BTreeMap<String, String>) -> BTreeMap
             continue;
         };
         if let Some(value) = super::normalize::parse_saved_env_override_value(&raw_value) {
-            let (value, migrated) = migrate_legacy_saved_env_override_value(&key, value);
+            let (value, migrated) = migrate_legacy_saved_env_override_value(
+                &key,
+                value,
+                should_migrate_legacy_defaults,
+            );
             should_save_migrated_snapshot |= migrated;
             if super::catalog::is_env_override_catalog_key(&key) || !value.is_empty() {
                 normalized.insert(key, value);
@@ -180,5 +194,9 @@ pub(crate) fn save_env_overrides_value(overrides: &BTreeMap<String, String>) -> 
         .collect::<BTreeMap<_, _>>();
     let raw = serde_json::to_string(&sanitized)
         .map_err(|err| format!("serialize env overrides failed: {err}"))?;
-    super::save_persisted_app_setting(super::APP_SETTING_ENV_OVERRIDES_KEY, Some(&raw))
+    super::save_persisted_app_setting(super::APP_SETTING_ENV_OVERRIDES_KEY, Some(&raw))?;
+    super::save_persisted_app_setting(
+        ENV_OVERRIDES_MIGRATION_VERSION_KEY,
+        Some(ENV_OVERRIDES_MIGRATION_VERSION),
+    )
 }

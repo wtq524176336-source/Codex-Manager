@@ -248,14 +248,8 @@ fn extract_token_payload_supports_camel_case_fields() {
         payload.chatgpt_account_id_hint.as_deref(),
         Some("cgpt-camel")
     );
-    assert_eq!(
-        payload.chatgpt_user_id_hint.as_deref(),
-        Some("user-camel")
-    );
-    assert_eq!(
-        payload.organization_id_hint.as_deref(),
-        Some("org-camel")
-    );
+    assert_eq!(payload.chatgpt_user_id_hint.as_deref(), Some("user-camel"));
+    assert_eq!(payload.organization_id_hint.as_deref(), Some("org-camel"));
 }
 
 /// 函数 `extract_token_payload_supports_sub2api_credentials_format`
@@ -296,10 +290,7 @@ fn extract_token_payload_supports_sub2api_credentials_format() {
         payload.chatgpt_user_id_hint.as_deref(),
         Some("user-sub2api")
     );
-    assert_eq!(
-        payload.organization_id_hint.as_deref(),
-        Some("org-sub2api")
-    );
+    assert_eq!(payload.organization_id_hint.as_deref(), Some("org-sub2api"));
 }
 
 /// 函数 `parse_items_from_content_supports_sub2api_accounts_wrapper`
