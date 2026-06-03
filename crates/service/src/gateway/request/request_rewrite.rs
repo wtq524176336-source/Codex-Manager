@@ -651,7 +651,8 @@ fn apply_request_overrides_with_prompt_cache_key_mode(
     let use_codex_compat_rewrite = allow_codex_compat_rewrite && use_codex_responses_compat;
     let allow_auto_image_generation_tool = use_codex_responses_compat;
     let allow_third_party_auto_image_generation_tool = !use_codex_responses_compat
-            && super::super::runtime_config::codex_image_generation_third_party_auto_inject_tool_enabled();
+        && super::super::runtime_config::codex_image_generation_third_party_auto_inject_tool_enabled(
+        );
     let normalized_model = model_slug.map(str::trim).filter(|v| !v.is_empty());
     let normalized_reasoning = reasoning_effort
         .and_then(crate::reasoning_effort::normalize_reasoning_effort)
