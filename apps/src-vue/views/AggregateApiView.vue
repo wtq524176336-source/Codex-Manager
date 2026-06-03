@@ -60,6 +60,7 @@
                 <strong>{{ row.supplierName || row.id }}</strong>
                 <span>{{ row.url }}</span>
                 <span v-if="row.modelOverride">模型覆写：{{ row.modelOverride }}</span>
+                <span v-if="row.createdAt">创建时间：{{ formatDateTime(row.createdAt) }}</span>
               </div>
             </template>
           </el-table-column>
@@ -118,11 +119,29 @@
               />
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="220" fixed="right" align="right">
+          <el-table-column label="操作" width="118" fixed="right" align="center">
             <template #default="{ row }">
-              <el-button link type="primary" :loading="prioritizingId === row.id" @click="prioritize(row)">设优先</el-button>
-              <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
-              <el-button link type="danger" @click="confirmDelete(row)">删除</el-button>
+              <div class="icon-actions">
+                <el-tooltip content="编辑配置" placement="top">
+                  <el-button text @click="openEdit(row)">
+                    <el-icon><Setting /></el-icon>
+                  </el-button>
+                </el-tooltip>
+                <el-dropdown trigger="click" @command="handleRowCommand($event, row)">
+                  <el-button text>
+                    <el-icon><MoreFilled /></el-icon>
+                  </el-button>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item command="edit">编辑聚合 API</el-dropdown-item>
+                      <el-dropdown-item command="prioritize" :disabled="prioritizingId === row.id">
+                        设为优先
+                      </el-dropdown-item>
+                      <el-dropdown-item command="delete" class="danger-item">删除聚合 API</el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
+              </div>
             </template>
           </el-table-column>
         </el-table>
@@ -233,6 +252,7 @@
 </template>
 
 <script setup lang="ts">
+import { MoreFilled, Setting } from "@element-plus/icons-vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, reactive, ref } from "vue";
 
@@ -333,6 +353,19 @@ function formatUsd(value: number) {
     minimumFractionDigits: value >= 10 ? 1 : 4,
     maximumFractionDigits: value >= 10 ? 1 : 4,
   }).format(Math.max(0, Number(value) || 0));
+}
+
+function formatDateTime(value?: number | null) {
+  const numeric = Number(value) || 0;
+  if (!numeric) return "-";
+  const ms = numeric > 10_000_000_000 ? numeric : numeric * 1000;
+  return new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(ms));
 }
 
 function isEnabled(row: AggregateApiSummary) {
@@ -664,6 +697,20 @@ async function prioritize(row: AggregateApiSummary) {
   }
 }
 
+function handleRowCommand(command: string | number | object, row: AggregateApiSummary) {
+  if (command === "edit") {
+    openEdit(row);
+    return;
+  }
+  if (command === "prioritize") {
+    void prioritize(row);
+    return;
+  }
+  if (command === "delete") {
+    void confirmDelete(row);
+  }
+}
+
 async function confirmReset(row: AggregateApiSummary) {
   await ElMessageBox.confirm(`确定重置 ${row.supplierName || row.id} 的费用统计吗？`, "重置费用", {
     type: "warning",
@@ -715,6 +762,23 @@ onMounted(loadData);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .icon-actions {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+
+    .el-button {
+      width: 30px;
+      height: 30px;
+      padding: 0;
+    }
+  }
+
+  .danger-item {
+    color: var(--el-color-danger);
   }
 
   .aggregate-secret-form {

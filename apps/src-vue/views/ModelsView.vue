@@ -1,63 +1,81 @@
 <template>
   <div class="page models-page">
-    <div class="page-hero">
+    <section class="models-intro">
+      <el-tag class="models-intro__badge" effect="plain">模型目录</el-tag>
       <div>
-        <h2 class="page-hero__title">模型管理</h2>
-        <p class="page-hero__desc">
-          维护本地结构化模型目录，控制模型是否在 API 中可用，并同步到 Codex CLI 模型缓存。
+        <h2>模型管理</h2>
+        <p>
+          这里维护本地结构化模型目录。默认绑定模型会优先展示 supportedInApi=true 的模型，而 Codex CLI 仍会拿到完整目录。
         </p>
       </div>
-      <div class="table-actions">
-        <el-button :loading="loading" @click="loadData(false)">刷新</el-button>
-        <el-button :loading="refreshingRemote" @click="loadData(true)">刷新远端</el-button>
-        <el-button :loading="syncingCache" :disabled="!models.length" @click="syncCodexCache">
-          导出 Codex 缓存
-        </el-button>
-        <el-button type="primary" @click="openCreate">新增自定义模型</el-button>
+      <div class="models-intro__badges">
+        <el-tag round effect="light">完整目录会同步到 Codex CLI</el-tag>
+        <el-tag round effect="light">默认绑定优先展示 API 可用模型</el-tag>
+        <el-tag round effect="light">远端刷新可与本地覆写共存</el-tag>
       </div>
-    </div>
+    </section>
 
-    <div class="summary-grid">
-      <div class="summary-card">
-        <div class="summary-card__label">模型总数</div>
-        <div class="summary-card__value">{{ models.length }}</div>
-        <div class="summary-card__hint">完整目录</div>
-      </div>
-      <div class="summary-card">
-        <div class="summary-card__label">API 可用</div>
-        <div class="summary-card__value">{{ apiEnabledCount }}</div>
-        <div class="summary-card__hint">可作为绑定模型</div>
-      </div>
-      <div class="summary-card">
-        <div class="summary-card__label">自定义模型</div>
-        <div class="summary-card__value">{{ customCount }}</div>
-        <div class="summary-card__hint">本地新增</div>
-      </div>
-      <div class="summary-card">
-        <div class="summary-card__label">已选择</div>
-        <div class="summary-card__value">{{ selectedSlugs.length }}</div>
-        <div class="summary-card__hint">批量删除对象</div>
-      </div>
-    </div>
+    <div class="page-card page-card--flush models-card">
+      <div class="models-card__header">
+        <div class="models-card__title-row">
+          <div>
+            <h3>模型目录明细</h3>
+            <p>按 slug、显示名称或描述快速定位，并结合来源与覆写状态查看当前目录。</p>
+          </div>
+          <div class="models-card__actions">
+            <el-button :loading="loading" @click="loadData(false)">
+              <el-icon><Refresh /></el-icon>
+              刷新
+            </el-button>
+            <el-button :loading="refreshingRemote" @click="loadData(true)">
+              <el-icon><RefreshRight /></el-icon>
+              远端并入
+            </el-button>
+            <el-button :loading="syncingCache" :disabled="!models.length" @click="syncCodexCache">
+              <el-icon><Download /></el-icon>
+              导出到本地 Codex 缓存
+            </el-button>
+            <el-button
+              :disabled="!selectedSlugs.length"
+              :loading="deleting"
+              @click="confirmBatchDelete"
+            >
+              <el-icon><Delete /></el-icon>
+              批量删除模型
+            </el-button>
+            <el-button type="primary" @click="openCreate">
+              <el-icon><Plus /></el-icon>
+              新增自定义模型
+            </el-button>
+          </div>
+        </div>
 
-    <div class="page-card page-card--flush">
-      <div class="page-card__body">
-        <div class="filter-bar models-filter">
-          <el-input v-model="keyword" clearable placeholder="搜索 slug / 名称 / 描述" />
+        <div class="mini-stat-row">
+          <span class="mini-stat">模型总数 <strong>{{ models.length }}</strong></span>
+          <span class="mini-stat">API 可用 <strong>{{ apiEnabledCount }}</strong></span>
+          <span class="mini-stat">自定义模型 <strong>{{ customCount }}</strong></span>
+          <span class="mini-stat">本地覆写 <strong>{{ editedCount }}</strong></span>
+          <el-tag round effect="light">当前筛选 {{ currentFilterLabel }}</el-tag>
+          <el-tag round effect="light">共 {{ filteredModels.length }} 条</el-tag>
+          <el-tag v-if="selectedSlugs.length" round effect="light">已选 {{ selectedSlugs.length }} 项</el-tag>
+        </div>
+
+        <div class="models-card__filters">
+          <el-input v-model="keyword" clearable placeholder="搜索 slug、显示名称或描述">
+            <template #prefix>
+              <el-icon><Search /></el-icon>
+            </template>
+          </el-input>
           <el-select v-model="filter">
             <el-option label="全部模型" value="all" />
             <el-option label="仅 API 可用" value="api" />
             <el-option label="仅自定义" value="custom" />
             <el-option label="仅本地覆写" value="edited" />
           </el-select>
-          <el-button
-            type="danger"
-            :disabled="!selectedSlugs.length"
-            :loading="deleting"
-            @click="confirmBatchDelete"
-          >
-            批量删除
-          </el-button>
+        </div>
+
+        <div class="models-card__hint">
+          保存后会自动同步到 ~/.codex/models_cache.json；如需让 /model 立即看到最新模型与说明，仍需重启正在运行中的 Codex 会话。Web 端可通过上方导出按钮下载同名 models_cache.json，再手动放入本地 ~/.codex/；桌面端继续由本地自动同步。
         </div>
       </div>
       <div class="table-scroll">
@@ -96,34 +114,35 @@
             </template>
           </el-table-column>
           <el-table-column label="可见性" width="120">
-            <template #default="{ row }">{{ row.visibility || "-" }}</template>
+            <template #default="{ row }">
+              <el-tag v-if="row.visibility === 'list'" effect="light">list</el-tag>
+              <el-tag v-else-if="row.visibility === 'hide'" type="info" effect="plain">hide</el-tag>
+              <el-tag v-else type="info" effect="light">未设置</el-tag>
+            </template>
           </el-table-column>
           <el-table-column label="推理等级" min-width="160">
             <template #default="{ row }">
-              <span v-if="row.defaultReasoningLevel">{{ row.defaultReasoningLevel }}</span>
-              <span v-else-if="reasoningLevelText(row)">{{ reasoningLevelText(row) }}</span>
+              <span v-if="reasoningLevelText(row)">{{ reasoningLevelText(row) }}</span>
+              <span v-else-if="row.defaultReasoningLevel">{{ row.defaultReasoningLevel }}</span>
               <span v-else class="muted">未设置</span>
             </template>
-          </el-table-column>
-          <el-table-column label="输入 / 计划" min-width="160">
-            <template #default="{ row }">
-              <div class="model-meta">
-                <span>{{ listText(row.inputModalities) || "-" }}</span>
-                <span>{{ listText(row.availableInPlans) || "全部计划" }}</span>
-              </div>
-            </template>
-          </el-table-column>
-          <el-table-column label="上下文" width="120">
-            <template #default="{ row }">{{ compact(row.contextWindow || 0) }}</template>
           </el-table-column>
           <el-table-column label="更新时间" width="170">
             <template #default="{ row }">{{ formatTime(row.updatedAt) }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="170" fixed="right" align="right">
+          <el-table-column label="操作" width="88" fixed="right" align="right">
             <template #default="{ row }">
-              <el-button link type="primary" @click="copyText(row.slug)">复制</el-button>
-              <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
-              <el-button link type="danger" @click="confirmDelete(row)">删除</el-button>
+              <el-dropdown trigger="click" @command="handleRowCommand($event, row)">
+                <el-button text>
+                  <el-icon><MoreFilled /></el-icon>
+                </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="edit">编辑模型</el-dropdown-item>
+                    <el-dropdown-item command="delete" class="danger-item">删除模型</el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
             </template>
           </el-table-column>
         </el-table>
@@ -185,6 +204,7 @@
 </template>
 
 <script setup lang="ts">
+import { Delete, Download, MoreFilled, Plus, Refresh, RefreshRight, Search } from "@element-plus/icons-vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, reactive, ref } from "vue";
 
@@ -274,6 +294,21 @@ const apiEnabledCount = computed(
 const customCount = computed(
   () => models.value.filter((item) => item.sourceKind === "custom").length,
 );
+const editedCount = computed(
+  () => models.value.filter((item) => item.userEdited).length,
+);
+const currentFilterLabel = computed(() => {
+  switch (filter.value) {
+    case "api":
+      return "仅 API 可用";
+    case "custom":
+      return "仅自定义";
+    case "edited":
+      return "仅本地覆写";
+    default:
+      return "全部模型";
+  }
+});
 const filteredModels = computed(() => {
   const value = keyword.value.trim().toLowerCase();
   return models.value.filter((item) => {
@@ -305,12 +340,6 @@ function compact(value: number) {
         maximumFractionDigits: 1,
       }).format(value)
     : "-";
-}
-
-function listText(value: unknown) {
-  return Array.isArray(value)
-    ? value.map((item) => String(item || "").trim()).filter(Boolean).join(" / ")
-    : "";
 }
 
 function reasoningLevelText(row: ModelInfo) {
@@ -449,6 +478,16 @@ function openEdit(row: ModelInfo) {
   modalOpen.value = true;
 }
 
+function handleRowCommand(command: string | number, row: ModelInfo) {
+  if (command === "edit") {
+    openEdit(row);
+    return;
+  }
+  if (command === "delete") {
+    void confirmDelete(row);
+  }
+}
+
 async function saveModelForm() {
   if (!form.slug.trim()) {
     ElMessage.warning("请填写模型 slug");
@@ -518,16 +557,118 @@ async function confirmBatchDelete() {
   }
 }
 
-async function copyText(text: string) {
-  await navigator.clipboard.writeText(text);
-  ElMessage.success("已复制到剪贴板");
-}
-
 onMounted(() => loadData(false));
 </script>
 
 <style scoped lang="scss">
 .models-page {
+  gap: 18px;
+
+  .models-intro {
+    display: grid;
+    gap: 10px;
+
+    &__badge {
+      width: fit-content;
+      border-color: rgba(37, 99, 235, 0.18);
+      background: rgba(37, 99, 235, 0.08);
+      color: var(--primary);
+    }
+
+    h2 {
+      margin: 0;
+      font-size: 30px;
+      font-weight: 760;
+      letter-spacing: 0;
+    }
+
+    p {
+      max-width: 920px;
+      margin: 6px 0 0;
+      color: var(--text-secondary);
+      font-size: 13px;
+      line-height: 1.7;
+    }
+
+    &__badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+  }
+
+  .models-card {
+    &__header {
+      display: grid;
+      gap: 14px;
+      padding: 18px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    &__title-row {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+
+      h3 {
+        margin: 0;
+        font-size: 17px;
+        font-weight: 700;
+      }
+
+      p {
+        margin: 6px 0 0;
+        color: var(--text-secondary);
+        font-size: 12px;
+      }
+    }
+
+    &__actions {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+
+    &__filters {
+      display: grid;
+      grid-template-columns: minmax(260px, 1fr) minmax(180px, 280px);
+      gap: 12px;
+    }
+
+    &__hint {
+      color: var(--text-secondary);
+      font-size: 12px;
+      line-height: 1.7;
+    }
+  }
+
+  .mini-stat-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .mini-stat {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 30px;
+    padding: 0 12px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.45);
+    color: var(--text-secondary);
+    font-size: 12px;
+
+    strong {
+      color: var(--text-primary);
+      font-weight: 700;
+    }
+  }
+
   .models-filter {
     grid-template-columns: minmax(260px, 1fr) 170px auto;
   }
@@ -547,6 +688,20 @@ onMounted(() => loadData(false));
 
 @media (max-width: 760px) {
   .models-page {
+    .models-card {
+      &__title-row {
+        display: grid;
+      }
+
+      &__actions {
+        justify-content: flex-start;
+      }
+
+      &__filters {
+        grid-template-columns: 1fr;
+      }
+    }
+
     .models-filter {
       grid-template-columns: 1fr;
     }

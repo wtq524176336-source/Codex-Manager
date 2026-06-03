@@ -12,31 +12,28 @@ export interface AccountSummary {
   planType?: string | null;
   planTypeRaw?: string | null;
   subscriptionPlan?: string | null;
+  hasSubscription?: boolean | null;
   subscriptionExpiresAt?: number | null;
   subscriptionRenewsAt?: number | null;
   currentWindowCostUsd?: number;
+  currentWindowStartedAt?: number | null;
+  currentWindowResetsAt?: number | null;
   primaryWindowCostUsd?: number;
+  primaryWindowStartedAt?: number | null;
+  primaryWindowResetsAt?: number | null;
   secondaryWindowCostUsd?: number;
+  secondaryWindowStartedAt?: number | null;
+  secondaryWindowResetsAt?: number | null;
   note?: string | null;
   tags?: string[];
   isAvailable?: boolean;
   isLowQuota?: boolean;
   availabilityText?: string;
   availabilityLevel?: string;
+  primaryRemainPercent?: number | null;
+  secondaryRemainPercent?: number | null;
   lastRefreshAt?: number | null;
-  usage?: {
-    accountId?: string;
-    availabilityStatus?: string;
-    usedPercent?: number | null;
-    remainPercent?: number | null;
-    windowMinutes?: number | null;
-    resetsAt?: number | null;
-    secondaryUsedPercent?: number | null;
-    secondaryRemainPercent?: number | null;
-    secondaryWindowMinutes?: number | null;
-    secondaryResetsAt?: number | null;
-    capturedAt?: number | null;
-  } | null;
+  usage?: AccountUsage | null;
   [key: string]: unknown;
 }
 
@@ -45,6 +42,19 @@ export interface AccountListResult {
   total?: number;
   page?: number;
   pageSize?: number;
+}
+
+export interface AccountUsage {
+  accountId: string;
+  availabilityStatus?: string | null;
+  usedPercent?: number | null;
+  windowMinutes?: number | null;
+  resetsAt?: number | null;
+  secondaryUsedPercent?: number | null;
+  secondaryWindowMinutes?: number | null;
+  secondaryResetsAt?: number | null;
+  creditsJson?: string | null;
+  capturedAt?: number | null;
 }
 
 export interface AggregateApiSummary {

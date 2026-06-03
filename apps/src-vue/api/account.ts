@@ -1,5 +1,5 @@
 import { invoke, withAddr } from "@/api/transport";
-import { asObject, asString, normalizeAccountList } from "@/api/normalize";
+import { asObject, asString, normalizeAccountList, normalizeUsageList } from "@/api/normalize";
 
 export interface AccountListParams {
   page?: number;
@@ -57,6 +57,11 @@ export async function listAccounts(params: AccountListParams = {}) {
     withAddr({ page: params.page ?? 1, pageSize: params.pageSize ?? 500 }),
   );
   return normalizeAccountList(result);
+}
+
+export async function listAccountUsage() {
+  const result = await invoke<unknown>("service_usage_list", withAddr());
+  return normalizeUsageList(result);
 }
 
 export function refreshAccounts(accountId?: string) {

@@ -24,26 +24,73 @@
       </div>
     </div>
 
-    <div class="summary-grid">
-      <div class="summary-card">
-        <div class="summary-card__label">密钥总数</div>
+    <div class="apikey-summary">
+      <div class="summary-card summary-card--with-icon">
+        <div class="summary-card__head">
+          <span class="summary-card__label">密钥总数</span>
+          <span class="summary-card__icon summary-card__icon--primary">
+            <el-icon><Key /></el-icon>
+          </span>
+        </div>
         <div class="summary-card__value">{{ items.length }}</div>
         <div class="summary-card__hint">平台访问凭证</div>
       </div>
-      <div class="summary-card">
-        <div class="summary-card__label">启用中</div>
+      <div class="summary-card summary-card--with-icon">
+        <div class="summary-card__head">
+          <span class="summary-card__label">启用中</span>
+          <span class="summary-card__icon summary-card__icon--success">
+            <el-icon><CircleCheck /></el-icon>
+          </span>
+        </div>
         <div class="summary-card__value">{{ enabledCount }}</div>
         <div class="summary-card__hint">可调用网关</div>
       </div>
-      <div class="summary-card">
-        <div class="summary-card__label">累计 Token</div>
+      <div class="summary-card summary-card--with-icon">
+        <div class="summary-card__head">
+          <span class="summary-card__label">总使用 Token</span>
+          <span class="summary-card__icon summary-card__icon--warning">
+            <el-icon><Lightning /></el-icon>
+          </span>
+        </div>
         <div class="summary-card__value summary-card__value--small">{{ compact(totalTokens) }}</div>
-        <div class="summary-card__hint">全部密钥统计</div>
+        <div class="summary-card__hint">按全部平台密钥累计</div>
       </div>
-      <div class="summary-card">
-        <div class="summary-card__label">累计费用</div>
+      <div class="summary-card summary-card--with-icon">
+        <div class="summary-card__head">
+          <span class="summary-card__label">总费用</span>
+          <span class="summary-card__icon summary-card__icon--success">
+            <el-icon><Money /></el-icon>
+          </span>
+        </div>
         <div class="summary-card__value summary-card__value--small">{{ formatUsd(totalCost) }}</div>
-        <div class="summary-card__hint">请求日志估算</div>
+        <div class="summary-card__hint">按全部平台密钥累计</div>
+      </div>
+    </div>
+
+    <div class="endpoint-grid">
+      <div class="endpoint-card" @click="copyText(openAiEndpoint)">
+        <div class="endpoint-card__icon">
+          <el-icon><Link /></el-icon>
+        </div>
+        <div class="endpoint-card__content">
+          <strong>OpenAI / Codex 端点</strong>
+          <code :title="openAiEndpoint">{{ openAiEndpoint }}</code>
+        </div>
+        <el-button text type="primary" @click.stop="copyText(openAiEndpoint)">
+          <el-icon><CopyDocument /></el-icon>
+        </el-button>
+      </div>
+      <div class="endpoint-card" @click="copyText(nativeProtocolEndpoint)">
+        <div class="endpoint-card__icon endpoint-card__icon--native">
+          <el-icon><Connection /></el-icon>
+        </div>
+        <div class="endpoint-card__content">
+          <strong>Claude Code / Gemini CLI 端点</strong>
+          <code :title="nativeProtocolEndpoint">{{ nativeProtocolEndpoint }}</code>
+        </div>
+        <el-button text type="primary" @click.stop="copyText(nativeProtocolEndpoint)">
+          <el-icon><CopyDocument /></el-icon>
+        </el-button>
       </div>
     </div>
 
@@ -109,16 +156,48 @@
               />
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="210" fixed="right" align="right">
+          <el-table-column label="操作" width="178" fixed="right" align="center">
             <template #default="{ row }">
-              <el-button link type="primary" :loading="switchingId === row.id" @click="switchRotation(row)">
-                切换策略
-              </el-button>
-              <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
-              <el-button link type="primary" :loading="ccSwitchImportingId === row.id" @click="importToCcSwitch(row)">
-                CCSwitch
-              </el-button>
-              <el-button link type="danger" @click="confirmDelete(row)">删除</el-button>
+              <div class="icon-actions">
+                <el-tooltip content="切换策略" placement="top">
+                  <el-button
+                    text
+                    :loading="switchingId === row.id"
+                    @click="switchRotation(row)"
+                  >
+                    <el-icon><RefreshRight /></el-icon>
+                  </el-button>
+                </el-tooltip>
+                <el-tooltip content="编辑配置" placement="top">
+                  <el-button text @click="openEdit(row)">
+                    <el-icon><Setting /></el-icon>
+                  </el-button>
+                </el-tooltip>
+                <el-tooltip content="导入 ccswitch" placement="top">
+                  <el-button
+                    text
+                    :loading="ccSwitchImportingId === row.id"
+                    @click="importToCcSwitch(row)"
+                  >
+                    <el-icon><Position /></el-icon>
+                  </el-button>
+                </el-tooltip>
+                <el-dropdown trigger="click" @command="handleRowCommand($event, row)">
+                  <el-button text>
+                    <el-icon><MoreFilled /></el-icon>
+                  </el-button>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item command="switch">
+                        {{ row.rotationStrategy === "aggregate_api_rotation" ? "切换为账号轮转" : "切换为聚合API轮转" }}
+                      </el-dropdown-item>
+                      <el-dropdown-item command="edit">设置模型与推理</el-dropdown-item>
+                      <el-dropdown-item command="ccswitch">导入 ccswitch</el-dropdown-item>
+                      <el-dropdown-item command="delete" class="danger-item">删除密钥</el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
+              </div>
             </template>
           </el-table-column>
         </el-table>
@@ -213,7 +292,20 @@
 </template>
 
 <script setup lang="ts">
-import { ArrowDown } from "@element-plus/icons-vue";
+import {
+  ArrowDown,
+  CircleCheck,
+  Connection,
+  CopyDocument,
+  Key,
+  Lightning,
+  Link,
+  Money,
+  MoreFilled,
+  Position,
+  RefreshRight,
+  Setting,
+} from "@element-plus/icons-vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, reactive, ref } from "vue";
 
@@ -326,6 +418,10 @@ const gatewayOrigin = computed(() => {
     return "http://localhost:48760/v1";
   }
 });
+const openAiEndpoint = computed(() => gatewayOrigin.value);
+const nativeProtocolEndpoint = computed(
+  () => `${gatewayOrigin.value.replace(/\/v1$/, "")}/v1/messages`,
+);
 
 function compact(value: number) {
   return new Intl.NumberFormat("zh-CN", {
@@ -357,6 +453,17 @@ function normalizePlanFilterValue(value?: string | null) {
 
 function normalizeEditableServiceTier(value?: string | null) {
   return String(value || "").trim().toLowerCase() === "fast" ? "fast" : "";
+}
+
+function normalizeEditableProtocolType(value?: string | null) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return "openai_compat";
+  if (["codex", "claude_code", "openai", "openai_compat"].includes(normalized)) {
+    return "openai_compat";
+  }
+  if (normalized === "anthropic" || normalized === "anthropic_native") return "anthropic_native";
+  if (normalized === "gemini" || normalized === "gemini_native") return "gemini_native";
+  return normalized;
 }
 
 function buildCcSwitchProviderName(name?: string | null, id?: string | null): string {
@@ -438,7 +545,7 @@ function openEdit(row: ApiKeySummary) {
     modelSlug: row.modelSlug || row.model || "",
     reasoningEffort: row.reasoningEffort || "",
     serviceTier: normalizeEditableServiceTier(row.serviceTier),
-    protocolType: row.protocol || row.clientType || "openai_compat",
+    protocolType: normalizeEditableProtocolType(row.protocol || row.clientType),
     upstreamBaseUrl: row.upstreamBaseUrl || "",
     staticHeadersJson: row.staticHeadersJson || "",
     rotationStrategy: row.rotationStrategy || "account_rotation",
@@ -537,7 +644,7 @@ async function switchRotation(row: ApiKeySummary) {
       modelSlug: row.modelSlug || row.model,
       reasoningEffort: row.reasoningEffort,
       serviceTier: normalizeEditableServiceTier(row.serviceTier),
-      protocolType: row.protocol || row.clientType || "openai_compat",
+      protocolType: normalizeEditableProtocolType(row.protocol || row.clientType),
       upstreamBaseUrl: row.upstreamBaseUrl,
       staticHeadersJson: row.staticHeadersJson,
       rotationStrategy: next,
@@ -551,6 +658,24 @@ async function switchRotation(row: ApiKeySummary) {
     ElMessage.error(getErrorMessage(error));
   } finally {
     switchingId.value = "";
+  }
+}
+
+function handleRowCommand(command: string | number | object, row: ApiKeySummary) {
+  if (command === "switch") {
+    void switchRotation(row);
+    return;
+  }
+  if (command === "edit") {
+    openEdit(row);
+    return;
+  }
+  if (command === "ccswitch") {
+    void importToCcSwitch(row);
+    return;
+  }
+  if (command === "delete") {
+    void confirmDelete(row);
   }
 }
 
@@ -588,8 +713,7 @@ async function copyText(text: string) {
 }
 
 function copyEndpoint(command: string | number) {
-  const endpoint =
-    command === "native" ? `${gatewayOrigin.value.replace(/\/v1$/, "")}/v1/messages` : gatewayOrigin.value;
+  const endpoint = command === "native" ? nativeProtocolEndpoint.value : openAiEndpoint.value;
   void copyText(endpoint);
 }
 
@@ -598,6 +722,108 @@ onMounted(loadData);
 
 <style scoped lang="scss">
 .apikey-page {
+  .apikey-summary {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 16px;
+  }
+
+  .summary-card--with-icon {
+    .summary-card__head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .summary-card__icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 34px;
+      height: 34px;
+      border-radius: 8px;
+      color: var(--el-color-primary);
+      background: color-mix(in srgb, var(--el-color-primary) 12%, transparent);
+
+      &--success {
+        color: var(--el-color-success);
+        background: color-mix(in srgb, var(--el-color-success) 12%, transparent);
+      }
+
+      &--warning {
+        color: var(--el-color-warning);
+        background: color-mix(in srgb, var(--el-color-warning) 14%, transparent);
+      }
+    }
+  }
+
+  .endpoint-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+  }
+
+  .endpoint-card {
+    display: grid;
+    grid-template-columns: 40px minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: center;
+    min-width: 0;
+    padding: 14px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    background: var(--card-bg);
+    box-shadow: var(--shadow-card);
+    cursor: pointer;
+    transition:
+      border-color 0.18s ease,
+      transform 0.18s ease;
+
+    &:hover {
+      border-color: color-mix(in srgb, var(--el-color-primary) 34%, var(--border-subtle));
+      transform: translateY(-1px);
+    }
+
+    &__icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 40px;
+      height: 40px;
+      border-radius: 8px;
+      color: var(--el-color-primary);
+      background: color-mix(in srgb, var(--el-color-primary) 12%, transparent);
+
+      &--native {
+        color: var(--el-color-success);
+        background: color-mix(in srgb, var(--el-color-success) 12%, transparent);
+      }
+    }
+
+    &__content {
+      display: grid;
+      gap: 5px;
+      min-width: 0;
+
+      strong {
+        overflow: hidden;
+        font-size: 13px;
+        font-weight: 650;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      code {
+        overflow: hidden;
+        color: var(--text-secondary);
+        font-size: 11px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+    }
+  }
+
   .apikey-filter {
     grid-template-columns: minmax(260px, 1fr) 180px auto;
   }
@@ -609,6 +835,24 @@ onMounted(loadData);
   .row-actions {
     justify-content: flex-start;
     margin-top: 4px;
+  }
+
+  .icon-actions {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    min-width: 144px;
+
+    .el-button {
+      width: 30px;
+      height: 30px;
+      padding: 0;
+    }
+  }
+
+  .danger-item {
+    color: var(--el-color-danger);
   }
 
   .form-extra {
@@ -630,8 +874,21 @@ onMounted(loadData);
 
 @media (max-width: 760px) {
   .apikey-page {
+    .apikey-summary,
+    .endpoint-grid {
+      grid-template-columns: 1fr;
+    }
+
     .apikey-filter {
       grid-template-columns: 1fr;
+    }
+  }
+}
+
+@media (min-width: 761px) and (max-width: 1180px) {
+  .apikey-page {
+    .apikey-summary {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
   }
 }

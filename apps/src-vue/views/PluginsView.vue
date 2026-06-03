@@ -71,14 +71,17 @@
             </div>
             <div class="plugin-card__footer">
               <span>{{ item.tasks?.length || 0 }} 个任务</span>
-              <el-button
-                size="small"
-                :type="installedMap[item.id] ? 'default' : 'primary'"
-                :loading="operatingId === item.id"
-                @click="installedMap[item.id] ? updateInstalledPlugin(item.id) : installCatalogPlugin(item.id)"
-              >
-                {{ installedMap[item.id] ? "更新" : "安装" }}
-              </el-button>
+              <div class="plugin-card__actions">
+                <el-button size="small" @click="openCatalogDetail(item)">详情</el-button>
+                <el-button
+                  size="small"
+                  :type="installedMap[item.id] ? 'default' : 'primary'"
+                  :loading="operatingId === item.id"
+                  @click="installedMap[item.id] ? updateInstalledPlugin(item.id) : installCatalogPlugin(item.id)"
+                >
+                  {{ installedMap[item.id] ? "更新" : "安装" }}
+                </el-button>
+              </div>
             </div>
           </div>
           <div v-if="!filteredCatalog.length" class="empty-hint">暂无插件</div>
@@ -104,12 +107,16 @@
             </div>
             <p v-if="item.lastError" class="plugin-error">{{ item.lastError }}</p>
             <div class="plugin-card__footer">
-              <el-button size="small" :loading="operatingId === item.pluginId" @click="togglePlugin(item)">
-                {{ item.status === "enabled" ? "禁用" : "启用" }}
-              </el-button>
-              <el-button size="small" type="danger" :loading="operatingId === item.pluginId" @click="removePlugin(item)">
-                卸载
-              </el-button>
+              <span>{{ formatSource(item.sourceUrl) }}</span>
+              <div class="plugin-card__actions">
+                <el-button size="small" @click="openInstalledDetail(item)">详情</el-button>
+                <el-button size="small" :loading="operatingId === item.pluginId" @click="togglePlugin(item)">
+                  {{ item.status === "enabled" ? "禁用" : "启用" }}
+                </el-button>
+                <el-button size="small" type="danger" :loading="operatingId === item.pluginId" @click="removePlugin(item)">
+                  卸载
+                </el-button>
+              </div>
             </div>
           </div>
           <div v-if="!installed.length" class="empty-hint">暂无已安装插件</div>
@@ -184,6 +191,124 @@
         </div>
       </el-tab-pane>
     </el-tabs>
+
+    <el-dialog
+      v-model="detailOpen"
+      :title="selectedDetail?.name || '插件详情'"
+      width="860px"
+      class="plugin-detail-dialog"
+    >
+      <div v-if="selectedDetail" class="plugin-detail">
+        <div class="plugin-detail__head">
+          <div>
+            <div class="plugin-detail__title">
+              <strong>{{ selectedDetail.name }}</strong>
+              <el-tag effect="light">v{{ selectedDetail.version }}</el-tag>
+              <el-tag v-if="selectedInstalledItem" :type="selectedInstalledItem.status === 'enabled' ? 'success' : 'info'">
+                {{ formatPluginStatus(selectedInstalledItem.status) }}
+              </el-tag>
+            </div>
+            <p>{{ selectedDetail.description || "暂无描述" }}</p>
+          </div>
+        </div>
+
+        <div class="plugin-detail__meta">
+          <span v-if="selectedDetail.author">作者：{{ selectedDetail.author }}</span>
+          <span>来源：{{ formatSource(selectedDetail.sourceUrl) }}</span>
+          <span>运行时：{{ formatRuntimeKind(selectedDetail.runtimeKind) }}</span>
+          <span>清单版本：{{ selectedDetail.manifestVersion || "-" }}</span>
+          <span v-if="selectedDetail.category">分类：{{ formatMarketCategory(selectedDetail.category) }}</span>
+          <span v-if="selectedTags.length">标签：{{ selectedTags.join(" / ") }}</span>
+        </div>
+
+        <section class="plugin-detail__section">
+          <h4>权限</h4>
+          <div v-if="selectedPermissions.length" class="plugin-card__badges">
+            <el-tag v-for="permission in selectedPermissions" :key="permission" size="small" effect="plain">
+              {{ formatPermissionLabel(permission) }}
+            </el-tag>
+          </div>
+          <p v-else>无需额外权限</p>
+        </section>
+
+        <section class="plugin-detail__section">
+          <h4>任务</h4>
+          <div v-if="selectedTaskRows.length" class="plugin-detail__list">
+            <div v-for="task in selectedTaskRows" :key="task.id" class="plugin-detail__item">
+              <div>
+                <strong>{{ task.name }}</strong>
+                <span>{{ task.description || formatSchedule(task) }}</span>
+                <span v-if="task.entrypoint">入口：{{ task.entrypoint }}</span>
+              </div>
+              <div class="plugin-detail__item-actions">
+                <el-tag effect="light">{{ task.enabled === false ? "停用" : "启用" }}</el-tag>
+                <el-button
+                  v-if="selectedInstalledItem"
+                  size="small"
+                  :loading="operatingId === task.id"
+                  @click="runTask(task.id)"
+                >
+                  运行
+                </el-button>
+              </div>
+            </div>
+          </div>
+          <p v-else>暂无任务</p>
+        </section>
+
+        <section v-if="selectedInstalledItem" class="plugin-detail__section">
+          <h4>最近运行</h4>
+          <div v-if="selectedLogRows.length" class="plugin-detail__list">
+            <div v-for="log in selectedLogRows" :key="log.id" class="plugin-detail__item">
+              <div>
+                <strong>{{ log.taskName || log.taskId || log.runType || "未知任务" }}</strong>
+                <span>{{ formatTime(log.startedAt) }} · {{ formatDuration(log.durationMs) }}</span>
+                <span v-if="log.error" class="plugin-error">{{ log.error }}</span>
+                <span v-else-if="log.output">{{ stringifyOutput(log.output) }}</span>
+              </div>
+              <el-tag :type="log.status === 'success' || log.status === 'ok' ? 'success' : 'danger'">
+                {{ log.status }}
+              </el-tag>
+            </div>
+          </div>
+          <p v-else>暂无日志</p>
+        </section>
+      </div>
+      <template #footer>
+        <el-button @click="detailOpen = false">关闭</el-button>
+        <el-button
+          v-if="selectedCatalogItem && !selectedInstalledItem"
+          type="primary"
+          :loading="operatingId === selectedCatalogItem.id"
+          @click="installCatalogPlugin(selectedCatalogItem.id)"
+        >
+          安装
+        </el-button>
+        <el-button
+          v-if="selectedCatalogItem && selectedInstalledItem && hasSelectedUpdate"
+          type="primary"
+          :loading="operatingId === selectedCatalogItem.id"
+          @click="updateInstalledPlugin(selectedCatalogItem.id)"
+        >
+          更新到 v{{ selectedCatalogItem.version }}
+        </el-button>
+        <el-button
+          v-if="selectedInstalledItem"
+          :loading="operatingId === selectedInstalledItem.pluginId"
+          @click="togglePlugin(selectedInstalledItem)"
+        >
+          {{ selectedInstalledItem.status === "enabled" ? "停用" : "启用" }}
+        </el-button>
+        <el-button
+          v-if="selectedInstalledItem"
+          type="danger"
+          :loading="operatingId === selectedInstalledItem.pluginId"
+          @click="removePlugin(selectedInstalledItem)"
+        >
+          卸载
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -211,6 +336,9 @@ const keyword = ref("");
 const catalogFilter = ref("installed");
 const loading = ref(false);
 const operatingId = ref("");
+const detailOpen = ref(false);
+const selectedPluginId = ref("");
+const selectedPluginKind = ref<"catalog" | "installed">("catalog");
 const catalog = ref<PluginCatalogEntry[]>([]);
 const installed = ref<InstalledPluginSummary[]>([]);
 const tasks = ref<PluginTaskSummary[]>([]);
@@ -227,6 +355,44 @@ const installedMap = computed<Record<string, InstalledPluginSummary>>(() =>
     return result;
   }, {}),
 );
+const catalogMap = computed<Record<string, PluginCatalogEntry>>(() =>
+  catalog.value.reduce<Record<string, PluginCatalogEntry>>((result, item) => {
+    result[item.id] = item;
+    return result;
+  }, {}),
+);
+const selectedCatalogItem = computed(() => catalogMap.value[selectedPluginId.value] || null);
+const selectedInstalledItem = computed(() => installedMap.value[selectedPluginId.value] || null);
+const selectedDetail = computed<PluginCatalogEntry | InstalledPluginSummary | null>(() =>
+  selectedPluginKind.value === "installed"
+    ? selectedInstalledItem.value || selectedCatalogItem.value
+    : selectedCatalogItem.value || selectedInstalledItem.value,
+);
+const selectedPermissions = computed(() => selectedDetail.value?.permissions || []);
+const selectedTags = computed(() => selectedDetail.value?.tags || []);
+const selectedTaskRows = computed<PluginTaskSummary[]>(() => {
+  if (selectedInstalledItem.value) {
+    return tasks.value.filter((task) => task.pluginId === selectedInstalledItem.value?.pluginId);
+  }
+  return (selectedCatalogItem.value?.tasks || []).map((task, index) => ({
+    id: `${selectedCatalogItem.value?.id || "catalog"}-${task.name || index}`,
+    pluginId: selectedCatalogItem.value?.id || "",
+    pluginName: selectedCatalogItem.value?.name || "",
+    name: task.name || `任务 ${index + 1}`,
+    description: task.description || null,
+    entrypoint: task.entrypoint || null,
+    scheduleKind: task.scheduleKind || null,
+    intervalSeconds: task.intervalSeconds || null,
+    enabled: true,
+  }));
+});
+const selectedLogRows = computed(() =>
+  logs.value.filter((log) => log.pluginId === selectedPluginId.value).slice(0, 5),
+);
+const hasSelectedUpdate = computed(() => {
+  if (!selectedCatalogItem.value || !selectedInstalledItem.value) return false;
+  return compareVersion(selectedCatalogItem.value.version, selectedInstalledItem.value.version) > 0;
+});
 const filteredCatalog = computed(() => {
   const value = keyword.value.trim().toLowerCase();
   return catalog.value.filter((item) => {
@@ -305,6 +471,18 @@ function runTask(taskId: string) {
   void operate(taskId, () => runPluginTask(taskId), "任务已运行");
 }
 
+function openCatalogDetail(item: PluginCatalogEntry) {
+  selectedPluginId.value = item.id;
+  selectedPluginKind.value = "catalog";
+  detailOpen.value = true;
+}
+
+function openInstalledDetail(item: InstalledPluginSummary) {
+  selectedPluginId.value = item.pluginId;
+  selectedPluginKind.value = "installed";
+  detailOpen.value = true;
+}
+
 function formatPermissionLabel(permission: string) {
   switch (permission) {
     case "accounts:cleanup":
@@ -337,6 +515,12 @@ function formatRuntimeKind(value?: string | null) {
   return value || "-";
 }
 
+function formatSource(value?: string | null) {
+  if (!value) return "内置市场";
+  if (value === "builtin://codexmanager") return "内置精选市场";
+  return value;
+}
+
 function formatPluginStatus(status: string) {
   if (status === "enabled") return "启用中";
   if (status === "broken") return "异常";
@@ -353,6 +537,22 @@ function formatTime(value?: number | null) {
   if (!value) return "-";
   const milliseconds = value > 10_000_000_000 ? value : value * 1000;
   return new Date(milliseconds).toLocaleString("zh-CN", { hour12: false });
+}
+
+function formatDuration(value?: number | null) {
+  if (value == null) return "-";
+  if (value >= 10_000) return `${Math.round(value / 1000)}s`;
+  if (value >= 1000) return `${(value / 1000).toFixed(1).replace(/\.0$/, "")}s`;
+  return `${Math.round(value)}ms`;
+}
+
+function stringifyOutput(value: unknown) {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
 }
 
 function compareVersion(left: string, right: string) {
@@ -471,7 +671,8 @@ onMounted(() => {
 
     &__meta,
     &__footer,
-    &__badges {
+    &__badges,
+    &__actions {
       display: flex;
       flex-wrap: wrap;
       align-items: center;
@@ -487,6 +688,10 @@ onMounted(() => {
     &__footer {
       justify-content: space-between;
       padding-top: 4px;
+    }
+
+    &__actions {
+      justify-content: flex-end;
     }
   }
 
@@ -508,6 +713,98 @@ onMounted(() => {
     span {
       color: var(--text-secondary);
       font-size: 12px;
+    }
+  }
+
+  .plugin-detail {
+    display: grid;
+    gap: 16px;
+
+    &__head {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+
+      p {
+        margin: 8px 0 0;
+        color: var(--text-secondary);
+        font-size: 13px;
+        line-height: 1.7;
+      }
+    }
+
+    &__title,
+    &__meta {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+    }
+
+    &__title {
+      strong {
+        font-size: 18px;
+      }
+    }
+
+    &__meta {
+      color: var(--text-secondary);
+      font-size: 12px;
+    }
+
+    &__section {
+      display: grid;
+      gap: 10px;
+      padding: 14px;
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      background: var(--table-section-bg);
+
+      h4,
+      p {
+        margin: 0;
+      }
+
+      p {
+        color: var(--text-secondary);
+        font-size: 13px;
+      }
+    }
+
+    &__list {
+      display: grid;
+      gap: 10px;
+    }
+
+    &__item {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px;
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      background: var(--card-bg);
+
+      > div:first-child {
+        display: grid;
+        gap: 4px;
+        min-width: 0;
+      }
+
+      span {
+        color: var(--text-secondary);
+        font-size: 12px;
+        line-height: 1.6;
+        word-break: break-word;
+      }
+    }
+
+    &__item-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
     }
   }
 }

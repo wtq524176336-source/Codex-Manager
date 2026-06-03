@@ -1,6 +1,7 @@
 import type {
   AccountListResult,
   AccountSummary,
+  AccountUsage,
   AggregateApiSecretResult,
   AggregateApiSummary,
   AggregateApiTestResult,
@@ -89,19 +90,233 @@ function firstNumber(source: UnknownRecord, keys: string[], fallback: number | n
   return fallback;
 }
 
-function normalizeAccount(item: unknown): AccountSummary | null {
+function remainingPercent(value: number | null | undefined): number | null {
+  const parsed = toNullableNumber(value);
+  if (parsed == null) return null;
+  return Math.max(0, Math.min(100, Math.round(100 - parsed)));
+}
+
+function hasSecondarySignal(usage?: AccountUsage | null): boolean {
+  return (
+    toNullableNumber(usage?.secondaryUsedPercent) != null ||
+    toNullableNumber(usage?.secondaryWindowMinutes) != null
+  );
+}
+
+function isLongWindow(windowMinutes: number | null | undefined): boolean {
+  const parsed = toNullableNumber(windowMinutes);
+  return parsed != null && parsed > 24 * 60 + 3;
+}
+
+function parseJsonObject(raw: string | null | undefined): UnknownRecord | null {
+  const text = String(raw || "").trim();
+  if (!text) return null;
+  try {
+    const parsed = JSON.parse(text);
+    return asObject(parsed);
+  } catch {
+    return null;
+  }
+}
+
+function extractPlanTypeRecursive(value: unknown): string | null {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const nested = extractPlanTypeRecursive(item);
+      if (nested) return nested;
+    }
+    return null;
+  }
+  const source = asObject(value);
+  if (!Object.keys(source).length) return null;
+  for (const key of [
+    "plan_type",
+    "planType",
+    "subscription_tier",
+    "subscriptionTier",
+    "tier",
+    "account_type",
+    "accountType",
+    "type",
+  ]) {
+    const text = asString(source[key]).toLowerCase();
+    if (text) return text;
+  }
+  for (const nested of Object.values(source)) {
+    const result = extractPlanTypeRecursive(nested);
+    if (result) return result;
+  }
+  return null;
+}
+
+function isFreePlanUsage(raw: string | null | undefined): boolean {
+  const planType = extractPlanTypeRecursive(parseJsonObject(raw));
+  return Boolean(planType && planType.includes("free"));
+}
+
+function getUsageDisplayBuckets(usage?: AccountUsage | null) {
+  const hasPrimarySignal =
+    toNullableNumber(usage?.usedPercent) != null || toNullableNumber(usage?.windowMinutes) != null;
+  const secondarySignal = hasSecondarySignal(usage);
+  const secondaryOnly =
+    hasPrimarySignal &&
+    !secondarySignal &&
+    (isLongWindow(usage?.windowMinutes) || isFreePlanUsage(usage?.creditsJson));
+
+  if (secondaryOnly) {
+    return {
+      primaryRemainPercent: null,
+      primaryResetsAt: null,
+      secondaryRemainPercent: remainingPercent(usage?.usedPercent),
+      secondaryResetsAt: toNullableNumber(usage?.resetsAt),
+    };
+  }
+  return {
+    primaryRemainPercent: remainingPercent(usage?.usedPercent),
+    primaryResetsAt: toNullableNumber(usage?.resetsAt),
+    secondaryRemainPercent: remainingPercent(usage?.secondaryUsedPercent),
+    secondaryResetsAt: toNullableNumber(usage?.secondaryResetsAt),
+  };
+}
+
+function normalizedAccountStatus(account?: { status?: string | null } | null): string {
+  return String(account?.status || "").trim().toLowerCase();
+}
+
+function normalizedAccountStatusReason(account?: { statusReason?: string | null } | null): string {
+  return String(account?.statusReason || "").trim().toLowerCase();
+}
+
+function isLimitedStatus(account?: { status?: string | null } | null): boolean {
+  return normalizedAccountStatus(account) === "limited";
+}
+
+function isBannedStatus(account?: { status?: string | null; statusReason?: string | null } | null): boolean {
+  const status = normalizedAccountStatus(account);
+  if (status !== "banned" && status !== "unavailable") return false;
+  const reason = normalizedAccountStatusReason(account);
+  return (
+    status === "banned" ||
+    reason === "account_deactivated" ||
+    reason === "workspace_deactivated" ||
+    reason === "deactivated_workspace"
+  );
+}
+
+function calcAvailability(
+  usage: AccountUsage | null | undefined,
+  account: { status?: string | null; statusReason?: string | null },
+) {
+  const primaryExhausted = (usage?.usedPercent ?? 0) >= 100;
+  const secondaryExhausted = (usage?.secondaryUsedPercent ?? 0) >= 100;
+  if (isBannedStatus(account)) return { text: "封禁", level: "bad" };
+  if (isLimitedStatus(account)) return { text: "限流", level: "bad" };
+  if (normalizedAccountStatus(account) === "unavailable") return { text: "不可用", level: "bad" };
+  if (!usage) return { text: "正常", level: "ok" };
+
+  const availabilityStatus = String(usage.availabilityStatus || "").trim().toLowerCase();
+  const hasPrimarySignal =
+    toNullableNumber(usage.usedPercent) != null || toNullableNumber(usage.windowMinutes) != null;
+  const secondarySignal = hasSecondarySignal(usage);
+  const secondaryOnly =
+    hasPrimarySignal &&
+    !secondarySignal &&
+    (isLongWindow(usage.windowMinutes) || isFreePlanUsage(usage.creditsJson));
+
+  if (availabilityStatus === "available") return { text: "可用", level: "ok" };
+  if (availabilityStatus === "primary_window_available_only") {
+    return { text: secondaryOnly ? "仅7天额度" : "7天窗口未提供", level: "ok" };
+  }
+  if (availabilityStatus === "unavailable") {
+    return primaryExhausted || secondaryExhausted
+      ? { text: "限流", level: "bad" }
+      : { text: "不可用", level: "bad" };
+  }
+  if (availabilityStatus === "unknown") return { text: "未知", level: "unknown" };
+
+  const primaryMissing =
+    toNullableNumber(usage.usedPercent) == null || toNullableNumber(usage.windowMinutes) == null;
+  const secondaryMissing =
+    toNullableNumber(usage.secondaryUsedPercent) == null ||
+    toNullableNumber(usage.secondaryWindowMinutes) == null;
+  if (primaryMissing) return { text: "用量缺失", level: "bad" };
+  if (primaryExhausted) return { text: "限流", level: "bad" };
+  if (!secondarySignal) return { text: secondaryOnly ? "仅7天额度" : "7天窗口未提供", level: "ok" };
+  if (secondaryMissing) return { text: "用量缺失", level: "bad" };
+  if (secondaryExhausted) return { text: "限流", level: "bad" };
+  return { text: "可用", level: "ok" };
+}
+
+function isLowQuotaUsage(usage?: AccountUsage | null): boolean {
+  const buckets = getUsageDisplayBuckets(usage);
+  const primaryRemain = buckets.primaryRemainPercent;
+  const secondaryRemain = buckets.secondaryRemainPercent;
+  return (
+    (primaryRemain != null && primaryRemain > 0 && primaryRemain <= 20) ||
+    (secondaryRemain != null && secondaryRemain > 0 && secondaryRemain <= 20)
+  );
+}
+
+function canParticipateInRouting(level: string): boolean {
+  return level !== "warn" && level !== "bad";
+}
+
+export function normalizeUsageSnapshot(payload: unknown): AccountUsage | null {
+  const source = asObject(payload);
+  const accountId = firstString(source, ["accountId", "account_id"]);
+  if (!accountId) return null;
+  return {
+    accountId,
+    availabilityStatus: firstString(source, ["availabilityStatus", "availability_status"]) || null,
+    usedPercent: firstNumber(source, ["usedPercent", "used_percent"]),
+    windowMinutes: firstNumber(source, ["windowMinutes", "window_minutes"]),
+    resetsAt: firstNumber(source, ["resetsAt", "resets_at"]),
+    secondaryUsedPercent: firstNumber(source, [
+      "secondaryUsedPercent",
+      "secondary_used_percent",
+    ]),
+    secondaryWindowMinutes: firstNumber(source, [
+      "secondaryWindowMinutes",
+      "secondary_window_minutes",
+    ]),
+    secondaryResetsAt: firstNumber(source, ["secondaryResetsAt", "secondary_resets_at"]),
+    creditsJson: firstString(source, ["creditsJson", "credits_json"]) || null,
+    capturedAt: firstNumber(source, ["capturedAt", "captured_at"]),
+  };
+}
+
+export function normalizeUsageList(payload: unknown): AccountUsage[] {
+  const source = asObject(payload);
+  return asArray(source.items ?? payload)
+    .map((item) => normalizeUsageSnapshot(item))
+    .filter((item): item is AccountUsage => Boolean(item));
+}
+
+function buildUsageMap(usages: AccountUsage[]): Map<string, AccountUsage> {
+  return new Map(usages.map((item) => [item.accountId, item]));
+}
+
+function normalizeAccount(item: unknown, usage?: AccountUsage | null): AccountSummary | null {
   const source = asObject(item);
   const id = asString(source.id);
   if (!id) return null;
-  const usage = asObject(source.usage);
   const label = firstString(source, ["label", "name"], id);
   const status = asString(source.status);
   const statusReason = firstString(source, ["statusReason", "status_reason"]);
-  const availabilityStatus = firstString(usage, ["availabilityStatus", "availability_status"]);
-  const isAvailable = toNullableBoolean(source.isAvailable ?? source.is_available);
-  const unavailableByStatus = [status, statusReason, availabilityStatus].some((value) =>
-    ["error", "disabled", "expired", "unavailable", "banned"].includes(value.toLowerCase()),
-  );
+  const usageFromSource = normalizeUsageSnapshot(source.usage) || usage || null;
+  const availability = calcAvailability(usageFromSource, { status, statusReason });
+  const usageBuckets = getUsageDisplayBuckets(usageFromSource);
+  const hasSubscription =
+    toNullableBoolean(source.hasSubscription ?? source.has_subscription) ?? null;
+  const subscriptionExpiresAt = firstNumber(source, [
+    "subscriptionExpiresAt",
+    "subscription_expires_at",
+  ]);
+  const isSubscriptionExpired =
+    subscriptionExpiresAt != null && subscriptionExpiresAt <= Math.floor(Date.now() / 1000);
+  const isSubscriptionInactive = hasSubscription === false || isSubscriptionExpired;
+  const rawPlanType =
+    firstString(source, ["planType", "plan_type", "subscriptionPlan", "subscription_plan"]) || null;
 
   return {
     ...source,
@@ -115,55 +330,64 @@ function normalizeAccount(item: unknown): AccountSummary | null {
     preferred: toNullableBoolean(source.preferred) ?? false,
     status,
     statusReason,
-    planType:
-      firstString(source, ["planType", "plan_type", "subscriptionPlan", "subscription_plan"]) ||
-      null,
+    planType: isSubscriptionInactive ? "free" : rawPlanType,
     planTypeRaw: firstString(source, ["planTypeRaw", "plan_type_raw"]) || null,
-    subscriptionPlan: firstString(source, ["subscriptionPlan", "subscription_plan"]) || null,
-    subscriptionExpiresAt: firstNumber(source, ["subscriptionExpiresAt", "subscription_expires_at"]),
-    subscriptionRenewsAt: firstNumber(source, ["subscriptionRenewsAt", "subscription_renews_at"]),
+    hasSubscription: isSubscriptionInactive ? false : hasSubscription,
+    subscriptionPlan: isSubscriptionInactive
+      ? null
+      : firstString(source, ["subscriptionPlan", "subscription_plan"]) || null,
+    subscriptionExpiresAt,
+    subscriptionRenewsAt: isSubscriptionInactive
+      ? null
+      : firstNumber(source, ["subscriptionRenewsAt", "subscription_renews_at"]),
     currentWindowCostUsd: toNumber(source.currentWindowCostUsd ?? source.current_window_cost_usd, 0),
+    currentWindowStartedAt: firstNumber(source, [
+      "currentWindowStartedAt",
+      "current_window_started_at",
+    ]),
+    currentWindowResetsAt: firstNumber(source, [
+      "currentWindowResetsAt",
+      "current_window_resets_at",
+    ]),
     primaryWindowCostUsd: toNumber(source.primaryWindowCostUsd ?? source.primary_window_cost_usd, 0),
+    primaryWindowStartedAt: firstNumber(source, [
+      "primaryWindowStartedAt",
+      "primary_window_started_at",
+    ]),
+    primaryWindowResetsAt: firstNumber(source, [
+      "primaryWindowResetsAt",
+      "primary_window_resets_at",
+    ]),
     secondaryWindowCostUsd: toNumber(
       source.secondaryWindowCostUsd ?? source.secondary_window_cost_usd,
       0,
     ),
+    secondaryWindowStartedAt: firstNumber(source, [
+      "secondaryWindowStartedAt",
+      "secondary_window_started_at",
+    ]),
+    secondaryWindowResetsAt: firstNumber(source, [
+      "secondaryWindowResetsAt",
+      "secondary_window_resets_at",
+    ]),
     note: firstString(source, ["note"]) || null,
     tags: asStringArray(source.tags),
-    isAvailable: isAvailable ?? !unavailableByStatus,
-    isLowQuota: toNullableBoolean(source.isLowQuota ?? source.is_low_quota) ?? false,
-    availabilityText: firstString(source, ["availabilityText", "availability_text"]) || status,
-    availabilityLevel: firstString(source, ["availabilityLevel", "availability_level"]),
-    lastRefreshAt: firstNumber(source, ["lastRefreshAt", "last_refresh_at"]),
-    usage: {
-      accountId: firstString(usage, ["accountId", "account_id"], id),
-      availabilityStatus,
-      usedPercent: firstNumber(usage, ["usedPercent", "used_percent"]),
-      remainPercent: firstNumber(usage, ["remainPercent", "remain_percent"]),
-      windowMinutes: firstNumber(usage, ["windowMinutes", "window_minutes"]),
-      resetsAt: firstNumber(usage, ["resetsAt", "resets_at"]),
-      secondaryUsedPercent: firstNumber(usage, [
-        "secondaryUsedPercent",
-        "secondary_used_percent",
-      ]),
-      secondaryRemainPercent: firstNumber(usage, [
-        "secondaryRemainPercent",
-        "secondary_remain_percent",
-      ]),
-      secondaryWindowMinutes: firstNumber(usage, [
-        "secondaryWindowMinutes",
-        "secondary_window_minutes",
-      ]),
-      secondaryResetsAt: firstNumber(usage, ["secondaryResetsAt", "secondary_resets_at"]),
-      capturedAt: firstNumber(usage, ["capturedAt", "captured_at"]),
-    },
+    isAvailable: canParticipateInRouting(availability.level),
+    isLowQuota: isLowQuotaUsage(usageFromSource),
+    availabilityText: availability.text,
+    availabilityLevel: availability.level,
+    primaryRemainPercent: usageBuckets.primaryRemainPercent,
+    secondaryRemainPercent: usageBuckets.secondaryRemainPercent,
+    lastRefreshAt: usageFromSource?.capturedAt ?? firstNumber(source, ["lastRefreshAt", "last_refresh_at"]),
+    usage: usageFromSource,
   };
 }
 
-export function normalizeAccountList(payload: unknown): AccountListResult {
+export function normalizeAccountList(payload: unknown, usages: AccountUsage[] = []): AccountListResult {
   const source = asObject(payload);
+  const usageMap = buildUsageMap(usages);
   const items = asArray(source.items ?? payload)
-    .map((item) => normalizeAccount(item))
+    .map((item) => normalizeAccount(item, usageMap.get(asString(asObject(item).id))))
     .filter((item): item is AccountSummary => Boolean(item));
 
   return {
@@ -172,6 +396,14 @@ export function normalizeAccountList(payload: unknown): AccountListResult {
     page: toNullableNumber(source.page) ?? 1,
     pageSize: toNullableNumber(source.pageSize ?? source.page_size) ?? items.length,
   };
+}
+
+export function attachUsagesToAccounts(
+  accounts: AccountSummary[],
+  usages: AccountUsage[],
+): AccountSummary[] {
+  const usageMap = buildUsageMap(usages);
+  return accounts.map((account) => normalizeAccount(account, usageMap.get(account.id)) || account);
 }
 
 function normalizeAggregateApi(item: unknown): AggregateApiSummary | null {

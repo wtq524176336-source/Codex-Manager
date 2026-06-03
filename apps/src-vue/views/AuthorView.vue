@@ -91,6 +91,9 @@
                 <span>微信</span>
                 <strong>{{ authorWechatId }}</strong>
               </div>
+              <div class="wechat-qr">
+                <img src="/author-wechat.jpg" alt="作者微信二维码" />
+              </div>
               <div>
                 <span>Telegram 群组</span>
                 <el-button link type="primary" @click="openLink(authorTelegramGroupUrl)">
@@ -104,13 +107,15 @@
             <div class="author-card__head">
               <el-icon><Money /></el-icon>
               <div>
-                <h3>随缘支持</h3>
+                <h3>赞助支持</h3>
                 <p>项目持续维护、修问题和做适配，欢迎随缘支持。</p>
               </div>
             </div>
             <div class="support-grid">
               <div v-for="item in supportImages" :key="item.key" class="support-item">
-                <div class="support-placeholder">{{ item.title }}</div>
+                <div class="support-placeholder">
+                  <img :src="item.src" :alt="item.title" />
+                </div>
                 <strong>{{ item.title }}</strong>
                 <span>{{ item.description }}</span>
               </div>
@@ -125,7 +130,7 @@
 <script setup lang="ts">
 import { InfoFilled, Link, MagicStick, Message, Money, Monitor, Promotion } from "@element-plus/icons-vue";
 import { ElMessage } from "element-plus";
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 
 import { getErrorMessage } from "@/api/http";
 import { openInBrowser } from "@/api/system";
@@ -153,11 +158,13 @@ const supportImages = [
     key: "alipay",
     title: "支付宝赞助码",
     description: "如果这个项目帮你省了时间，可以请作者喝杯咖啡。",
+    src: "/author-alipay.jpg",
   },
   {
     key: "wechat-pay",
     title: "微信赞助码",
     description: "项目持续维护、修问题和做适配，欢迎随缘支持。",
+    src: "/author-wechat-pay.jpg",
   },
 ];
 const visibleSponsors = computed(() => authorContent.value?.authorSponsors || []);
@@ -212,9 +219,17 @@ async function openLink(url: string) {
   }
 }
 
+let refreshTimer: number | undefined;
+
 onMounted(() => {
   void loadContent();
-  window.setInterval(() => void loadContent(), 5 * 60 * 1000);
+  refreshTimer = window.setInterval(() => void loadContent(), 5 * 60 * 1000);
+});
+
+onUnmounted(() => {
+  if (refreshTimer !== undefined) {
+    window.clearInterval(refreshTimer);
+  }
 });
 </script>
 
@@ -322,6 +337,18 @@ onMounted(() => {
     }
   }
 
+  .support-placeholder {
+    overflow: hidden;
+
+    img {
+      width: min(100%, 220px);
+      max-height: none;
+      aspect-ratio: 1;
+      border-radius: 14px;
+      object-fit: cover;
+    }
+  }
+
   .partner-content {
     display: grid;
     gap: 10px;
@@ -351,6 +378,17 @@ onMounted(() => {
       padding: 12px;
       border: 1px solid var(--border-subtle);
       border-radius: 10px;
+    }
+
+    .wechat-qr {
+      justify-content: center;
+
+      img {
+        width: min(100%, 220px);
+        aspect-ratio: 1;
+        border-radius: 14px;
+        object-fit: cover;
+      }
     }
 
     span {

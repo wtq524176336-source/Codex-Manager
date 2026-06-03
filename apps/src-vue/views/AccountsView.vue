@@ -125,26 +125,36 @@
           </div>
           <div class="quota-detail">
             <div class="quota-row">
-              <span>{{ primaryWindowLabel(row) }}</span>
-              <span>{{ formatQuotaCost(row.primaryWindowCostUsd || row.currentWindowCostUsd) }}</span>
+              <span class="quota-row__label">
+                {{ primaryWindowLabel(row) }}
+                <template v-if="hasPrimaryCost(row)">（{{ formatQuotaCost(primaryQuotaCost(row)) }}）</template>
+              </span>
               <div class="quota-bar">
-                <span class="quota-bar__fill quota-bar__fill--green" :style="{ width: `${primaryUsagePercent(row)}%` }" />
+                <span class="quota-bar__fill quota-bar__fill--green" :style="{ width: `${primaryUsagePercent(row) ?? 0}%` }" />
               </div>
-              <span>{{ primaryUsagePercent(row) }}%</span>
-              <span>{{ resetAfterLabel(row.usage?.resetsAt, row.lastRefreshAt) }}</span>
+              <span>{{ formatRemainPercent(primaryUsagePercent(row), primaryEmptyText(row)) }}</span>
+              <span>{{ resetAfterLabel(row.usage?.resetsAt, primaryEmptyResetText(row)) }}</span>
             </div>
             <div class="quota-row">
-              <span>{{ secondaryWindowLabel(row) }}</span>
-              <span>{{ formatQuotaCost(row.secondaryWindowCostUsd) }}</span>
+              <span class="quota-row__label">
+                {{ secondaryWindowLabel(row) }}
+                <template v-if="hasSecondaryCost(row)">（{{ formatQuotaCost(row.secondaryWindowCostUsd) }}）</template>
+              </span>
               <div class="quota-bar">
-                <span class="quota-bar__fill quota-bar__fill--blue" :style="{ width: `${secondaryUsagePercent(row)}%` }" />
+                <span class="quota-bar__fill quota-bar__fill--blue" :style="{ width: `${secondaryUsagePercent(row) ?? 0}%` }" />
               </div>
-              <span>{{ secondaryUsagePercent(row) }}%</span>
-              <span>{{ resetAfterLabel(row.usage?.secondaryResetsAt, row.lastRefreshAt) }}</span>
+              <span>{{ formatRemainPercent(secondaryUsagePercent(row), secondaryEmptyText(row)) }}</span>
+              <span>{{ resetAfterLabel(row.usage?.secondaryResetsAt, secondaryEmptyResetText(row)) }}</span>
+            </div>
+            <div class="quota-actions">
+              <el-button link type="primary" @click="openUsageDialog(row)">详情</el-button>
             </div>
           </div>
           <div>
-            <span :class="['account-state', row.isAvailable === false ? 'account-state--danger' : '']">
+            <span
+              :class="['account-state', row.isAvailable === false ? 'account-state--danger' : '']"
+              :title="row.availabilityText || undefined"
+            >
               {{ formatHealthStatus(row) }}
             </span>
           </div>
@@ -345,6 +355,105 @@
       </el-tabs>
     </el-dialog>
 
+    <el-dialog v-model="usageDialogOpen" title="用量详情" width="700px" class="usage-dialog">
+      <div v-if="selectedAccount" class="usage-detail">
+        <div class="usage-detail__account">
+          <strong>{{ selectedAccount.name || selectedAccount.label || selectedAccount.id }}</strong>
+          <span>{{ shortAccountId(selectedAccount.id) }}</span>
+        </div>
+
+        <section class="usage-panel">
+          <div class="usage-panel__head">
+            <strong>套餐信息</strong>
+            <span>订阅接口同步回来的套餐状态与时间信息。</span>
+          </div>
+          <div class="usage-info-grid">
+            <div>
+              <span>订阅状态</span>
+              <strong>{{ subscriptionStatusLabel(selectedAccount) }}</strong>
+            </div>
+            <div>
+              <span>订阅方案</span>
+              <strong>{{ subscriptionPlanLabel(selectedAccount) }}</strong>
+            </div>
+            <div>
+              <span>到期时间</span>
+              <strong>{{ formatDateMinute(selectedAccount.subscriptionExpiresAt) }}</strong>
+            </div>
+            <div>
+              <span>续费时间</span>
+              <strong>{{ formatDateMinute(selectedAccount.subscriptionRenewsAt) }}</strong>
+            </div>
+          </div>
+        </section>
+
+        <section class="usage-panel">
+          <div class="usage-panel__head">
+            <strong>额度窗口</strong>
+            <span>标准 5 小时窗口和 1 周窗口按剩余额度显示。</span>
+          </div>
+          <div class="usage-window-grid">
+            <div class="usage-window usage-window--green">
+              <div>
+                <strong>5小时额度</strong>
+                <span>标准模型窗口</span>
+              </div>
+              <div class="usage-window__value">
+                {{ formatRemainPercent(primaryUsagePercent(selectedAccount), primaryEmptyText(selectedAccount)) }}
+                <small v-if="primaryUsagePercent(selectedAccount) != null">剩余</small>
+              </div>
+              <div class="quota-bar">
+                <span class="quota-bar__fill quota-bar__fill--green" :style="{ width: `${primaryUsagePercent(selectedAccount) ?? 0}%` }" />
+              </div>
+              <div class="usage-window__meta">
+                <span>已使用 {{ usedPercentLabel(primaryUsagePercent(selectedAccount)) }}</span>
+                <span>重置时间: {{ formatUsageResetTime(selectedAccount.usage?.resetsAt, primaryEmptyResetText(selectedAccount)) }}</span>
+              </div>
+            </div>
+
+            <div class="usage-window usage-window--blue">
+              <div>
+                <strong>1周额度</strong>
+                <span>长周期窗口</span>
+              </div>
+              <div class="usage-window__value">
+                {{ formatRemainPercent(secondaryUsagePercent(selectedAccount), secondaryEmptyText(selectedAccount)) }}
+                <small v-if="secondaryUsagePercent(selectedAccount) != null">剩余</small>
+              </div>
+              <div class="quota-bar">
+                <span class="quota-bar__fill quota-bar__fill--blue" :style="{ width: `${secondaryUsagePercent(selectedAccount) ?? 0}%` }" />
+              </div>
+              <div class="usage-window__meta">
+                <span>已使用 {{ usedPercentLabel(secondaryUsagePercent(selectedAccount)) }}</span>
+                <span>重置时间: {{ formatUsageResetTime(selectedAccount.usage?.secondaryResetsAt, secondaryEmptyResetText(selectedAccount)) }}</span>
+              </div>
+            </div>
+          </div>
+          <p class="usage-detail__captured">
+            数据捕获于: {{ formatTime(selectedAccount.lastRefreshAt) === "-" ? "未知时间" : formatTime(selectedAccount.lastRefreshAt) }}
+          </p>
+        </section>
+      </div>
+      <template #footer>
+        <el-button @click="usageDialogOpen = false">关闭</el-button>
+        <el-button
+          v-if="selectedAccount"
+          :loading="refreshingTokens"
+          @click="refreshTokens(selectedAccount.id)"
+        >
+          刷新 AT/RT
+        </el-button>
+        <el-button
+          v-if="selectedAccount"
+          type="primary"
+          :loading="refreshing"
+          @click="refreshUsage(selectedAccount.id)"
+        >
+          立即刷新
+        </el-button>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="editorOpen" title="编辑账号信息" width="520px">
       <div class="form-grid form-grid--single">
         <el-input v-model="editor.label" placeholder="显示名称" />
@@ -374,6 +483,7 @@ import {
   importAccountsByDirectory,
   importAccountsByFile,
   getLoginStatus,
+  listAccountUsage,
   listAccounts,
   loginWithChatgptAuthTokens,
   refreshAccounts,
@@ -387,6 +497,7 @@ import {
 } from "@/api/account";
 import { listApiKeys, updateApiKey } from "@/api/apiKey";
 import { getErrorMessage } from "@/api/http";
+import { attachUsagesToAccounts } from "@/api/normalize";
 import { getRequestLogTodaySummary, type RequestLogTodaySummary } from "@/api/requestLog";
 import type { AccountSummary, ApiKeySummary } from "@/types/common";
 
@@ -418,6 +529,8 @@ const rowLoadingId = ref("");
 const importDialogOpen = ref(false);
 const exportDialogOpen = ref(false);
 const cleanupDialogOpen = ref(false);
+const usageDialogOpen = ref(false);
+const selectedAccount = ref<AccountSummary | null>(null);
 const addAccountDialogOpen = ref(false);
 const editorOpen = ref(false);
 const savingEditor = ref(false);
@@ -567,6 +680,12 @@ const accountMetricCards = computed(() => [
   },
 ]);
 
+function syncSelectedAccount() {
+  const currentId = selectedAccount.value?.id;
+  if (!currentId) return;
+  selectedAccount.value = accounts.value.find((item) => item.id === currentId) || selectedAccount.value;
+}
+
 watch([keyword, planFilter, statusFilter, pageSize], () => {
   page.value = 1;
 });
@@ -575,28 +694,74 @@ watch(totalPages, (value) => {
   if (page.value > value) page.value = value;
 });
 
-function readUsedPercent(row: AccountSummary): number {
-  const value = row.usage?.usedPercent;
-  return typeof value === "number" && Number.isFinite(value) ? Math.round(value) : 0;
-}
-
 function readPercent(value: unknown): number | null {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? Math.max(0, Math.min(100, Math.round(numeric))) : null;
 }
 
-function secondaryUsagePercent(row: AccountSummary): number {
-  const remainPercent = readPercent(row.usage?.secondaryRemainPercent);
-  if (remainPercent != null) return remainPercent;
-  const usedPercent = readPercent(row.usage?.secondaryUsedPercent);
-  return usedPercent == null ? 0 : Math.max(0, 100 - usedPercent);
+function hasPrimaryUsageSignal(row: AccountSummary): boolean {
+  return readPercent(row.usage?.usedPercent) != null || row.usage?.windowMinutes != null;
 }
 
-function primaryUsagePercent(row: AccountSummary): number {
-  const remainPercent = readPercent(row.usage?.remainPercent);
+function hasSecondaryUsageSignal(row: AccountSummary): boolean {
+  return readPercent(row.usage?.secondaryUsedPercent) != null || row.usage?.secondaryWindowMinutes != null;
+}
+
+function isLongWindow(minutes: unknown): boolean {
+  const numeric = Number(minutes);
+  return Number.isFinite(numeric) && numeric > 24 * 60 + 3;
+}
+
+function isSecondaryOnlyUsage(row: AccountSummary): boolean {
+  return (
+    hasPrimaryUsageSignal(row) &&
+    !hasSecondaryUsageSignal(row) &&
+    (isLongWindow(row.usage?.windowMinutes) ||
+      String(row.planType || row.subscriptionPlan || "").toLowerCase() === "free")
+  );
+}
+
+function isPrimaryOnlyUsage(row: AccountSummary): boolean {
+  return hasPrimaryUsageSignal(row) && !hasSecondaryUsageSignal(row) && !isSecondaryOnlyUsage(row);
+}
+
+function secondaryUsagePercent(row: AccountSummary): number | null {
+  const remainPercent = readPercent(row.secondaryRemainPercent);
   if (remainPercent != null) return remainPercent;
-  const usedPercent = readUsedPercent(row);
-  return Math.max(0, 100 - usedPercent);
+  const usedPercent = readPercent(row.usage?.secondaryUsedPercent);
+  if (usedPercent != null) return Math.max(0, 100 - usedPercent);
+  return isSecondaryOnlyUsage(row) ? readPercent(row.primaryRemainPercent) : null;
+}
+
+function primaryUsagePercent(row: AccountSummary): number | null {
+  const remainPercent = readPercent(row.primaryRemainPercent);
+  if (remainPercent != null) return remainPercent;
+  const usedPercent = readPercent(row.usage?.usedPercent);
+  return usedPercent == null ? null : Math.max(0, 100 - usedPercent);
+}
+
+function primaryEmptyText(row: AccountSummary): string {
+  return isSecondaryOnlyUsage(row) ? "未提供" : "--";
+}
+
+function secondaryEmptyText(row: AccountSummary): string {
+  return isPrimaryOnlyUsage(row) ? "未提供" : "--";
+}
+
+function primaryEmptyResetText(row: AccountSummary): string {
+  return isSecondaryOnlyUsage(row) ? "未提供" : "未知";
+}
+
+function secondaryEmptyResetText(row: AccountSummary): string {
+  return isPrimaryOnlyUsage(row) ? "未提供" : "未知";
+}
+
+function formatRemainPercent(value: number | null, emptyText: string): string {
+  return value == null ? emptyText : `${value}%`;
+}
+
+function usedPercentLabel(remainPercent: number | null): string {
+  return remainPercent == null ? "--" : `${Math.max(0, 100 - remainPercent)}%`;
 }
 
 function displayPlan(row: AccountSummary): string {
@@ -636,14 +801,31 @@ function formatPlanLabel(value: unknown): string {
   }
 }
 
+function subscriptionStatusLabel(row: AccountSummary): string {
+  const expiresAt = Number(row.subscriptionExpiresAt);
+  if (row.hasSubscription === false) return "未订阅";
+  if (Number.isFinite(expiresAt) && expiresAt > 0 && expiresAt <= Math.floor(Date.now() / 1000)) {
+    return "已过期";
+  }
+  return row.subscriptionPlan || row.planType ? "有效" : "未知";
+}
+
+function subscriptionPlanLabel(row: AccountSummary): string {
+  return formatPlanLabel(row.subscriptionPlan || row.planType || "unknown");
+}
+
 function isLimitedAccount(row: AccountSummary): boolean {
-  const statusText = `${row.status} ${row.statusReason} ${row.availabilityText}`.toLowerCase();
-  return Boolean(row.isLowQuota || statusText.includes("limit") || statusText.includes("limited"));
+  return String(row.status || "").trim().toLowerCase() === "limited";
 }
 
 function isBannedAccount(row: AccountSummary): boolean {
-  const statusText = `${row.status} ${row.statusReason} ${row.availabilityText}`.toLowerCase();
-  return statusText.includes("ban") || statusText.includes("banned");
+  const status = String(row.status || "").trim().toLowerCase();
+  const reason = String(row.statusReason || "").trim().toLowerCase();
+  return (
+    status === "banned" ||
+    (status === "unavailable" &&
+      ["account_deactivated", "workspace_deactivated", "deactivated_workspace"].includes(reason))
+  );
 }
 
 function shortAccountId(value: string): string {
@@ -665,38 +847,53 @@ function formatMetricNumber(value: number): string {
   return new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 2 }).format(numeric);
 }
 
+function hasQuotaCost(value: unknown): boolean {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric >= 0;
+}
+
+function primaryQuotaCost(row: AccountSummary): unknown {
+  return row.primaryWindowCostUsd ?? row.currentWindowCostUsd;
+}
+
+function hasPrimaryCost(row: AccountSummary): boolean {
+  return row.primaryWindowStartedAt != null && row.primaryWindowResetsAt != null
+    && hasQuotaCost(primaryQuotaCost(row));
+}
+
+function hasSecondaryCost(row: AccountSummary): boolean {
+  return row.secondaryWindowStartedAt != null && row.secondaryWindowResetsAt != null
+    && hasQuotaCost(row.secondaryWindowCostUsd);
+}
+
 function formatQuotaCost(value: unknown): string {
   const numeric = Number(value);
-  if (!Number.isFinite(numeric) || numeric <= 0) return "($0.00)";
-  return `(${new Intl.NumberFormat("en-US", {
+  const normalized = Number.isFinite(numeric) ? Math.max(0, numeric) : 0;
+  return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
     minimumFractionDigits: 2,
-    maximumFractionDigits: numeric > 0 && numeric < 1 ? 4 : 2,
-  }).format(numeric)})`;
+    maximumFractionDigits: normalized > 0 && normalized < 1 ? 4 : 2,
+  }).format(normalized);
 }
 
-function windowLabel(minutes: unknown, fallback: string): string {
-  const numeric = Number(minutes);
-  if (!Number.isFinite(numeric) || numeric <= 0) return fallback;
-  if (numeric < 60) return `${Math.round(numeric)}分钟`;
-  if (numeric < 24 * 60) return `${Math.round(numeric / 60)}小时`;
-  return `${Math.round(numeric / (24 * 60))}周`;
+function primaryWindowLabel(_row: AccountSummary): string {
+  return "5小时";
 }
 
-function primaryWindowLabel(row: AccountSummary): string {
-  return windowLabel(row.usage?.windowMinutes, "5小时");
+function secondaryWindowLabel(_row: AccountSummary): string {
+  return "1周";
 }
 
-function secondaryWindowLabel(row: AccountSummary): string {
-  return windowLabel(row.usage?.secondaryWindowMinutes, "1周");
-}
-
-function resetAfterLabel(resetsAt?: number | string | null, fallbackAt?: number | string | null): string {
+function resetAfterLabel(
+  resetsAt?: number | string | null,
+  emptyTextOrFallbackAt?: number | string | null,
+): string {
   const reset = Number(resetsAt);
-  const fallback = Number(fallbackAt);
   if (!Number.isFinite(reset) || reset <= 0) {
-    return Number.isFinite(fallback) && fallback > 0 ? "已刷新" : "未知后刷新";
+    const emptyText =
+      typeof emptyTextOrFallbackAt === "string" ? emptyTextOrFallbackAt : "未知";
+    return `${emptyText}后刷新`;
   }
   const resetMs = reset > 10_000_000_000 ? reset : reset * 1000;
   const diffMinutes = Math.max(0, Math.round((resetMs - Date.now()) / 60000));
@@ -706,6 +903,12 @@ function resetAfterLabel(resetsAt?: number | string | null, fallbackAt?: number 
   if (days > 0) return `${days}d${hours}h${minutes}min后刷新`;
   if (hours > 0) return `${hours}h${minutes}min后刷新`;
   return `${minutes}min后刷新`;
+}
+
+function formatUsageResetTime(value?: number | string | null, emptyText = "未知"): string {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return emptyText;
+  return formatTime(numeric);
 }
 
 function formatAccountStatus(row: AccountSummary): string {
@@ -720,11 +923,15 @@ function formatHealthStatus(row: AccountSummary): string {
 }
 
 function cleanupStatusOf(row: AccountSummary) {
-  const statusText = `${row.status} ${row.statusReason} ${row.availabilityText}`.toLowerCase();
-  if (statusText.includes("ban")) return "banned";
-  if (row.isLowQuota || statusText.includes("limit")) return "limited";
-  if (row.isAvailable === false) return "unavailable";
+  if (isBannedAccount(row)) return "banned";
+  if (isLimitedAccount(row)) return "limited";
+  if (String(row.status || "").trim().toLowerCase() === "unavailable") return "unavailable";
   return "";
+}
+
+function openUsageDialog(row: AccountSummary) {
+  selectedAccount.value = row;
+  usageDialogOpen.value = true;
 }
 
 function formatTime(value?: number | string | null): string {
@@ -754,12 +961,14 @@ function formatUsd(value: number) {
 async function loadData() {
   loading.value = true;
   try {
-    const [result, keys, todaySummary] = await Promise.all([
+    const [result, usageRows, keys, todaySummary] = await Promise.all([
       listAccounts({ page: 1, pageSize: 1000 }),
+      listAccountUsage().catch(() => []),
       listApiKeys().catch(() => []),
       getRequestLogTodaySummary().catch(() => tokenStats.value),
     ]);
-    accounts.value = result.items || [];
+    accounts.value = attachUsagesToAccounts(result.items || [], usageRows);
+    syncSelectedAccount();
     apiKeys.value = keys;
     tokenStats.value = todaySummary;
   } catch (error) {
@@ -1652,13 +1861,24 @@ onUnmounted(() => {
     gap: 10px;
   }
 
+  .quota-actions {
+    display: flex;
+    justify-content: flex-end;
+  }
+
   .quota-row {
     display: grid;
-    grid-template-columns: 48px 76px minmax(220px, 1fr) 44px 112px;
+    grid-template-columns: 120px minmax(120px, 1fr) 44px 112px;
     align-items: center;
     gap: 10px;
     color: var(--text-secondary);
     font-size: 12px;
+
+    &__label {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
   }
 
   .quota-bar {
@@ -1679,6 +1899,134 @@ onUnmounted(() => {
       &--blue {
         background: #2f6cf6;
       }
+    }
+  }
+
+  .usage-detail {
+    display: grid;
+    gap: 16px;
+
+    &__account {
+      display: grid;
+      gap: 4px;
+      padding: 12px;
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      background: var(--table-section-bg);
+
+      strong {
+        color: var(--text-primary);
+        font-size: 15px;
+      }
+
+      span {
+        color: var(--text-secondary);
+        font-size: 12px;
+      }
+    }
+
+    &__captured {
+      margin: 0;
+      color: var(--text-secondary);
+      font-size: 12px;
+      font-style: italic;
+      text-align: center;
+    }
+  }
+
+  .usage-panel {
+    display: grid;
+    gap: 12px;
+    padding: 14px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 14px;
+    background: var(--table-section-bg);
+
+    &__head {
+      display: grid;
+      gap: 4px;
+
+      strong {
+        color: var(--text-primary);
+        font-size: 14px;
+      }
+
+      span {
+        color: var(--text-secondary);
+        font-size: 12px;
+      }
+    }
+  }
+
+  .usage-info-grid,
+  .usage-window-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .usage-info-grid {
+    > div {
+      display: grid;
+      gap: 6px;
+      padding: 12px;
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      background: var(--card-bg);
+
+      span {
+        color: var(--text-secondary);
+        font-size: 11px;
+      }
+
+      strong {
+        color: var(--text-primary);
+        font-size: 13px;
+      }
+    }
+  }
+
+  .usage-window {
+    display: grid;
+    gap: 10px;
+    padding: 12px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    background: var(--card-bg);
+
+    > div:first-child {
+      display: grid;
+      gap: 4px;
+
+      strong {
+        font-size: 13px;
+      }
+
+      span {
+        color: var(--text-secondary);
+        font-size: 11px;
+      }
+    }
+
+    &__value {
+      font-size: 22px;
+      font-weight: 700;
+
+      small {
+        margin-left: 4px;
+        color: var(--text-secondary);
+        font-size: 12px;
+        font-weight: 500;
+      }
+    }
+
+    &__meta {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: 8px;
+      color: var(--text-secondary);
+      font-size: 11px;
     }
   }
 
