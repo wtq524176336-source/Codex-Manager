@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::fs::{File, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -15,6 +15,8 @@ const TRACE_FLUSH_WAIT_TIMEOUT_MS: u64 = 200;
 const ENV_TRACE_QUEUE_CAPACITY: &str = "CODEXMANAGER_TRACE_QUEUE_CAPACITY";
 const ENV_GEMINI_TRACE_DIAGNOSTICS: &str = "CODEXMANAGER_GEMINI_TRACE_DIAGNOSTICS";
 const TRACE_PENDING_LINE_LIMIT: usize = 32;
+const TRACE_RETENTION_SECS: i64 = 24 * 60 * 60;
+const TRACE_RETENTION_CLEANUP_INTERVAL_SECS: i64 = 60;
 
 static TRACE_WRITER: OnceLock<TraceAsyncWriter> = OnceLock::new();
 static TRACE_SEQ: AtomicU64 = AtomicU64::new(1);
@@ -173,6 +175,7 @@ impl TraceAsyncWriter {
 struct TraceFileWriter {
     path: PathBuf,
     writer: Option<BufWriter<File>>,
+    last_retention_cleanup_at: i64,
 }
 
 impl TraceFileWriter {
@@ -188,7 +191,11 @@ impl TraceFileWriter {
     /// # 返回
     /// 返回函数执行结果
     fn new(path: PathBuf) -> Self {
-        Self { path, writer: None }
+        Self {
+            path,
+            writer: None,
+            last_retention_cleanup_at: 0,
+        }
     }
 
     /// 函数 `reset_path`
@@ -209,6 +216,7 @@ impl TraceFileWriter {
         }
         self.path = next_path;
         self.writer = None;
+        self.last_retention_cleanup_at = 0;
     }
 
     /// 函数 `append_line`
@@ -225,10 +233,62 @@ impl TraceFileWriter {
     /// # 返回
     /// 返回函数执行结果
     fn append_line(&mut self, line: &str, flush: bool) -> std::io::Result<()> {
+        if let Err(err) = self.prune_expired_lines(current_trace_ts()) {
+            log::warn!(
+                "gateway trace retention cleanup failed: path={}, err={}",
+                self.path.display(),
+                err
+            );
+            self.writer = None;
+        }
         let writer = self.ensure_open_writer()?;
         writeln!(writer, "{line}")?;
         if flush {
             writer.flush()?;
+        }
+        Ok(())
+    }
+
+    fn prune_expired_lines(&mut self, now: i64) -> std::io::Result<()> {
+        if self.last_retention_cleanup_at != 0
+            && now.saturating_sub(self.last_retention_cleanup_at)
+                < TRACE_RETENTION_CLEANUP_INTERVAL_SECS
+        {
+            return Ok(());
+        }
+        self.last_retention_cleanup_at = now;
+        let cutoff = now.saturating_sub(TRACE_RETENTION_SECS);
+        if let Some(writer) = self.writer.as_mut() {
+            writer.flush()?;
+        }
+        self.writer = None;
+        let bytes = match fs::read(&self.path) {
+            Ok(bytes) => bytes,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(err) => return Err(err),
+        };
+        if bytes.is_empty() {
+            return Ok(());
+        }
+        let content = String::from_utf8_lossy(&bytes);
+        let mut retained = String::with_capacity(content.len());
+        let mut dropped = 0usize;
+        for line in content.lines() {
+            if trace_line_ts(line).is_some_and(|ts| ts >= cutoff) {
+                retained.push_str(line);
+                retained.push('\n');
+            } else {
+                dropped += 1;
+            }
+        }
+        if dropped > 0 {
+            fs::write(&self.path, retained.as_bytes())?;
+            log::debug!(
+                "event=gateway_trace_retention_pruned path={} dropped_lines={} retention_secs={}",
+                self.path.display(),
+                dropped,
+                TRACE_RETENTION_SECS
+            );
         }
         Ok(())
     }
@@ -559,6 +619,12 @@ fn current_trace_ts() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|value| value.as_secs() as i64)
         .unwrap_or(0)
+}
+
+fn trace_line_ts(line: &str) -> Option<i64> {
+    let rest = line.strip_prefix("ts=")?;
+    let value = rest.split_whitespace().next()?;
+    value.parse::<i64>().ok()
 }
 
 /// 函数 `buffer_trace_line`
@@ -909,6 +975,35 @@ pub(crate) fn log_aggregate_attempt(
     append_trace_line(line, true);
 }
 
+pub(crate) fn log_aggregate_body_rewrite(
+    trace_id: &str,
+    stage: &str,
+    content_encoding: Option<&str>,
+    input_body_len: usize,
+    output_body_len: usize,
+    decoded_zstd: bool,
+    input_json: bool,
+    output_json: bool,
+    skip_content_encoding: bool,
+    note: &str,
+) {
+    let line = format!(
+        "ts={} event=AGGREGATE_BODY_REWRITE trace_id={} stage={} content_encoding={} input_body_len={} output_body_len={} decoded_zstd={} input_json={} output_json={} skip_content_encoding={} note={}",
+        current_trace_ts(),
+        sanitize_text(trace_id),
+        sanitize_text(stage),
+        sanitize_text(content_encoding.unwrap_or("-")),
+        input_body_len,
+        output_body_len,
+        if decoded_zstd { "true" } else { "false" },
+        if input_json { "true" } else { "false" },
+        if output_json { "true" } else { "false" },
+        if skip_content_encoding { "true" } else { "false" },
+        sanitize_text(note),
+    );
+    append_trace_line(line, true);
+}
+
 pub(crate) fn log_aggregate_request_payload(
     trace_id: &str,
     upstream_url: &str,
@@ -1251,61 +1346,59 @@ pub(crate) struct BridgeResultLog<'a> {
     pub last_sse_event_type: Option<&'a str>,
 }
 
-pub(crate) fn log_bridge_result(params: BridgeResultLog<'_>) {
-    let BridgeResultLog {
-        trace_id,
-        adapter,
-        path,
-        is_stream,
-        stream_terminal_seen,
-        stream_terminal_error,
-        delivery_error,
-        output_text_len,
-        output_tokens,
-        delivered_status_code,
-        upstream_error_hint,
-        upstream_request_id,
-        upstream_cf_ray,
-        upstream_auth_error,
-        upstream_identity_error_code,
-        upstream_content_type,
-        last_sse_event_type,
-    } = params;
-    let bridge_has_error = delivery_error.is_some()
-        || stream_terminal_error.is_some()
-        || (is_stream && !stream_terminal_seen)
-        || has_error_text(upstream_error_hint)
-        || has_error_text(upstream_auth_error)
-        || has_error_text(upstream_identity_error_code);
-    if bridge_has_error {
-        mark_trace_has_error(trace_id);
-    }
-    let line = format!(
-        "ts={} event=BRIDGE_RESULT trace_id={} adapter={} path={} stream={} terminal_seen={} terminal_error={} delivery_error={} output_text_len={} output_tokens={} delivered_status={} upstream_hint={} upstream_request_id={} upstream_cf_ray={} upstream_auth_error={} upstream_identity_error_code={} upstream_content_type={} last_sse_event={}",
+fn bridge_result_has_error(params: &BridgeResultLog<'_>) -> bool {
+    params.delivery_error.is_some()
+        || params.stream_terminal_error.is_some()
+        || (params.is_stream && !params.stream_terminal_seen)
+        || has_error_text(params.upstream_error_hint)
+        || has_error_text(params.upstream_auth_error)
+        || has_error_text(params.upstream_identity_error_code)
+}
+
+fn bridge_result_line(event: &str, params: &BridgeResultLog<'_>) -> String {
+    format!(
+        "ts={} event={} trace_id={} adapter={} path={} stream={} terminal_seen={} terminal_error={} delivery_error={} output_text_len={} output_tokens={} delivered_status={} upstream_hint={} upstream_request_id={} upstream_cf_ray={} upstream_auth_error={} upstream_identity_error_code={} upstream_content_type={} last_sse_event={}",
         current_trace_ts(),
-        sanitize_text(trace_id),
-        sanitize_text(adapter),
-        sanitize_text(path),
-        if is_stream { "true" } else { "false" },
-        if stream_terminal_seen { "true" } else { "false" },
-        sanitize_text(stream_terminal_error.unwrap_or("-")),
-        sanitize_text(delivery_error.unwrap_or("-")),
-        output_text_len,
-        output_tokens
+        sanitize_text(event),
+        sanitize_text(params.trace_id),
+        sanitize_text(params.adapter),
+        sanitize_text(params.path),
+        if params.is_stream { "true" } else { "false" },
+        if params.stream_terminal_seen { "true" } else { "false" },
+        sanitize_text(params.stream_terminal_error.unwrap_or("-")),
+        sanitize_text(params.delivery_error.unwrap_or("-")),
+        params.output_text_len,
+        params.output_tokens
             .map(|value| value.to_string())
             .unwrap_or_else(|| "-".to_string()),
-        delivered_status_code
+        params
+            .delivered_status_code
             .map(|value| value.to_string())
             .unwrap_or_else(|| "-".to_string()),
-        sanitize_text(upstream_error_hint.unwrap_or("-")),
-        sanitize_text(upstream_request_id.unwrap_or("-")),
-        sanitize_text(upstream_cf_ray.unwrap_or("-")),
-        sanitize_text(upstream_auth_error.unwrap_or("-")),
-        sanitize_text(upstream_identity_error_code.unwrap_or("-")),
-        sanitize_text(upstream_content_type.unwrap_or("-")),
-        sanitize_text(last_sse_event_type.unwrap_or("-")),
-    );
-    buffer_trace_line(trace_id, line);
+        sanitize_text(params.upstream_error_hint.unwrap_or("-")),
+        sanitize_text(params.upstream_request_id.unwrap_or("-")),
+        sanitize_text(params.upstream_cf_ray.unwrap_or("-")),
+        sanitize_text(params.upstream_auth_error.unwrap_or("-")),
+        sanitize_text(params.upstream_identity_error_code.unwrap_or("-")),
+        sanitize_text(params.upstream_content_type.unwrap_or("-")),
+        sanitize_text(params.last_sse_event_type.unwrap_or("-")),
+    )
+}
+
+pub(crate) fn log_bridge_result(params: BridgeResultLog<'_>) {
+    if bridge_result_has_error(&params) {
+        mark_trace_has_error(params.trace_id);
+    }
+    let line = bridge_result_line("BRIDGE_RESULT", &params);
+    buffer_trace_line(params.trace_id, line);
+}
+
+pub(crate) fn log_aggregate_bridge_result(params: BridgeResultLog<'_>) {
+    if bridge_result_has_error(&params) {
+        mark_trace_has_error(params.trace_id);
+    }
+    let line = bridge_result_line("AGGREGATE_BRIDGE_RESULT", &params);
+    append_trace_line(line, true);
 }
 
 /// 函数 `log_attempt_profile`

@@ -128,11 +128,23 @@ fn upstream_url_for_log(url: &reqwest::Url) -> String {
     url.to_string()
 }
 
-fn request_headers_for_log(request: &Request, skip_content_encoding: bool) -> String {
+fn request_headers_for_log(
+    request: &Request,
+    injected_headers: &HashSet<String>,
+    is_stream: bool,
+    skip_content_encoding: bool,
+) -> String {
     request
         .headers()
         .iter()
-        .filter(|header| !(skip_content_encoding && header.field.equiv("Content-Encoding")))
+        .filter(|header| {
+            !should_skip_forward_header_for_aggregate_request(
+                header.field.as_str().into(),
+                injected_headers,
+                is_stream,
+                skip_content_encoding,
+            )
+        })
         .map(|header| format!("{}={}", header.field.as_str(), header.value.as_str()))
         .collect::<Vec<_>>()
         .join("; ")
@@ -202,13 +214,20 @@ fn rewrite_body_model_override(body: &Bytes, model_override: Option<&str>) -> By
 }
 
 fn request_uses_zstd_encoding(request: &Request) -> bool {
-    request.headers().iter().any(|header| {
-        header.field.equiv("Content-Encoding")
-            && header
-                .value
-                .as_str()
-                .split(',')
-                .any(|value| value.trim().eq_ignore_ascii_case("zstd"))
+    request_content_encoding_for_log(request).is_some_and(|value| {
+        value
+            .split(',')
+            .any(|item| item.trim().eq_ignore_ascii_case("zstd"))
+    })
+}
+
+fn request_content_encoding_for_log(request: &Request) -> Option<&str> {
+    request.headers().iter().find_map(|header| {
+        if header.field.equiv("Content-Encoding") {
+            Some(header.value.as_str())
+        } else {
+            None
+        }
     })
 }
 
@@ -263,24 +282,75 @@ fn rewrite_decoded_body_for_aggregate_api(body: &Bytes, model_override: Option<&
     strip_image_generation_tool_when_aggregate_unsupported(&rewritten)
 }
 
+struct AggregateBodyRewrite {
+    body: Bytes,
+    skip_content_encoding: bool,
+    decoded_zstd: bool,
+    note: &'static str,
+}
+
+fn body_is_json(body: &[u8]) -> bool {
+    serde_json::from_slice::<Value>(body).is_ok()
+}
+
 fn rewrite_body_for_aggregate_api(
     request: &Request,
     body: &Bytes,
     model_override: Option<&str>,
-) -> (Bytes, bool) {
+) -> AggregateBodyRewrite {
     if request_uses_zstd_encoding(request) {
+        if body_is_json(body.as_ref()) {
+            return AggregateBodyRewrite {
+                body: rewrite_decoded_body_for_aggregate_api(body, model_override),
+                skip_content_encoding: true,
+                decoded_zstd: false,
+                note: "already_decoded_json",
+            };
+        }
         let Ok(decoded) = zstd::stream::decode_all(Cursor::new(body.as_ref())) else {
-            return (body.clone(), false);
+            return AggregateBodyRewrite {
+                body: body.clone(),
+                skip_content_encoding: false,
+                decoded_zstd: false,
+                note: "decode_error",
+            };
         };
+        if decoded.is_empty() {
+            return AggregateBodyRewrite {
+                body: body.clone(),
+                skip_content_encoding: false,
+                decoded_zstd: false,
+                note: "decoded_empty",
+            };
+        }
+        if !body_is_json(&decoded) {
+            return AggregateBodyRewrite {
+                body: body.clone(),
+                skip_content_encoding: false,
+                decoded_zstd: false,
+                note: "decoded_non_json",
+            };
+        }
         let decoded_body = Bytes::from(decoded);
         let rewritten_decoded =
             rewrite_decoded_body_for_aggregate_api(&decoded_body, model_override);
-        return (rewritten_decoded, true);
+        return AggregateBodyRewrite {
+            body: rewritten_decoded,
+            skip_content_encoding: true,
+            decoded_zstd: true,
+            note: "decoded_json",
+        };
     }
-    (
-        rewrite_decoded_body_for_aggregate_api(body, model_override),
-        false,
-    )
+    AggregateBodyRewrite {
+        body: rewrite_decoded_body_for_aggregate_api(body, model_override),
+        skip_content_encoding: false,
+        decoded_zstd: false,
+        note: if body_is_json(body.as_ref()) {
+            "plain_json"
+        } else {
+            "plain_non_json"
+        },
+    }
 }
 
 fn replace_query_param(mut url: reqwest::Url, name: &str, value: &str) -> reqwest::Url {
@@ -1043,14 +1113,33 @@ pub(in super::super) fn proxy_aggregate_request(
             }
 
             let request_ref = request.as_ref().expect("request should still be available");
-            let (rewritten_body, skip_content_encoding) = rewrite_body_for_aggregate_api(
+            let rewrite_result = rewrite_body_for_aggregate_api(
                 request_ref,
                 body,
                 candidate.model_override.as_deref(),
             );
+            let rewritten_body = rewrite_result.body;
+            let skip_content_encoding = rewrite_result.skip_content_encoding;
             let upstream_url_log = upstream_url_for_log(&url);
-            let request_headers_log = request_headers_for_log(request_ref, skip_content_encoding);
+            let request_headers_log = request_headers_for_log(
+                request_ref,
+                &injected_headers,
+                is_stream,
+                skip_content_encoding,
+            );
             let auth_log = aggregate_auth_for_log(secret.as_str(), &auth_config);
+            super::super::super::trace_log::log_aggregate_body_rewrite(
+                trace_id,
+                "upstream_rewrite",
+                request_content_encoding_for_log(request_ref),
+                body.len(),
+                rewritten_body.len(),
+                rewrite_result.decoded_zstd,
+                body_is_json(body.as_ref()),
+                body_is_json(rewritten_body.as_ref()),
+                skip_content_encoding,
+                rewrite_result.note,
+            );
             super::super::super::trace_log::log_aggregate_attempt(
                 trace_id,
                 candidate_supplier_name.as_deref(),
@@ -1200,7 +1289,7 @@ pub(in super::super) fn proxy_aggregate_request(
                 .map(str::trim)
                 .map(str::len)
                 .unwrap_or(0);
-            super::super::super::trace_log::log_bridge_result(
+            super::super::super::trace_log::log_aggregate_bridge_result(
                 super::super::super::trace_log::BridgeResultLog {
                     trace_id,
                     adapter: format!("{response_adapter:?}").as_str(),

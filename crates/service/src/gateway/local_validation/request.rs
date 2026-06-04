@@ -7,6 +7,7 @@ use base64::Engine;
 use bytes::Bytes;
 use codexmanager_core::storage::ApiKey;
 use reqwest::Method;
+use std::io::Cursor;
 use tiny_http::Request;
 
 use super::{LocalValidationError, LocalValidationResult};
@@ -1173,6 +1174,45 @@ fn client_accepts_sse(incoming_headers: &super::super::IncomingHeaderSnapshot) -
     })
 }
 
+fn request_content_encoding(
+    incoming_headers: &super::super::IncomingHeaderSnapshot,
+) -> Option<&str> {
+    incoming_headers
+        .raw_headers()
+        .iter()
+        .find_map(|(name, value)| {
+            if name.eq_ignore_ascii_case("content-encoding") {
+                Some(value.as_str())
+            } else {
+                None
+            }
+        })
+}
+
+fn request_uses_zstd_encoding(incoming_headers: &super::super::IncomingHeaderSnapshot) -> bool {
+    request_content_encoding(incoming_headers).is_some_and(|value| {
+        value
+            .split(',')
+            .any(|item| item.trim().eq_ignore_ascii_case("zstd"))
+    })
+}
+
+fn body_is_json(body: &[u8]) -> bool {
+    serde_json::from_slice::<serde_json::Value>(body).is_ok()
+}
+
+fn decode_zstd_body_for_aggregate_api(body: Vec<u8>) -> (Vec<u8>, bool, &'static str) {
+    if body.is_empty() {
+        return (body, false, "empty_body");
+    }
+    match zstd::stream::decode_all(Cursor::new(body.as_slice())) {
+        Ok(decoded) if decoded.is_empty() => (body, false, "decoded_empty"),
+        Ok(decoded) if body_is_json(&decoded) => (decoded, true, "decoded_json"),
+        Ok(_) => (body, false, "decoded_non_json"),
+        Err(_) => (body, false, "decode_error"),
+    }
+}
+
 /// 函数 `apply_passthrough_request_overrides`
 ///
 /// 作者: gaohongshun
@@ -1373,6 +1413,31 @@ pub(super) fn build_local_validation_result(
     )?;
 
     if api_key.rotation_strategy == ROTATION_AGGREGATE_API {
+        let aggregate_input_body_len = body.len();
+        let aggregate_input_body_json = body_is_json(&body);
+        let mut aggregate_decoded_zstd = false;
+        let mut aggregate_decode_note = "plain_body";
+        let aggregate_content_encoding =
+            request_content_encoding(&incoming_headers).map(str::to_string);
+        if request_uses_zstd_encoding(&incoming_headers) {
+            let (decoded_body, decoded_zstd, decode_note) =
+                decode_zstd_body_for_aggregate_api(body);
+            body = decoded_body;
+            aggregate_decoded_zstd = decoded_zstd;
+            aggregate_decode_note = decode_note;
+        }
+        super::super::trace_log::log_aggregate_body_rewrite(
+            trace_id.as_str(),
+            "local_validation",
+            aggregate_content_encoding.as_deref(),
+            aggregate_input_body_len,
+            body.len(),
+            aggregate_decoded_zstd,
+            aggregate_input_body_json,
+            body_is_json(&body),
+            aggregate_decoded_zstd,
+            aggregate_decode_note,
+        );
         let (
             mut rewritten_body,
             model_for_log,
