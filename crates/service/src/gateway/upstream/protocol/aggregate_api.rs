@@ -152,6 +152,54 @@ fn rewrite_body_model_override(body: &Bytes, model_override: Option<&str>) -> By
         .unwrap_or_else(|_| body.clone())
 }
 
+fn strip_image_generation_tool_when_disabled(body: &Bytes) -> Bytes {
+    if crate::gateway::runtime_config::codex_image_generation_enabled() {
+        return body.clone();
+    }
+    let Ok(mut value) = serde_json::from_slice::<Value>(body.as_ref()) else {
+        return body.clone();
+    };
+    let Some(object) = value.as_object_mut() else {
+        return body.clone();
+    };
+    let mut changed = false;
+    if let Some(Value::Array(tools)) = object.get_mut("tools") {
+        let original_len = tools.len();
+        tools.retain(|tool| {
+            tool.get("type")
+                .and_then(Value::as_str)
+                .map_or(true, |tool_type| tool_type != "image_generation")
+        });
+        if tools.len() != original_len {
+            changed = true;
+        }
+        if tools.is_empty() {
+            object.remove("tools");
+        }
+    }
+    let image_tool_choice = object
+        .get("tool_choice")
+        .and_then(Value::as_object)
+        .and_then(|tool_choice| tool_choice.get("type"))
+        .and_then(Value::as_str)
+        .is_some_and(|tool_type| tool_type == "image_generation");
+    if image_tool_choice {
+        object.remove("tool_choice");
+        changed = true;
+    }
+    if !changed {
+        return body.clone();
+    }
+    serde_json::to_vec(&value)
+        .map(Bytes::from)
+        .unwrap_or_else(|_| body.clone())
+}
+
+fn rewrite_body_for_aggregate_api(body: &Bytes, model_override: Option<&str>) -> Bytes {
+    let rewritten = rewrite_body_model_override(body, model_override);
+    strip_image_generation_tool_when_disabled(&rewritten)
+}
+
 fn replace_query_param(mut url: reqwest::Url, name: &str, value: &str) -> reqwest::Url {
     let name_trimmed = name.trim();
     if name_trimmed.is_empty() {
@@ -910,7 +958,7 @@ pub(in super::super) fn proxy_aggregate_request(
                 request.as_ref().expect("request should still be available"),
                 method,
                 url.clone(),
-                &rewrite_body_model_override(body, candidate.model_override.as_deref()),
+                &rewrite_body_for_aggregate_api(body, candidate.model_override.as_deref()),
                 secret.as_str(),
                 &auth_config,
                 &injected_headers,
@@ -1331,7 +1379,8 @@ mod tests {
 
     use super::{
         build_upstream_url, effective_action_path, resolve_aggregate_api_rotation_candidates,
-        resolve_passthrough_sse_protocol, rewrite_body_model_override,
+        resolve_passthrough_sse_protocol, rewrite_body_for_aggregate_api,
+        rewrite_body_model_override,
     };
     use crate::aggregate_api::{
         AGGREGATE_API_AUTH_APIKEY, AGGREGATE_API_PROVIDER_CLAUDE, AGGREGATE_API_PROVIDER_CODEX,
@@ -1425,6 +1474,33 @@ mod tests {
             serde_json::from_slice(rewritten.as_ref()).expect("parse rewritten body");
         assert_eq!(value["model"], "qwen3.5-plus");
         assert_eq!(value["messages"].as_array().map(Vec::len), Some(0));
+    }
+
+    #[test]
+    fn aggregate_body_strips_image_generation_when_disabled() {
+        let _guard = crate::test_env_guard();
+        let previous = std::env::var("CODEXMANAGER_CODEX_IMAGE_GENERATION_ENABLED").ok();
+        std::env::set_var("CODEXMANAGER_CODEX_IMAGE_GENERATION_ENABLED", "0");
+        crate::gateway::reload_runtime_config_from_env();
+        let body = Bytes::from_static(
+            br#"{"model":"gpt-5.4","tools":[{"type":"image_generation"},{"type":"web_search_preview"}],"tool_choice":{"type":"image_generation"},"input":"hello"}"#,
+        );
+
+        let rewritten = rewrite_body_for_aggregate_api(&body, None);
+
+        let value: serde_json::Value =
+            serde_json::from_slice(rewritten.as_ref()).expect("parse rewritten body");
+        let tools = value["tools"].as_array().expect("tools array");
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["type"], "web_search_preview");
+        assert!(value.get("tool_choice").is_none());
+
+        if let Some(value) = previous {
+            std::env::set_var("CODEXMANAGER_CODEX_IMAGE_GENERATION_ENABLED", value);
+        } else {
+            std::env::remove_var("CODEXMANAGER_CODEX_IMAGE_GENERATION_ENABLED");
+        }
+        crate::gateway::reload_runtime_config_from_env();
     }
 
     #[test]
