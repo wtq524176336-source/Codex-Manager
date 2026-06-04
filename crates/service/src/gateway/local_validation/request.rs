@@ -1146,9 +1146,11 @@ fn resolve_client_is_stream(
     normalized_path: &str,
     client_is_stream: bool,
     client_stream_specified: bool,
+    client_accepts_sse: bool,
     native_codex_client: bool,
 ) -> bool {
     client_is_stream
+        || (normalized_path.starts_with("/v1/responses") && client_accepts_sse)
         || (is_non_native_openai_responses_api_request(
             protocol_type,
             normalized_path,
@@ -1156,6 +1158,15 @@ fn resolve_client_is_stream(
         ) && !client_stream_specified)
         || (protocol_type == PROTOCOL_GEMINI_NATIVE
             && normalized_path.contains(":streamGenerateContent"))
+}
+
+fn client_accepts_sse(incoming_headers: &super::super::IncomingHeaderSnapshot) -> bool {
+    incoming_headers.raw_headers().iter().any(|(name, value)| {
+        name.eq_ignore_ascii_case("accept")
+            && value
+                .split(',')
+                .any(|item| item.trim().eq_ignore_ascii_case("text/event-stream"))
+    })
 }
 
 /// 函数 `apply_passthrough_request_overrides`
@@ -1297,6 +1308,7 @@ pub(super) fn build_local_validation_result(
             normalized_path.as_str(),
             initial_request_meta.is_stream,
             initial_request_meta.stream_specified,
+            false,
             native_codex_client,
         );
         let request_type_for_log = request_type_for_log(&incoming_headers, &body);
@@ -1384,6 +1396,7 @@ pub(super) fn build_local_validation_result(
             normalized_path.as_str(),
             initial_request_meta.is_stream,
             initial_request_meta.stream_specified,
+            client_accepts_sse(&incoming_headers),
             native_codex_client,
         );
         let request_type_for_log = request_type_for_log(&incoming_headers, &rewritten_body);
@@ -1647,6 +1660,7 @@ pub(super) fn build_local_validation_result(
         normalized_path.as_str(),
         client_request_meta.is_stream,
         client_request_meta.stream_specified,
+        false,
         native_codex_client,
     );
     let has_prompt_cache_key = request_meta.has_prompt_cache_key;

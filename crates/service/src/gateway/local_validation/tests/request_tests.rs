@@ -438,6 +438,7 @@ fn aggregate_passthrough_openai_responses_defaults_omitted_stream_to_sse() {
         false,
         false,
         false,
+        false,
     );
 
     assert_eq!(payload.get("stream").and_then(Value::as_bool), Some(true));
@@ -627,6 +628,7 @@ fn gemini_stream_generate_content_path_forces_stream_mode_without_body_flag() {
         false,
         false,
         false,
+        false,
     ));
     assert!(resolve_client_is_stream(
         crate::apikey_profile::PROTOCOL_GEMINI_NATIVE,
@@ -634,10 +636,12 @@ fn gemini_stream_generate_content_path_forces_stream_mode_without_body_flag() {
         false,
         false,
         false,
+        false,
     ));
     assert!(!resolve_client_is_stream(
         crate::apikey_profile::PROTOCOL_GEMINI_NATIVE,
         "/v1beta/models/gemini-2.5-pro:generateContent",
+        false,
         false,
         false,
         false,
@@ -652,6 +656,7 @@ fn openai_responses_api_defaults_to_stream_when_stream_is_omitted() {
         false,
         false,
         false,
+        false,
     ));
     assert!(resolve_client_is_stream(
         crate::apikey_profile::PROTOCOL_OPENAI_COMPAT,
@@ -659,6 +664,7 @@ fn openai_responses_api_defaults_to_stream_when_stream_is_omitted() {
         true,
         true,
         false,
+        false,
     ));
     assert!(!resolve_client_is_stream(
         crate::apikey_profile::PROTOCOL_OPENAI_COMPAT,
@@ -666,12 +672,22 @@ fn openai_responses_api_defaults_to_stream_when_stream_is_omitted() {
         false,
         true,
         false,
+        false,
     ));
     assert!(!resolve_client_is_stream(
         crate::apikey_profile::PROTOCOL_OPENAI_COMPAT,
         "/v1/responses",
         false,
         false,
+        false,
+        true,
+    ));
+    assert!(resolve_client_is_stream(
+        crate::apikey_profile::PROTOCOL_OPENAI_COMPAT,
+        "/v1/responses",
+        false,
+        true,
+        true,
         true,
     ));
 }
