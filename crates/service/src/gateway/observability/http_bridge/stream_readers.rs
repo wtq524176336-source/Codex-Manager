@@ -1,12 +1,7 @@
-use serde_json::{json, Map, Value};
 use std::io::{Cursor, Read};
 use std::sync::{Arc, Mutex};
 
-use super::{
-    append_output_text, append_output_text_raw, collect_output_text_from_event_fields,
-    collect_response_output_text, extract_error_hint_from_body, extract_error_message_from_json,
-    merge_usage,
-};
+use super::{append_output_text_raw, collect_response_output_text, merge_usage};
 use super::{
     build_images_api_response, chat_image_payload, collect_image_generation_data_urls,
     collect_image_generation_results, image_generation_result_payload, images_usage_value,
@@ -30,7 +25,6 @@ use common::{
     stream_idle_timed_out, stream_idle_timeout_message, stream_reader_disconnected_message,
     stream_wait_timeout, upstream_hint_or_stream_incomplete_message,
 };
-use common::{mark_collector_terminal_success, mark_first_response_ms_on_usage};
 pub(crate) use common::{
     PassthroughSseCollector, SseKeepAliveFrame, UpstreamSseFramePump, UpstreamSseFramePumpItem,
 };

@@ -1682,7 +1682,6 @@ pub(super) fn build_local_validation_result(
         false,
         native_codex_client,
     );
-    let has_prompt_cache_key = request_meta.has_prompt_cache_key;
     let request_shape = client_request_meta.request_shape;
     let request_type_for_log = request_type_for_log(&incoming_headers, &body);
 

@@ -1948,7 +1948,7 @@ pub(crate) fn respond_with_stream_upstream(
     response_adapter: ResponseAdapter,
     _passthrough_sse_protocol: Option<PassthroughSseProtocol>,
     request_path: &str,
-    _tool_name_restore_map: Option<&ToolNameRestoreMap>,
+    tool_name_restore_map: Option<&ToolNameRestoreMap>,
     is_stream: bool,
     _allow_failover_for_deactivation: bool,
     trace_id: Option<&str>,
