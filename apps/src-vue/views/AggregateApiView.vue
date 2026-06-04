@@ -42,12 +42,6 @@
       <div class="page-card__body">
         <div class="filter-bar aggregate-filter">
           <el-input v-model="keyword" clearable placeholder="搜索供应商 / URL / 模型" />
-          <el-select v-model="providerFilter">
-            <el-option label="全部类型" value="all" />
-            <el-option label="Codex" value="codex" />
-            <el-option label="Claude" value="claude" />
-            <el-option label="Gemini" value="gemini" />
-          </el-select>
           <el-button :loading="loading" @click="loadData">刷新</el-button>
         </div>
       </div>
@@ -64,13 +58,8 @@
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="类型" width="110" align="center">
-            <template #default="{ row }">
-              <el-tag effect="light">{{ providerLabel(row.providerType) }}</el-tag>
-            </template>
-          </el-table-column>
           <el-table-column label="协议" width="150">
-            <template #default="{ row }">{{ protocolLabel(row.protocolMode, row.providerType) }}</template>
+            <template #default="{ row }">{{ protocolLabel(row.protocolMode) }}</template>
           </el-table-column>
           <el-table-column label="密钥" min-width="180">
             <template #default="{ row }">
@@ -152,18 +141,10 @@
       <div class="form-grid">
         <el-input v-model="form.supplierName" placeholder="供应商名称" />
         <el-input-number v-model="form.sort" :min="0" controls-position="right" placeholder="顺序" />
-        <el-select v-model="form.providerType" placeholder="供应商类型">
-          <el-option label="Codex" value="codex" />
-          <el-option label="Claude" value="claude" />
-          <el-option label="Gemini" value="gemini" />
-        </el-select>
-        <el-select v-if="form.providerType === 'codex'" v-model="form.protocolMode" placeholder="协议模式">
+        <el-select v-model="form.protocolMode" placeholder="协议模式">
           <el-option label="OpenAI 兼容" value="openai_compat" />
           <el-option label="Codex CLI 兼容" value="codex_cli" />
-          <el-option label="Responses 官方" value="responses" />
-          <el-option label="Codex Responses" value="codex_responses" />
         </el-select>
-        <div v-else class="field-hint">Claude / Gemini 使用原生协议，不需要协议模式</div>
         <el-input v-model="form.url" placeholder="上游 URL" />
         <el-input v-model="form.modelOverride" placeholder="模型覆写，可空" />
         <el-select v-model="form.authType" placeholder="鉴权类型">
@@ -239,8 +220,8 @@
             placeholder="例如：/v1/responses 或 /api/paas/v4/responses"
           />
         </div>
-        <p v-if="form.providerType === 'codex'" class="dialog-hint">
-          Responses 模式用于支持 /v1/responses、/responses 以及 compact 请求；需要特殊路径时打开自定义 action。
+        <p class="dialog-hint">
+          Codex CLI 兼容用于支持 /v1/responses、/responses 以及 compact 请求；需要特殊路径时打开自定义 action。
         </p>
       </div>
       <template #footer>
@@ -271,7 +252,6 @@ import type { AggregateApiSecretResult, AggregateApiSummary } from "@/types/comm
 
 const items = ref<AggregateApiSummary[]>([]);
 const keyword = ref("");
-const providerFilter = ref("all");
 const loading = ref(false);
 const saving = ref(false);
 const testingId = ref("");
@@ -284,7 +264,6 @@ const editingId = ref("");
 const revealedSecrets = ref<Record<string, AggregateApiSecretResult>>({});
 const form = reactive({
   supplierName: "",
-  providerType: "codex",
   protocolMode: "openai_compat",
   url: "",
   key: "",
@@ -310,12 +289,10 @@ const filteredItems = computed(() => {
   return items.value.filter((item) => {
     const matchKeyword =
       !value ||
-      [item.supplierName, item.url, item.providerType, item.modelOverride].some((part) =>
+      [item.supplierName, item.url, item.modelOverride].some((part) =>
         String(part || "").toLowerCase().includes(value),
       );
-    const matchProvider =
-      providerFilter.value === "all" || item.providerType === providerFilter.value;
-    return matchKeyword && matchProvider;
+    return matchKeyword;
   });
 });
 const enabledCount = computed(() => items.value.filter((item) => isEnabled(item)).length);
@@ -326,18 +303,17 @@ const totalCost = computed(() =>
   items.value.reduce((sum, item) => sum + Math.max(0, Number(item.estimatedCostUsd) || 0), 0),
 );
 
-function providerLabel(value?: string | null) {
-  if (value === "gemini") return "Gemini";
-  if (value === "claude") return "Claude";
-  return "Codex";
+function protocolLabel(value?: string | null) {
+  if (normalizeProtocolModeForForm(value) === "codex_cli") return "Codex CLI 兼容";
+  return "OpenAI 兼容";
 }
 
-function protocolLabel(value?: string | null, providerType?: string | null) {
-  if (providerType && providerType !== "codex") return "-";
-  if (value === "codex_responses") return "Codex Responses";
-  if (value === "responses") return "Responses";
-  if (value === "codex_cli") return "Codex CLI";
-  return "OpenAI 兼容";
+function normalizeProtocolModeForForm(value?: string | null) {
+  const normalized = String(value || "").trim().toLowerCase().replace(/-/g, "_");
+  if (["codex_cli", "codex", "codex_responses", "responses"].includes(normalized)) {
+    return "codex_cli";
+  }
+  return "openai_compat";
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -396,7 +372,6 @@ function testTagType(value?: string | null) {
 function resetForm() {
   Object.assign(form, {
     supplierName: "",
-    providerType: "codex",
     protocolMode: "openai_compat",
     url: "",
     key: "",
@@ -441,8 +416,7 @@ function openEdit(row: AggregateApiSummary) {
   editingId.value = row.id;
   Object.assign(form, {
     supplierName: row.supplierName || "",
-    providerType: row.providerType || "codex",
-    protocolMode: row.protocolMode || "openai_compat",
+    protocolMode: normalizeProtocolModeForForm(row.protocolMode),
     url: row.url || "",
     key: "",
     authType: isUserpass ? "userpass" : "apikey",
@@ -502,8 +476,8 @@ function readPayload(): AggregateApiPayload {
 
   return {
     supplierName: form.supplierName,
-    providerType: form.providerType,
-    protocolMode: form.providerType === "codex" ? form.protocolMode : null,
+    providerType: "codex",
+    protocolMode: form.protocolMode,
     url: form.url,
     key: form.authType === "apikey" ? form.key : null,
     authType: form.authType,
@@ -648,7 +622,7 @@ async function toggleStatus(row: AggregateApiSummary, checked: unknown) {
   togglingId.value = row.id;
   try {
     await updateAggregateApi(row.id, {
-      providerType: row.providerType,
+      providerType: "codex",
       protocolMode: row.protocolMode,
       supplierName: row.supplierName,
       sort: row.sort,
@@ -680,7 +654,7 @@ async function prioritize(row: AggregateApiSummary) {
   prioritizingId.value = row.id;
   try {
     await updateAggregateApi(row.id, {
-      providerType: row.providerType,
+      providerType: "codex",
       protocolMode: row.protocolMode,
       supplierName: row.supplierName,
       sort: nextSort,
@@ -743,7 +717,7 @@ onMounted(loadData);
 <style scoped lang="scss">
 .aggregate-page {
   .aggregate-filter {
-    grid-template-columns: minmax(260px, 1fr) 160px auto;
+    grid-template-columns: minmax(260px, 1fr) auto;
   }
 
   .aggregate-table {

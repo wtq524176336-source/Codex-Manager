@@ -11,6 +11,58 @@
 | 聚合诊断日志 | `gateway-trace.log` 写入器有 24 小时保留窗口和 60 秒清理间隔。 | `crates/service/src/gateway/observability/trace_log.rs:18`、`crates/service/src/gateway/observability/trace_log.rs:19` |
 | Responses 字段过滤 | `/v1/responses` 官方字段保留逻辑集中在 `retain_official_fields`。 | `crates/service/src/gateway/request/official_responses_http.rs:577` |
 
+## 2026-06-04 账号管理列表移除额度详情入口
+
+### 需求
+
+用户提供截图 `file:///C:/Users/52417/AppData/Local/PixPin/Temp/PixPin_2026-06-04_16-27-14.png`，要求删除红色标注部分。
+
+### 依据
+
+- 截图红框标注账号管理列表中额度详情区域的蓝色「详情」链接。
+- 当前账号列表额度区域直接展示 5 小时和 1 周额度行，额度区域结束后进入账号状态展示，不再提供详情入口。依据：`apps/src-vue/views/AccountsView.vue:126`、`apps/src-vue/views/AccountsView.vue:149`
+- 账号页状态变量列表已不再保留 `usageDialogOpen`、`selectedAccount` 这类详情弹窗状态。依据：`apps/src-vue/views/AccountsView.vue:420`
+
+### 修复
+
+- 移除账号管理列表额度详情区域的「详情」按钮。
+- 移除该按钮容器 `.quota-actions` 样式。
+- 删除该入口移除后不可达的用量详情弹窗、打开函数和仅供该弹窗使用的样式。
+
+### 影响范围
+
+- 影响账号管理列表中的「详情」入口展示。
+- 列表中的额度百分比、重置时间、立即刷新和刷新 AT/RT 功能不变。
+
+## 2026-06-04 聚合 API 移除 Claude/Gemini 供应商并去重协议模式
+
+### 需求
+
+用户提供截图 `file:///C:/Users/52417/AppData/Local/PixPin/Temp/PixPin_2026-06-04_16-29-05.png` 和 `file:///C:/Users/52417/AppData/Local/PixPin/Temp/PixPin_2026-06-04_16-29-12.png`，询问聚合 API 编辑弹窗中的供应商类型和协议模式是否存在重复。
+随后用户明确说明：`Claude / Gemini 相关的代码可以删除`。
+
+### 依据
+
+- 前端聚合 API 列表和编辑弹窗当前不再展示供应商类型下拉或类型列，只保留协议列和两个协议选项。依据：`apps/src-vue/views/AggregateApiView.vue:51`、`apps/src-vue/views/AggregateApiView.vue:144`
+- 前端提交聚合 API 时固定写入 `providerType: "codex"`；启停操作也固定提交 Codex provider。依据：`apps/src-vue/views/AggregateApiView.vue:477`、`apps/src-vue/views/AggregateApiView.vue:624`
+- 后端聚合 API 供应商常量只保留 `codex`，`normalize_provider_type` 仅接受 Codex/OpenAI 兼容别名。依据：`crates/service/src/aggregate_api.rs:15`、`crates/service/src/aggregate_api.rs:529`
+- 后端协议模式仍只保留 `openai_compat` 和 `codex_cli` 两类，旧值 `responses`、`codex_responses` 会归一到 `codex_cli`。依据：`crates/service/src/aggregate_api.rs:544`
+- 聚合 API 轮转候选只选择启用中的 Codex provider；指定的聚合 API ID 也必须是启用中的 Codex provider 才会参与轮转。依据：`crates/service/src/gateway/upstream/protocol/aggregate_api.rs:588`、`crates/service/src/gateway/upstream/protocol/aggregate_api.rs:849`
+
+### 修复
+
+- 移除聚合 API 前端的供应商类型筛选、类型列和表单供应商类型下拉。
+- 前端创建、编辑、启停、置顶聚合 API 时固定提交 `providerType: "codex"`。
+- 移除 Codex 协议模式下重复的 `Responses 官方`、`Codex Responses` 选项，只保留 `OpenAI 兼容`、`Codex CLI 兼容`。
+- 将旧值 `responses`、`codex_responses` 在前端编辑回显时归一为 `Codex CLI 兼容`。
+- 删除聚合 API 后端 Claude/Gemini 供应商常量、默认地址、连通性探测、模型发现和轮转分流逻辑。
+- 聚合 API 网关转发不再为旧 Claude provider 设置 Anthropic Native SSE 透传协议。
+
+### 影响范围
+
+- 影响聚合 API 的供应商配置、连通性测试和网关轮转候选选择。
+- 不删除全局 Claude/Gemini 请求协议适配模块；本次只清理聚合 API 供应商配置和轮转分支。
+
 ## 2026-06-04 项目协作提示词优化
 
 ### 需求

@@ -13,16 +13,11 @@ use crate::gateway;
 use crate::storage_helpers::{generate_aggregate_api_id, open_storage};
 
 pub(crate) const AGGREGATE_API_PROVIDER_CODEX: &str = "codex";
-pub(crate) const AGGREGATE_API_PROVIDER_CLAUDE: &str = "claude";
-pub(crate) const AGGREGATE_API_PROVIDER_GEMINI: &str = "gemini";
 pub(crate) const AGGREGATE_API_AUTH_APIKEY: &str = "apikey";
 pub(crate) const AGGREGATE_API_AUTH_USERPASS: &str = "userpass";
 pub(crate) const AGGREGATE_API_PROTOCOL_OPENAI_COMPAT: &str = "openai_compat";
 pub(crate) const AGGREGATE_API_PROTOCOL_CODEX_CLI: &str = "codex_cli";
-const CLAUDE_DEFAULT_PROBE_MODEL: &str = "claude-haiku-4-5-20251001";
-const ALIBABA_CODING_PLAN_PROBE_MODEL: &str = "qwen3.5-plus";
 const CODEX_CLI_DEFAULT_PROBE_MODEL: &str = "gpt-5.5";
-const MAX_DISCOVERED_CLAUDE_PROBE_MODELS: usize = 8;
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -275,24 +270,21 @@ mod tests {
     use std::sync::mpsc;
     use std::thread;
     use std::time::Duration;
-    use tiny_http::{Response, Server, StatusCode};
+    use tiny_http::{Response, Server};
 
     use super::{
-        action_path_or_default, build_codex_models_probe_url, claude_probe_fallback_models_for_api,
-        extract_model_ids_from_models_response, normalize_action_override, normalize_provider_type,
-        normalize_provider_type_value, probe_claude_endpoint, probe_codex_endpoint,
-        provider_default_url, AGGREGATE_API_PROVIDER_CLAUDE, AGGREGATE_API_PROVIDER_GEMINI,
-        ALIBABA_CODING_PLAN_PROBE_MODEL, CLAUDE_DEFAULT_PROBE_MODEL,
+        action_path_or_default, build_codex_models_probe_url, normalize_action_override,
+        probe_codex_endpoint,
     };
 
     fn aggregate_api_with_action(action: Option<&str>) -> AggregateApi {
         AggregateApi {
             id: "agg-test".to_string(),
-            provider_type: "claude".to_string(),
+            provider_type: "codex".to_string(),
             protocol_mode: None,
             supplier_name: Some("test".to_string()),
             sort: 0,
-            url: "https://open.bigmodel.cn/api/anthropic".to_string(),
+            url: "https://api.openai.com/v1".to_string(),
             auth_type: "apikey".to_string(),
             auth_params_json: None,
             action: action.map(str::to_string),
@@ -309,7 +301,7 @@ mod tests {
     #[test]
     fn action_override_disabled_stays_none() {
         let value =
-            normalize_action_override(Some(false), Some("/v1/messages".to_string())).unwrap();
+            normalize_action_override(Some(false), Some("/v1/responses".to_string())).unwrap();
         assert_eq!(value, Some(None));
     }
 
@@ -322,7 +314,7 @@ mod tests {
     #[test]
     fn empty_action_uses_base_url_without_default_path() {
         let api = aggregate_api_with_action(Some(""));
-        let path = action_path_or_default(&api, "/v1/messages?beta=true");
+        let path = action_path_or_default(&api, "/v1/responses");
         assert_eq!(path, "");
     }
 
@@ -356,118 +348,6 @@ mod tests {
             url,
             "https://api.openai.com/v1/models?limit=20&client_version=0.101.0"
         );
-    }
-
-    #[test]
-    fn gemini_provider_type_is_normalized_independently() {
-        assert_eq!(
-            normalize_provider_type(Some("gemini_native".to_string())).unwrap(),
-            AGGREGATE_API_PROVIDER_GEMINI
-        );
-        assert_eq!(
-            normalize_provider_type_value("google_gemini"),
-            AGGREGATE_API_PROVIDER_GEMINI
-        );
-        assert_eq!(
-            provider_default_url(AGGREGATE_API_PROVIDER_GEMINI),
-            "https://generativelanguage.googleapis.com"
-        );
-        assert_eq!(
-            normalize_provider_type(Some("claude".to_string())).unwrap(),
-            AGGREGATE_API_PROVIDER_CLAUDE
-        );
-    }
-
-    #[test]
-    fn claude_probe_models_prefer_alibaba_coding_plan_model_for_dashscope() {
-        let mut api = aggregate_api_with_action(None);
-        api.url = "https://coding-intl.dashscope.aliyuncs.com/apps/anthropic".to_string();
-
-        assert_eq!(
-            claude_probe_fallback_models_for_api(&api),
-            vec![ALIBABA_CODING_PLAN_PROBE_MODEL, CLAUDE_DEFAULT_PROBE_MODEL]
-        );
-    }
-
-    #[test]
-    fn claude_probe_models_keep_anthropic_default_first_for_generic_urls() {
-        let mut api = aggregate_api_with_action(None);
-        api.url = "https://api.anthropic.com/v1".to_string();
-
-        assert_eq!(
-            claude_probe_fallback_models_for_api(&api),
-            vec![CLAUDE_DEFAULT_PROBE_MODEL, ALIBABA_CODING_PLAN_PROBE_MODEL]
-        );
-    }
-
-    #[test]
-    fn extract_model_ids_from_models_response_accepts_common_shapes() {
-        let body = r#"{
-            "data": [
-                {"id":"provider-model-a"},
-                {"model":"provider-model-b"},
-                "provider-model-c"
-            ],
-            "models": [{"slug":"ignored-because-data-wins"}]
-        }"#;
-
-        assert_eq!(
-            extract_model_ids_from_models_response(body),
-            vec![
-                "provider-model-a".to_string(),
-                "provider-model-b".to_string(),
-                "provider-model-c".to_string()
-            ]
-        );
-    }
-
-    #[test]
-    fn claude_probe_uses_configured_model_without_model_discovery() {
-        let server = Server::http("127.0.0.1:0").expect("start mock server");
-        let base_url = format!("http://{}", server.server_addr());
-        let (tx, rx) = mpsc::channel();
-        let join = thread::spawn(move || {
-            let mut request = server
-                .recv_timeout(Duration::from_secs(2))
-                .expect("receive messages request")
-                .expect("messages request present");
-            let mut body = String::new();
-            request
-                .as_reader()
-                .read_to_string(&mut body)
-                .expect("read request body");
-            tx.send((
-                request.method().as_str().to_string(),
-                request.url().to_string(),
-                body,
-            ))
-            .expect("send messages request");
-            request
-                .respond(Response::from_string(
-                    r#"{"id":"msg_probe","type":"message"}"#,
-                ))
-                .expect("respond messages");
-        });
-
-        let mut api = aggregate_api_with_action(None);
-        api.url = base_url;
-        api.model_override = Some("qwen3.5-plus".to_string());
-        let client = reqwest::blocking::Client::builder()
-            .timeout(Duration::from_secs(5))
-            .build()
-            .expect("build client");
-
-        let status = probe_claude_endpoint(&client, &api, "secret").expect("probe succeeds");
-
-        assert_eq!(status, 200);
-        let captured = rx
-            .recv_timeout(Duration::from_secs(2))
-            .expect("captured request");
-        join.join().expect("join mock server");
-        assert_eq!(captured.0, "POST");
-        assert_eq!(captured.1, "/v1/messages?beta=true");
-        let body: Value = serde_json::from_str(captured.2.as_str()).expect("parse body");
-        assert_eq!(body["model"], "qwen3.5-plus");
     }
 
     #[test]
@@ -515,147 +395,6 @@ mod tests {
         assert_eq!(captured.1, "/v1/chat/completions");
         let body: Value = serde_json::from_str(captured.2.as_str()).expect("parse body");
         assert_eq!(body["model"], "qwen3.5-plus");
-    }
-
-    #[test]
-    fn claude_probe_uses_discovered_model_before_fallbacks() {
-        let server = Server::http("127.0.0.1:0").expect("start mock server");
-        let base_url = format!("http://{}", server.server_addr());
-        let (tx, rx) = mpsc::channel();
-        let join = thread::spawn(move || {
-            let request = server
-                .recv_timeout(Duration::from_secs(2))
-                .expect("receive model list request")
-                .expect("model list request present");
-            tx.send((
-                request.method().as_str().to_string(),
-                request.url().to_string(),
-                None,
-            ))
-            .expect("send model list request");
-            request
-                .respond(Response::from_string(
-                    r#"{"data":[{"id":"provider-model"}]}"#,
-                ))
-                .expect("respond model list");
-
-            let mut request = server
-                .recv_timeout(Duration::from_secs(2))
-                .expect("receive messages request")
-                .expect("messages request present");
-            let mut body = String::new();
-            request
-                .as_reader()
-                .read_to_string(&mut body)
-                .expect("read request body");
-            tx.send((
-                request.method().as_str().to_string(),
-                request.url().to_string(),
-                Some(body),
-            ))
-            .expect("send messages request");
-            request
-                .respond(Response::from_string(
-                    r#"{"id":"msg_probe","type":"message"}"#,
-                ))
-                .expect("respond messages");
-        });
-
-        let mut api = aggregate_api_with_action(None);
-        api.url = base_url;
-        let client = reqwest::blocking::Client::builder()
-            .timeout(Duration::from_secs(5))
-            .build()
-            .expect("build client");
-
-        let status = probe_claude_endpoint(&client, &api, "secret").expect("probe succeeds");
-
-        assert_eq!(status, 200);
-        let first = rx
-            .recv_timeout(Duration::from_secs(2))
-            .expect("first captured request");
-        let second = rx
-            .recv_timeout(Duration::from_secs(2))
-            .expect("second captured request");
-        join.join().expect("join mock server");
-        assert_eq!(first.0, "GET");
-        assert_eq!(first.1, "/v1/models");
-        assert_eq!(second.0, "POST");
-        assert_eq!(second.1, "/v1/messages?beta=true");
-        let second_body: Value =
-            serde_json::from_str(second.2.as_deref().expect("second body")).expect("parse body");
-        assert_eq!(second_body["model"], "provider-model");
-    }
-
-    #[test]
-    fn claude_probe_retries_with_alibaba_model_after_default_model_bad_request() {
-        let server = Server::http("127.0.0.1:0").expect("start mock server");
-        let base_url = format!("http://{}/apps/anthropic", server.server_addr());
-        let (tx, rx) = mpsc::channel();
-        let join = thread::spawn(move || {
-            let request = server
-                .recv_timeout(Duration::from_secs(2))
-                .expect("receive model list request")
-                .expect("model list request present");
-            tx.send((request.url().to_string(), String::new()))
-                .expect("send captured model list request");
-            request
-                .respond(Response::from_string("").with_status_code(StatusCode(404)))
-                .expect("respond model list request");
-
-            for (index, status) in [400u16, 200u16].into_iter().enumerate() {
-                let mut request = server
-                    .recv_timeout(Duration::from_secs(2))
-                    .expect("receive mock request")
-                    .expect("mock request present");
-                let mut body = String::new();
-                request
-                    .as_reader()
-                    .read_to_string(&mut body)
-                    .expect("read request body");
-                tx.send((request.url().to_string(), body))
-                    .expect("send captured request");
-                let response_body = if index == 0 {
-                    r#"{"error":{"message":"model not found"}}"#
-                } else {
-                    r#"{"id":"msg_probe","type":"message","content":[]}"#
-                };
-                request
-                    .respond(
-                        Response::from_string(response_body).with_status_code(StatusCode(status)),
-                    )
-                    .expect("respond mock request");
-            }
-        });
-
-        let mut api = aggregate_api_with_action(None);
-        api.url = base_url;
-        let client = reqwest::blocking::Client::builder()
-            .timeout(Duration::from_secs(5))
-            .build()
-            .expect("build client");
-
-        let status = probe_claude_endpoint(&client, &api, "secret").expect("probe succeeds");
-
-        assert_eq!(status, 200);
-        let models_request = rx
-            .recv_timeout(Duration::from_secs(2))
-            .expect("captured model list request");
-        let first = rx
-            .recv_timeout(Duration::from_secs(2))
-            .expect("first captured request");
-        let second = rx
-            .recv_timeout(Duration::from_secs(2))
-            .expect("second captured request");
-        join.join().expect("join mock server");
-        assert_eq!(models_request.0, "/apps/anthropic/v1/models");
-        assert_eq!(first.0, "/apps/anthropic/v1/messages?beta=true");
-        assert_eq!(second.0, "/apps/anthropic/v1/messages?beta=true");
-        let first_body: Value = serde_json::from_str(first.1.as_str()).expect("parse first body");
-        let second_body: Value =
-            serde_json::from_str(second.1.as_str()).expect("parse second body");
-        assert_eq!(first_body["model"], CLAUDE_DEFAULT_PROBE_MODEL);
-        assert_eq!(second_body["model"], ALIBABA_CODING_PLAN_PROBE_MODEL);
     }
 }
 
@@ -795,12 +534,6 @@ fn normalize_provider_type(value: Option<String>) -> Result<String, String> {
                 "codex" | "openai" | "openai_compat" | "gpt" => {
                     Ok(AGGREGATE_API_PROVIDER_CODEX.to_string())
                 }
-                "gemini" | "gemini_native" | "google" | "google_ai" | "google_gemini" => {
-                    Ok(AGGREGATE_API_PROVIDER_GEMINI.to_string())
-                }
-                "claude" | "anthropic" | "anthropic_native" | "claude_code" => {
-                    Ok(AGGREGATE_API_PROVIDER_CLAUDE.to_string())
-                }
                 other => Err(format!("unsupported aggregate api provider type: {other}")),
             }
         }
@@ -831,30 +564,6 @@ fn normalize_protocol_mode_value(value: Option<&str>) -> String {
         .unwrap_or_else(|_| AGGREGATE_API_PROTOCOL_OPENAI_COMPAT.to_string())
 }
 
-/// 函数 `normalize_provider_type_value`
-///
-/// 作者: gaohongshun
-///
-/// 时间: 2026-04-02
-///
-/// # 参数
-/// - value: 参数 value
-///
-/// # 返回
-/// 返回函数执行结果
-fn normalize_provider_type_value(value: &str) -> String {
-    let normalized = value.trim().to_ascii_lowercase().replace('-', "_");
-    match normalized.as_str() {
-        "claude" | "anthropic" | "anthropic_native" | "claude_code" => {
-            AGGREGATE_API_PROVIDER_CLAUDE.to_string()
-        }
-        "gemini" | "gemini_native" | "google" | "google_ai" | "google_gemini" => {
-            AGGREGATE_API_PROVIDER_GEMINI.to_string()
-        }
-        _ => AGGREGATE_API_PROVIDER_CODEX.to_string(),
-    }
-}
-
 /// 函数 `provider_default_url`
 ///
 /// 作者: gaohongshun
@@ -866,12 +575,8 @@ fn normalize_provider_type_value(value: &str) -> String {
 ///
 /// # 返回
 /// 返回函数执行结果
-fn provider_default_url(provider_type: &str) -> &'static str {
-    match provider_type {
-        AGGREGATE_API_PROVIDER_CLAUDE => "https://api.anthropic.com/v1",
-        AGGREGATE_API_PROVIDER_GEMINI => "https://generativelanguage.googleapis.com",
-        _ => "https://api.openai.com/v1",
-    }
+fn provider_default_url() -> &'static str {
+    "https://api.openai.com/v1"
 }
 
 /// 函数 `normalize_probe_url`
@@ -924,29 +629,6 @@ fn read_first_chunk(mut response: reqwest::blocking::Response) -> Result<(), Str
     }
 }
 
-/// 函数 `build_claude_probe_body`
-///
-/// 作者: gaohongshun
-///
-/// 时间: 2026-04-02
-///
-/// # 参数
-/// 无
-///
-/// # 返回
-/// 返回函数执行结果
-fn build_claude_probe_body(model: &str) -> serde_json::Value {
-    json!({
-        "model": model,
-        "max_tokens": 1,
-        "messages": [{
-            "role": "user",
-            "content": "Who are you?"
-        }],
-        "stream": true
-    })
-}
-
 /// 函数 `build_codex_probe_body`
 ///
 /// 作者: gaohongshun
@@ -974,20 +656,6 @@ fn codex_probe_model<'a>(api: &'a AggregateApi, default_model: &'a str) -> &'a s
         .unwrap_or(default_model)
 }
 
-fn build_gemini_probe_body() -> serde_json::Value {
-    json!({
-        "contents": [{
-            "role": "user",
-            "parts": [{
-                "text": "Who are you?"
-            }]
-        }],
-        "generationConfig": {
-            "maxOutputTokens": 1
-        }
-    })
-}
-
 fn append_client_version_query(url: &str) -> String {
     if url.contains("client_version=") {
         return url.to_string();
@@ -997,165 +665,6 @@ fn append_client_version_query(url: &str) -> String {
         "{url}{separator}client_version={}",
         gateway::current_codex_user_agent_version()
     )
-}
-
-/// 函数 `probe_codex_only_for_provider`
-///
-/// 作者: gaohongshun
-///
-/// 时间: 2026-04-02
-///
-/// # 参数
-/// - provider_type: 参数 provider_type
-///
-/// # 返回
-/// 返回函数执行结果
-fn probe_codex_only_for_provider(provider_type: &str) -> bool {
-    !matches!(
-        provider_type,
-        AGGREGATE_API_PROVIDER_CLAUDE | AGGREGATE_API_PROVIDER_GEMINI
-    )
-}
-
-fn is_alibaba_claude_compat_url(url: &str) -> bool {
-    let normalized = url.trim().to_ascii_lowercase();
-    normalized.contains("dashscope.aliyuncs.com/apps/anthropic")
-        || normalized.contains("dashscope-intl.aliyuncs.com/apps/anthropic")
-        || normalized.contains("coding-intl.dashscope.aliyuncs.com/apps/anthropic")
-}
-
-fn claude_probe_fallback_models_for_api(api: &AggregateApi) -> Vec<&'static str> {
-    if is_alibaba_claude_compat_url(api.url.as_str()) {
-        return vec![ALIBABA_CODING_PLAN_PROBE_MODEL, CLAUDE_DEFAULT_PROBE_MODEL];
-    }
-    vec![CLAUDE_DEFAULT_PROBE_MODEL, ALIBABA_CODING_PLAN_PROBE_MODEL]
-}
-
-fn push_unique_model(models: &mut Vec<String>, model: &str) {
-    let trimmed = model.trim();
-    if trimmed.is_empty() {
-        return;
-    }
-    if !models.iter().any(|item| item == trimmed) {
-        models.push(trimmed.to_string());
-    }
-}
-
-fn model_id_from_value(value: &serde_json::Value) -> Option<String> {
-    if let Some(model) = value.as_str() {
-        let trimmed = model.trim();
-        return if trimmed.is_empty() {
-            None
-        } else {
-            Some(trimmed.to_string())
-        };
-    }
-    let object = value.as_object()?;
-    ["id", "model", "slug", "name"]
-        .iter()
-        .find_map(|key| object.get(*key).and_then(serde_json::Value::as_str))
-        .map(str::trim)
-        .filter(|model| !model.is_empty())
-        .map(str::to_string)
-}
-
-fn extract_model_ids_from_models_response(body: &str) -> Vec<String> {
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(body) else {
-        return Vec::new();
-    };
-    let items = value
-        .get("data")
-        .and_then(serde_json::Value::as_array)
-        .or_else(|| value.get("models").and_then(serde_json::Value::as_array))
-        .or_else(|| value.as_array());
-    let Some(items) = items else {
-        return Vec::new();
-    };
-    let mut models = Vec::new();
-    for item in items {
-        if models.len() >= MAX_DISCOVERED_CLAUDE_PROBE_MODELS {
-            break;
-        }
-        if let Some(model) = model_id_from_value(item) {
-            push_unique_model(&mut models, model.as_str());
-        }
-    }
-    models
-}
-
-fn add_claude_probe_headers(
-    builder: reqwest::blocking::RequestBuilder,
-) -> reqwest::blocking::RequestBuilder {
-    builder
-        .header("anthropic-version", "2023-06-01")
-        .header(
-            "anthropic-beta",
-            "claude-code-20250219,interleaved-thinking-2025-05-14",
-        )
-        .header("accept", "application/json")
-        .header("accept-encoding", "identity")
-        .header("user-agent", "claude-cli/2.1.2 (external, cli)")
-        .header("x-app", "cli")
-}
-
-fn build_claude_models_probe_url(api: &AggregateApi) -> String {
-    normalize_probe_url(api.url.as_str(), "/models")
-}
-
-fn probe_claude_models_endpoint(
-    client: &reqwest::blocking::Client,
-    api: &AggregateApi,
-    secret: &str,
-) -> Result<Vec<String>, String> {
-    let url = build_claude_models_probe_url(api);
-    let builder = client.get(url.as_str());
-    let (builder, updated_url) = apply_probe_auth(builder, url.clone(), api, secret)?;
-    let builder = if updated_url != url {
-        let rebuilt = client.get(updated_url.as_str());
-        let (rebuilt, _) = apply_probe_auth(rebuilt, updated_url, api, secret)?;
-        rebuilt
-    } else {
-        builder
-    };
-    let response = add_claude_probe_headers(builder)
-        .send()
-        .map_err(|err| err.to_string())?;
-
-    let status_code = response.status().as_u16() as i64;
-    if !response.status().is_success() {
-        return Err(format!("claude models probe http_status={status_code}"));
-    }
-    let body = response.text().map_err(|err| err.to_string())?;
-    let models = extract_model_ids_from_models_response(body.as_str());
-    if models.is_empty() {
-        return Err("claude models probe returned empty model list".to_string());
-    }
-    Ok(models)
-}
-
-fn claude_probe_models_for_api(
-    client: &reqwest::blocking::Client,
-    api: &AggregateApi,
-    secret: &str,
-) -> (Vec<String>, Option<String>) {
-    let mut models = Vec::new();
-    let discovery_error = match probe_claude_models_endpoint(client, api, secret) {
-        Ok(discovered) => {
-            for model in discovered {
-                push_unique_model(&mut models, model.as_str());
-            }
-            None
-        }
-        Err(err) => Some(err),
-    };
-    for fallback in claude_probe_fallback_models_for_api(api) {
-        push_unique_model(&mut models, fallback);
-    }
-    (models, discovery_error)
-}
-
-fn should_retry_claude_probe_with_next_model(status_code: u16) -> bool {
-    status_code == 400
 }
 
 /// 函数 `add_codex_probe_headers`
@@ -1343,123 +852,6 @@ fn probe_codex_endpoint(
     Err(format!("{models_err}; {responses_err}"))
 }
 
-/// 函数 `probe_claude_endpoint`
-///
-/// 作者: gaohongshun
-///
-/// 时间: 2026-04-02
-///
-/// # 参数
-/// - client: 参数 client
-/// - base_url: 参数 base_url
-/// - secret: 参数 secret
-///
-/// # 返回
-/// 返回函数执行结果
-fn probe_claude_endpoint(
-    client: &reqwest::blocking::Client,
-    api: &AggregateApi,
-    secret: &str,
-) -> Result<i64, String> {
-    let probe_path = action_path_or_default(api, "/messages?beta=true");
-    let url = normalize_probe_url(api.url.as_str(), probe_path.as_str());
-    let (mut models, discovery_error) = if let Some(model_override) = api
-        .model_override
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        (vec![model_override.to_string()], None)
-    } else {
-        claude_probe_models_for_api(client, api, secret)
-    };
-    if models.is_empty() {
-        models = claude_probe_fallback_models_for_api(api)
-            .into_iter()
-            .map(str::to_string)
-            .collect();
-    }
-    let mut last_error = None;
-    for (index, model) in models.iter().enumerate() {
-        let builder = client.post(url.as_str());
-        let (builder, updated_url) = apply_probe_auth(builder, url.clone(), api, secret)?;
-        let builder = if updated_url != url {
-            let rebuilt = client.post(updated_url.as_str());
-            let (rebuilt, _) = apply_probe_auth(rebuilt, updated_url, api, secret)?;
-            rebuilt
-        } else {
-            builder
-        };
-        let response = builder
-            .header("anthropic-version", "2023-06-01")
-            .header(
-                "anthropic-beta",
-                "claude-code-20250219,interleaved-thinking-2025-05-14",
-            )
-            .header("content-type", "application/json")
-            .header("accept", "application/json")
-            .header("accept-encoding", "identity")
-            .header("user-agent", "claude-cli/2.1.2 (external, cli)")
-            .header("x-app", "cli")
-            .json(&build_claude_probe_body(model))
-            .send()
-            .map_err(|err| err.to_string())?;
-
-        let status_code = response.status().as_u16() as i64;
-        if response.status().is_success() {
-            read_first_chunk(response)?;
-            return Ok(status_code);
-        }
-
-        let status_code_u16 = response.status().as_u16();
-        last_error = Some(format!(
-            "claude probe http_status={status_code} model={model}"
-        ));
-        if index + 1 >= models.len() || !should_retry_claude_probe_with_next_model(status_code_u16)
-        {
-            break;
-        }
-    }
-    Err(match (discovery_error, last_error) {
-        (Some(discovery), Some(probe)) => format!("{discovery}; {probe}"),
-        (None, Some(probe)) => probe,
-        (Some(discovery), None) => discovery,
-        (None, None) => "claude probe failed".to_string(),
-    })
-}
-
-fn probe_gemini_endpoint(
-    client: &reqwest::blocking::Client,
-    api: &AggregateApi,
-    secret: &str,
-) -> Result<i64, String> {
-    let probe_path = action_path_or_default(api, "/v1beta/models/gemini-2.5-flash:generateContent");
-    let url = normalize_probe_url(api.url.as_str(), probe_path.as_str());
-    let builder = client.post(url.as_str());
-    let (builder, updated_url) = apply_probe_auth(builder, url.clone(), api, secret)?;
-    let builder = if updated_url != url {
-        let rebuilt = client.post(updated_url.as_str());
-        let (rebuilt, _) = apply_probe_auth(rebuilt, updated_url, api, secret)?;
-        rebuilt
-    } else {
-        builder
-    };
-    let response = builder
-        .header("content-type", "application/json")
-        .header("accept", "application/json")
-        .header("accept-encoding", "identity")
-        .json(&build_gemini_probe_body())
-        .send()
-        .map_err(|err| err.to_string())?;
-
-    let status_code = response.status().as_u16() as i64;
-    if !response.status().is_success() {
-        return Err(format!("gemini probe http_status={status_code}"));
-    }
-    read_first_chunk(response)?;
-    Ok(status_code)
-}
-
 /// 函数 `list_aggregate_apis`
 ///
 /// 作者: gaohongshun
@@ -1540,15 +932,11 @@ pub(crate) fn create_aggregate_api(
 ) -> Result<AggregateApiCreateResult, String> {
     let storage = open_storage().ok_or_else(|| "storage unavailable".to_string())?;
     let normalized_provider_type = normalize_provider_type(provider_type)?;
-    let normalized_protocol_mode = if normalized_provider_type == AGGREGATE_API_PROVIDER_CODEX {
-        Some(normalize_protocol_mode(protocol_mode)?)
-    } else {
-        None
-    };
+    let normalized_protocol_mode = Some(normalize_protocol_mode(protocol_mode)?);
     let normalized_supplier_name = normalize_supplier_name(supplier_name)?;
     let normalized_sort = normalize_sort(sort);
-    let normalized_url = normalize_upstream_base_url(url)?
-        .unwrap_or_else(|| provider_default_url(normalized_provider_type.as_str()).to_string());
+    let normalized_url =
+        normalize_upstream_base_url(url)?.unwrap_or_else(|| provider_default_url().to_string());
     let normalized_auth_type = normalize_auth_type(auth_type)?;
     let normalized_auth_params_json = normalize_auth_params_json(
         normalized_auth_type.as_str(),
@@ -1667,31 +1055,18 @@ pub(crate) fn update_aggregate_api(
             .update_aggregate_api_auth_type(api_id, next)
             .map_err(|err| err.to_string())?;
     }
-    let normalized_provider_type = match provider_type {
-        Some(raw) => Some(normalize_provider_type(Some(raw))?),
-        None => None,
-    };
-    let existing_provider_type = normalize_provider_type_value(existing.provider_type.as_str());
-    let next_provider_type = normalized_provider_type
-        .as_deref()
-        .unwrap_or(existing_provider_type.as_str())
-        .to_string();
-    if let Some(normalized_provider_type) = normalized_provider_type.as_deref() {
-        storage
-            .update_aggregate_api_type(api_id, normalized_provider_type)
-            .map_err(|err| err.to_string())?;
-    }
-    if next_provider_type == AGGREGATE_API_PROVIDER_CODEX
-        && (protocol_mode_provided || existing_provider_type != next_provider_type)
-    {
+    let normalized_provider_type = normalize_provider_type(provider_type)?;
+    storage
+        .update_aggregate_api_type(api_id, normalized_provider_type.as_str())
+        .map_err(|err| err.to_string())?;
+    if protocol_mode_provided {
         let normalized_protocol_mode = normalize_protocol_mode(protocol_mode)?;
         storage
             .update_aggregate_api_protocol_mode(api_id, Some(normalized_protocol_mode.as_str()))
             .map_err(|err| err.to_string())?;
-    } else if next_provider_type != AGGREGATE_API_PROVIDER_CODEX && existing.protocol_mode.is_some()
-    {
+    } else if existing.protocol_mode.is_none() {
         storage
-            .update_aggregate_api_protocol_mode(api_id, None)
+            .update_aggregate_api_protocol_mode(api_id, Some(AGGREGATE_API_PROTOCOL_OPENAI_COMPAT))
             .map_err(|err| err.to_string())?;
     }
     let normalized_supplier_name = normalize_supplier_name(supplier_name)?;
@@ -1896,20 +1271,12 @@ pub(crate) fn test_aggregate_api_connection(
     };
     let client = gateway::fresh_upstream_client();
     let started_at = Instant::now();
-    let provider_type = normalize_provider_type_value(api.provider_type.as_str());
-    let result = match provider_type.as_str() {
-        AGGREGATE_API_PROVIDER_CLAUDE => probe_claude_endpoint(&client, &api, &secret),
-        AGGREGATE_API_PROVIDER_GEMINI => probe_gemini_endpoint(&client, &api, &secret),
-        _ if probe_codex_only_for_provider(provider_type.as_str()) => {
-            probe_codex_endpoint(&client, &api, &secret)
-        }
-        _ => probe_codex_endpoint(&client, &api, &secret),
-    };
+    let result = probe_codex_endpoint(&client, &api, &secret);
     let (ok, status_code, last_error) = match result {
         Ok(code) => (true, Some(code), None),
         Err(err) => (false, None, Some(err)),
     };
-    let message = last_error.map(|err| format!("provider={provider_type}; {err}"));
+    let message = last_error.map(|err| format!("provider=codex; {err}"));
 
     let _ = storage.update_aggregate_api_test_result(api_id, ok, status_code, message.as_deref());
     Ok(AggregateApiTestResult {

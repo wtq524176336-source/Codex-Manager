@@ -9,8 +9,7 @@ use tiny_http::Request;
 
 use super::super::GatewayUpstreamResponse;
 use crate::aggregate_api::{
-    AGGREGATE_API_AUTH_APIKEY, AGGREGATE_API_AUTH_USERPASS, AGGREGATE_API_PROVIDER_CLAUDE,
-    AGGREGATE_API_PROVIDER_CODEX, AGGREGATE_API_PROVIDER_GEMINI,
+    AGGREGATE_API_AUTH_APIKEY, AGGREGATE_API_AUTH_USERPASS, AGGREGATE_API_PROVIDER_CODEX,
 };
 use crate::gateway::request_log::RequestLogUsage;
 use serde_json::Value;
@@ -487,24 +486,6 @@ fn parse_auth_config(
     ))
 }
 
-fn resolve_passthrough_sse_protocol(
-    candidate: &AggregateApi,
-    path: &str,
-    response_adapter: super::super::super::ResponseAdapter,
-) -> Option<super::super::super::PassthroughSseProtocol> {
-    if response_adapter != super::super::super::ResponseAdapter::Passthrough {
-        return None;
-    }
-    let provider_type = normalize_provider_type_value(candidate.provider_type.as_str());
-    if provider_type != AGGREGATE_API_PROVIDER_CLAUDE {
-        return None;
-    }
-    if path == "/v1/messages" || path.starts_with("/v1/messages?") {
-        return Some(super::super::super::PassthroughSseProtocol::AnthropicNative);
-    }
-    None
-}
-
 /// 函数 `should_skip_forward_header`
 ///
 /// 作者: gaohongshun
@@ -604,6 +585,14 @@ fn normalize_candidate_order(mut candidates: Vec<AggregateApi>) -> Vec<Aggregate
     candidates
 }
 
+fn is_active_codex_aggregate_api(api: &AggregateApi) -> bool {
+    api.status == "active"
+        && api
+            .provider_type
+            .trim()
+            .eq_ignore_ascii_case(AGGREGATE_API_PROVIDER_CODEX)
+}
+
 /// 函数 `apply_gateway_route_strategy_to_aggregate_candidates`
 ///
 /// 作者: gaohongshun
@@ -645,30 +634,6 @@ pub(crate) fn apply_gateway_route_strategy_to_aggregate_candidates(
         }
     } else {
         super::super::super::route_hint::apply_balanced_round_robin(candidates, key_id, model);
-    }
-}
-
-/// 函数 `normalize_provider_type_value`
-///
-/// 作者: gaohongshun
-///
-/// 时间: 2026-04-02
-///
-/// # 参数
-/// - value: 参数 value
-///
-/// # 返回
-/// 返回函数执行结果
-fn normalize_provider_type_value(value: &str) -> String {
-    let normalized = value.trim().to_ascii_lowercase().replace('-', "_");
-    match normalized.as_str() {
-        "claude" | "anthropic" | "anthropic_native" | "claude_code" => {
-            AGGREGATE_API_PROVIDER_CLAUDE.to_string()
-        }
-        "gemini" | "gemini_native" | "google" | "google_ai" | "google_gemini" => {
-            AGGREGATE_API_PROVIDER_GEMINI.to_string()
-        }
-        _ => AGGREGATE_API_PROVIDER_CODEX.to_string(),
     }
 }
 
@@ -883,23 +848,14 @@ fn build_aggregate_api_request(
 /// 返回函数执行结果
 pub(crate) fn resolve_aggregate_api_rotation_candidates(
     storage: &Storage,
-    protocol_type: &str,
+    _protocol_type: &str,
     aggregate_api_id: Option<&str>,
 ) -> Result<Vec<AggregateApi>, String> {
-    let provider_type = match protocol_type {
-        "anthropic_native" => AGGREGATE_API_PROVIDER_CLAUDE,
-        "gemini_native" => AGGREGATE_API_PROVIDER_GEMINI,
-        _ => AGGREGATE_API_PROVIDER_CODEX,
-    };
-
     let mut candidates = storage
         .list_aggregate_apis()
         .map_err(|err| err.to_string())?
         .into_iter()
-        .filter(|api| {
-            api.status == "active"
-                && normalize_provider_type_value(api.provider_type.as_str()) == provider_type
-        })
+        .filter(is_active_codex_aggregate_api)
         .collect::<Vec<_>>();
     candidates = normalize_candidate_order(candidates);
 
@@ -911,15 +867,15 @@ pub(crate) fn resolve_aggregate_api_rotation_candidates(
             .find_aggregate_api_by_id(api_id)
             .map_err(|err| err.to_string())?
         {
-            candidates.retain(|api| api.id != preferred.id);
-            candidates.insert(0, preferred);
+            if is_active_codex_aggregate_api(&preferred) {
+                candidates.retain(|api| api.id != preferred.id);
+                candidates.insert(0, preferred);
+            }
         }
     }
 
     if candidates.is_empty() {
-        Err(format!(
-            "aggregate api not found for provider {provider_type}"
-        ))
+        Err("aggregate api not found for provider codex".to_string())
     } else {
         Ok(candidates)
     }
@@ -1263,8 +1219,6 @@ pub(in super::super) fn proxy_aggregate_request(
                 attempt_idx,
             );
             let inflight_guard = super::super::super::acquire_account_inflight(key_id);
-            let passthrough_sse_protocol =
-                resolve_passthrough_sse_protocol(&candidate, path, response_adapter);
             let bridge = super::super::super::respond_with_upstream(
                 request
                     .take()
@@ -1272,7 +1226,7 @@ pub(in super::super) fn proxy_aggregate_request(
                 GatewayUpstreamResponse::Blocking(upstream),
                 inflight_guard,
                 response_adapter,
-                passthrough_sse_protocol,
+                None,
                 None,
                 path,
                 None,
@@ -1621,24 +1575,19 @@ mod tests {
 
     use super::{
         build_upstream_url, effective_action_path, resolve_aggregate_api_rotation_candidates,
-        resolve_passthrough_sse_protocol, rewrite_body_for_aggregate_api,
-        rewrite_body_model_override,
+        rewrite_body_for_aggregate_api, rewrite_body_model_override,
     };
-    use crate::aggregate_api::{
-        AGGREGATE_API_AUTH_APIKEY, AGGREGATE_API_PROVIDER_CLAUDE, AGGREGATE_API_PROVIDER_CODEX,
-        AGGREGATE_API_PROVIDER_GEMINI,
-    };
-    use crate::gateway::{PassthroughSseProtocol, ResponseAdapter};
+    use crate::aggregate_api::{AGGREGATE_API_AUTH_APIKEY, AGGREGATE_API_PROVIDER_CODEX};
     use bytes::Bytes;
 
     fn aggregate_api_with_action(action: Option<&str>) -> AggregateApi {
         AggregateApi {
             id: "agg-path-test".to_string(),
-            provider_type: "claude".to_string(),
-            protocol_mode: None,
+            provider_type: AGGREGATE_API_PROVIDER_CODEX.to_string(),
+            protocol_mode: Some("codex_cli".to_string()),
             supplier_name: Some("test".to_string()),
             sort: 0,
-            url: "https://open.bigmodel.cn/api/anthropic".to_string(),
+            url: "https://api.openai.com/v1".to_string(),
             auth_type: "apikey".to_string(),
             auth_params_json: None,
             action: action.map(str::to_string),
@@ -1655,41 +1604,30 @@ mod tests {
     #[test]
     fn empty_custom_action_uses_base_url_without_original_path() {
         let api = aggregate_api_with_action(Some(""));
-        let path = effective_action_path(&api, "/v1/messages?beta=true");
+        let path = effective_action_path(&api, "/v1/responses?client_version=1");
         assert_eq!(path, "");
-    }
-
-    #[test]
-    fn claude_messages_passthrough_uses_anthropic_native_terminal_rules() {
-        let api = aggregate_api_with_action(None);
-        let protocol = resolve_passthrough_sse_protocol(
-            &api,
-            "/v1/messages?beta=true",
-            ResponseAdapter::Passthrough,
-        );
-        assert_eq!(protocol, Some(PassthroughSseProtocol::AnthropicNative));
     }
 
     #[test]
     fn build_upstream_url_preserves_base_path_prefix() {
         let url = build_upstream_url(
-            "https://open.bigmodel.cn/api/anthropic",
-            "/v1/messages?beta=true",
+            "https://example.com/openai",
+            "/v1/responses?client_version=1",
         )
         .expect("build upstream url");
         assert_eq!(
             url.as_str(),
-            "https://open.bigmodel.cn/api/anthropic/v1/messages?beta=true"
+            "https://example.com/openai/v1/responses?client_version=1"
         );
     }
 
     #[test]
     fn build_upstream_url_keeps_root_base_behavior() {
-        let url = build_upstream_url("https://api.example.com", "/v1/messages?beta=true")
+        let url = build_upstream_url("https://api.example.com", "/v1/responses?client_version=1")
             .expect("build upstream url");
         assert_eq!(
             url.as_str(),
-            "https://api.example.com/v1/messages?beta=true"
+            "https://api.example.com/v1/responses?client_version=1"
         );
     }
 
@@ -1708,14 +1646,14 @@ mod tests {
 
     #[test]
     fn rewrite_body_model_override_replaces_json_model() {
-        let body = Bytes::from_static(br#"{"model":"claude-sonnet","messages":[]}"#);
+        let body = Bytes::from_static(br#"{"model":"gpt-5.4","input":"hi"}"#);
 
         let rewritten = rewrite_body_model_override(&body, Some("qwen3.5-plus"));
 
         let value: serde_json::Value =
             serde_json::from_slice(rewritten.as_ref()).expect("parse rewritten body");
         assert_eq!(value["model"], "qwen3.5-plus");
-        assert_eq!(value["messages"].as_array().map(Vec::len), Some(0));
+        assert_eq!(value["input"], "hi");
     }
 
     #[test]
@@ -1785,14 +1723,13 @@ mod tests {
     }
 
     #[test]
-    fn gemini_native_candidates_resolve_to_gemini_provider_only() {
+    fn rotation_candidates_use_codex_provider_only() {
         let storage = Storage::open_in_memory().expect("open storage");
         storage.init().expect("init storage");
         let now = now_ts();
         for (id, provider_type) in [
             ("agg-codex", AGGREGATE_API_PROVIDER_CODEX),
-            ("agg-claude", AGGREGATE_API_PROVIDER_CLAUDE),
-            ("agg-gemini", AGGREGATE_API_PROVIDER_GEMINI),
+            ("agg-legacy", "legacy_provider"),
         ] {
             storage
                 .insert_aggregate_api(&AggregateApi {
@@ -1816,13 +1753,13 @@ mod tests {
                 .expect("insert aggregate api");
         }
 
-        let candidates = resolve_aggregate_api_rotation_candidates(&storage, "gemini_native", None)
-            .expect("resolve gemini candidates");
+        let candidates = resolve_aggregate_api_rotation_candidates(&storage, "openai", None)
+            .expect("resolve aggregate candidates");
         let candidate_ids = candidates
             .iter()
             .map(|item| item.id.as_str())
             .collect::<Vec<_>>();
-        assert_eq!(candidate_ids, vec!["agg-gemini"]);
+        assert_eq!(candidate_ids, vec!["agg-codex"]);
     }
 
     /// 函数 `final_error_promotes_success_status_to_bad_gateway`
