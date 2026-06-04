@@ -57,7 +57,7 @@
 
 - 生成 gateway 内部统一请求结构
 - 为当前保留链路标记透传响应模式
-- 保留 Gemini stream 输出模式与 tool name map 占位
+- 保留 OpenAI/Codex 请求透传与 OpenAI 兼容改写入口
 
 高风险文件：
 
@@ -172,7 +172,7 @@
 - 默认值是 `true`
 - 对齐官方 Codex：仅在 `ChatGPT Codex backend + /v1/responses + 流式请求` 这条链路上启用
 - 启用后，请求体会在真正发上游前做 `zstd` 压缩，并补 `Content-Encoding: zstd`
-- `compact`、非流式请求、OpenAI API fallback、Azure/Anthropic 路径不会启用这层压缩
+- `compact`、非流式请求、OpenAI API fallback 以及非 ChatGPT Codex backend 上游不会启用这层压缩
 
 ### 单账号并发上限
 

@@ -76,7 +76,6 @@ pub(in super::super) enum SseTerminal {
 pub enum PassthroughSseProtocol {
     #[default]
     Generic,
-    AnthropicNative,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -100,14 +99,11 @@ pub(in super::super) struct SseFrameInspection {
 /// 返回函数执行结果
 fn classify_terminal_event_name(
     name: &str,
-    protocol: PassthroughSseProtocol,
+    _protocol: PassthroughSseProtocol,
 ) -> Option<SseTerminal> {
     let normalized = name.trim().to_ascii_lowercase();
     if normalized.is_empty() {
         return None;
-    }
-    if protocol == PassthroughSseProtocol::AnthropicNative && normalized == "message_stop" {
-        return Some(SseTerminal::Ok);
     }
     if normalized == "done"
         || is_response_completed_event_name(normalized.as_str())
@@ -445,19 +441,6 @@ mod tests {
         ];
         let inspection = inspect_sse_frame_for_protocol(&lines, PassthroughSseProtocol::Generic);
         assert!(inspection.terminal.is_none());
-        assert_eq!(inspection.last_event_type.as_deref(), Some("message_stop"));
-    }
-
-    #[test]
-    fn inspect_sse_frame_anthropic_native_treats_message_stop_as_terminal() {
-        let lines = vec![
-            "event: message_stop\n".to_string(),
-            "data: {\"type\":\"message_stop\"}\n".to_string(),
-            "\n".to_string(),
-        ];
-        let inspection =
-            inspect_sse_frame_for_protocol(&lines, PassthroughSseProtocol::AnthropicNative);
-        assert!(matches!(inspection.terminal, Some(SseTerminal::Ok)));
         assert_eq!(inspection.last_event_type.as_deref(), Some("message_stop"));
     }
 

@@ -642,6 +642,10 @@ impl Storage {
             include_str!("../../migrations/056_account_subscription_hints.sql"),
             |s| s.ensure_account_subscription_hints_table(),
         )?;
+        self.apply_sql_migration(
+            "057_api_key_profiles_openai_only",
+            include_str!("../../migrations/057_api_key_profiles_openai_only.sql"),
+        )?;
         self.ensure_api_key_rotation_columns()?;
         self.ensure_aggregate_apis_table()?;
         self.ensure_aggregate_api_secrets_table()?;

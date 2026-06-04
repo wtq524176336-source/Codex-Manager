@@ -4,15 +4,11 @@ use std::time::Instant;
 
 use super::attempt_flow::transport::UpstreamRequestContext;
 
-mod claude;
 mod codex;
-mod gemini;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum GatewayUpstreamExecutorKind {
     CodexResponses,
-    Claude,
-    Gemini,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,14 +25,8 @@ pub(super) struct GatewayUpstreamExecutionPlan {
 }
 
 pub(super) fn resolve_gateway_upstream_executor_kind(
-    protocol_type: &str,
+    _protocol_type: &str,
 ) -> GatewayUpstreamExecutorKind {
-    if protocol_type == crate::apikey_profile::PROTOCOL_ANTHROPIC_NATIVE {
-        return GatewayUpstreamExecutorKind::Claude;
-    }
-    if protocol_type == crate::apikey_profile::PROTOCOL_GEMINI_NATIVE {
-        return GatewayUpstreamExecutorKind::Gemini;
-    }
     GatewayUpstreamExecutorKind::CodexResponses
 }
 
@@ -111,50 +101,6 @@ where
             has_more_candidates,
             log_gateway_result,
         ),
-        GatewayUpstreamExecutorKind::Claude => claude::execute(
-            storage,
-            method,
-            request_ctx,
-            incoming_headers,
-            body,
-            is_stream,
-            base,
-            path,
-            primary_url,
-            alt_url,
-            request_deadline,
-            upstream_fallback_base,
-            account,
-            token,
-            strip_session_affinity,
-            debug,
-            allow_openai_fallback,
-            disable_challenge_stateless_retry,
-            has_more_candidates,
-            log_gateway_result,
-        ),
-        GatewayUpstreamExecutorKind::Gemini => gemini::execute(
-            storage,
-            method,
-            request_ctx,
-            incoming_headers,
-            body,
-            is_stream,
-            base,
-            path,
-            primary_url,
-            alt_url,
-            request_deadline,
-            upstream_fallback_base,
-            account,
-            token,
-            strip_session_affinity,
-            debug,
-            allow_openai_fallback,
-            disable_challenge_stateless_retry,
-            has_more_candidates,
-            log_gateway_result,
-        ),
     }
 }
 
@@ -172,12 +118,8 @@ mod tests {
             GatewayUpstreamExecutorKind::CodexResponses
         );
         assert_eq!(
-            resolve_gateway_upstream_executor_kind("anthropic_native"),
-            GatewayUpstreamExecutorKind::Claude
-        );
-        assert_eq!(
-            resolve_gateway_upstream_executor_kind("gemini_native"),
-            GatewayUpstreamExecutorKind::Gemini
+            resolve_gateway_upstream_executor_kind("legacy_native"),
+            GatewayUpstreamExecutorKind::CodexResponses
         );
     }
 
@@ -191,9 +133,9 @@ mod tests {
             }
         );
         assert_eq!(
-            resolve_gateway_upstream_execution_plan("anthropic_native", "aggregate_api_rotation"),
+            resolve_gateway_upstream_execution_plan("openai_compat", "aggregate_api_rotation"),
             GatewayUpstreamExecutionPlan {
-                executor_kind: GatewayUpstreamExecutorKind::Claude,
+                executor_kind: GatewayUpstreamExecutorKind::CodexResponses,
                 route_kind: GatewayUpstreamRouteKind::AggregateApi,
             }
         );
@@ -202,13 +144,6 @@ mod tests {
             GatewayUpstreamExecutionPlan {
                 executor_kind: GatewayUpstreamExecutorKind::CodexResponses,
                 route_kind: GatewayUpstreamRouteKind::HybridAccountFirst,
-            }
-        );
-        assert_eq!(
-            resolve_gateway_upstream_execution_plan("gemini_native", "aggregate_api_rotation"),
-            GatewayUpstreamExecutionPlan {
-                executor_kind: GatewayUpstreamExecutorKind::Gemini,
-                route_kind: GatewayUpstreamRouteKind::AggregateApi,
             }
         );
     }

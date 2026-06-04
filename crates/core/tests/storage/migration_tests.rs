@@ -268,6 +268,15 @@ fn init_tracks_schema_migrations_and_is_idempotent() {
         )
         .expect("count 054 migration");
     assert_eq!(applied_054, 1);
+    let applied_057: i64 = storage
+        .conn
+        .query_row(
+            "SELECT COUNT(1) FROM schema_migrations WHERE version = '057_api_key_profiles_openai_only'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("count 057 migration");
+    assert_eq!(applied_057, 1);
 
     assert!(!storage
         .has_column("accounts", "note")
@@ -648,9 +657,9 @@ fn api_key_profile_drop_azure_protocol_migration_normalizes_legacy_rows() {
             );
             CREATE TABLE api_key_profiles (
                 key_id TEXT PRIMARY KEY REFERENCES api_keys(id) ON DELETE CASCADE,
-                client_type TEXT NOT NULL CHECK (client_type IN ('codex', 'claude_code')),
-                protocol_type TEXT NOT NULL CHECK (protocol_type IN ('openai_compat', 'anthropic_native', 'azure_openai')),
-                auth_scheme TEXT NOT NULL CHECK (auth_scheme IN ('authorization_bearer', 'x_api_key', 'api_key')),
+                client_type TEXT NOT NULL CHECK (client_type IN ('codex')),
+                protocol_type TEXT NOT NULL CHECK (protocol_type IN ('openai_compat', 'azure_openai')),
+                auth_scheme TEXT NOT NULL CHECK (auth_scheme IN ('authorization_bearer', 'api_key')),
                 upstream_base_url TEXT,
                 static_headers_json TEXT,
                 default_model TEXT,

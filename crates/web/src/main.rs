@@ -545,20 +545,6 @@ async fn async_main() {
         )
         .route("/v1", any(service_gateway::gateway_proxy))
         .route("/v1/{*path}", any(service_gateway::gateway_proxy))
-        .route("/v1alpha/{*path}", any(service_gateway::gateway_proxy))
-        .route("/v1beta/{*path}", any(service_gateway::gateway_proxy))
-        .route(
-            "/v1internal:generateContent",
-            any(service_gateway::gateway_proxy),
-        )
-        .route(
-            "/v1internal:streamGenerateContent",
-            any(service_gateway::gateway_proxy),
-        )
-        .route(
-            "/v1internal:countTokens",
-            any(service_gateway::gateway_proxy),
-        )
         .route("/api/runtime", get(runtime_info))
         .route("/api/author-content", get(service_gateway::author_content))
         .route("/__auth_status", get(auth::auth_status))

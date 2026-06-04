@@ -1,7 +1,6 @@
 use codexmanager_core::storage::{Account, ConversationBinding, Token};
 
 use super::super::super::IncomingHeaderSnapshot;
-use crate::apikey_profile::PROTOCOL_ANTHROPIC_NATIVE;
 use crate::gateway::conversation_binding::ConversationRoutingContext;
 
 pub(in super::super) struct UpstreamRequestSetup {
@@ -10,7 +9,6 @@ pub(in super::super) struct UpstreamRequestSetup {
     pub(in super::super) url: String,
     pub(in super::super) url_alt: Option<String>,
     pub(in super::super) candidate_count: usize,
-    pub(in super::super) anthropic_has_thread_anchor: bool,
     pub(in super::super) has_sticky_fallback_session: bool,
     pub(in super::super) has_sticky_fallback_conversation: bool,
     pub(in super::super) has_body_encrypted_content: bool,
@@ -29,9 +27,8 @@ pub(in super::super) struct UpstreamRequestSetup {
 /// # 返回
 /// 返回函数执行结果
 pub(in super::super) fn prepare_request_setup(
+    upstream_base: String,
     path: &str,
-    protocol_type: &str,
-    has_prompt_cache_key: bool,
     incoming_headers: &IncomingHeaderSnapshot,
     body: &bytes::Bytes,
     candidates: &mut Vec<(Account, Token)>,
@@ -42,7 +39,6 @@ pub(in super::super) fn prepare_request_setup(
     model_for_log: Option<&str>,
     trace_id: &str,
 ) -> UpstreamRequestSetup {
-    let upstream_base = super::super::super::resolve_upstream_base_url();
     let upstream_fallback_base =
         super::super::super::resolve_upstream_fallback_base_url(upstream_base.as_str());
     let (url, url_alt) =
@@ -55,8 +51,6 @@ pub(in super::super) fn prepare_request_setup(
             conversation_binding,
             candidates,
         );
-    let anthropic_has_thread_anchor = protocol_type == PROTOCOL_ANTHROPIC_NATIVE
-        && (has_prompt_cache_key || conversation_routing.is_some());
     let rotation_plan = super::super::super::conversation_binding::apply_candidate_rotation(
         candidates,
         conversation_routing.as_ref(),
@@ -82,7 +76,6 @@ pub(in super::super) fn prepare_request_setup(
         url,
         url_alt,
         candidate_count,
-        anthropic_has_thread_anchor,
         has_sticky_fallback_session: false,
         has_sticky_fallback_conversation:
             super::super::header_profile::derive_sticky_conversation_id_from_headers(

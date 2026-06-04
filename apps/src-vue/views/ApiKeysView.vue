@@ -16,7 +16,6 @@
           <template #dropdown>
             <el-dropdown-menu>
               <el-dropdown-item command="openai">复制 OpenAI / Codex 端点</el-dropdown-item>
-              <el-dropdown-item command="native">复制 Claude Code / Gemini CLI 端点</el-dropdown-item>
             </el-dropdown-menu>
           </template>
         </el-dropdown>
@@ -77,18 +76,6 @@
           <code :title="openAiEndpoint">{{ openAiEndpoint }}</code>
         </div>
         <el-button text type="primary" @click.stop="copyText(openAiEndpoint)">
-          <el-icon><CopyDocument /></el-icon>
-        </el-button>
-      </div>
-      <div class="endpoint-card" @click="copyText(nativeProtocolEndpoint)">
-        <div class="endpoint-card__icon endpoint-card__icon--native">
-          <el-icon><Connection /></el-icon>
-        </div>
-        <div class="endpoint-card__content">
-          <strong>Claude Code / Gemini CLI 端点</strong>
-          <code :title="nativeProtocolEndpoint">{{ nativeProtocolEndpoint }}</code>
-        </div>
-        <el-button text type="primary" @click.stop="copyText(nativeProtocolEndpoint)">
           <el-icon><CopyDocument /></el-icon>
         </el-button>
       </div>
@@ -248,9 +235,7 @@
           <el-option label="fast" value="fast" />
         </el-select>
         <el-select v-model="form.protocolType" placeholder="协议类型">
-          <el-option label="通配兼容 (Codex / Claude Code / Gemini CLI)" value="openai_compat" />
-          <el-option label="Anthropic Native" value="anthropic_native" />
-          <el-option label="Gemini Native" value="gemini_native" />
+          <el-option label="OpenAI / Codex 兼容" value="openai_compat" />
         </el-select>
         <el-select v-if="usesAccountPlanFilter" v-model="form.accountPlanFilter" placeholder="账号类型过滤">
           <el-option label="全部账号" value="all" />
@@ -295,7 +280,6 @@
 import {
   ArrowDown,
   CircleCheck,
-  Connection,
   CopyDocument,
   Key,
   Lightning,
@@ -419,9 +403,6 @@ const gatewayOrigin = computed(() => {
   }
 });
 const openAiEndpoint = computed(() => gatewayOrigin.value);
-const nativeProtocolEndpoint = computed(
-  () => `${gatewayOrigin.value.replace(/\/v1$/, "")}/v1/messages`,
-);
 
 function compact(value: number) {
   return new Intl.NumberFormat("zh-CN", {
@@ -458,12 +439,10 @@ function normalizeEditableServiceTier(value?: string | null) {
 function normalizeEditableProtocolType(value?: string | null) {
   const normalized = String(value || "").trim().toLowerCase();
   if (!normalized) return "openai_compat";
-  if (["codex", "claude_code", "openai", "openai_compat"].includes(normalized)) {
+  if (["codex", "openai", "openai_compat"].includes(normalized)) {
     return "openai_compat";
   }
-  if (normalized === "anthropic" || normalized === "anthropic_native") return "anthropic_native";
-  if (normalized === "gemini" || normalized === "gemini_native") return "gemini_native";
-  return normalized;
+  return "openai_compat";
 }
 
 function buildCcSwitchProviderName(name?: string | null, id?: string | null): string {
@@ -713,8 +692,8 @@ async function copyText(text: string) {
 }
 
 function copyEndpoint(command: string | number) {
-  const endpoint = command === "native" ? nativeProtocolEndpoint.value : openAiEndpoint.value;
-  void copyText(endpoint);
+  void command;
+  void copyText(openAiEndpoint.value);
 }
 
 onMounted(loadData);

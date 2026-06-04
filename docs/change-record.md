@@ -34,12 +34,13 @@
 - 影响账号管理列表中的「详情」入口展示。
 - 列表中的额度百分比、重置时间、立即刷新和刷新 AT/RT 功能不变。
 
-## 2026-06-04 聚合 API 移除 Claude/Gemini 供应商并去重协议模式
+## 2026-06-04 仅保留 Codex/OpenAI 链路并删除 Claude/Gemini 支持
 
 ### 需求
 
 用户提供截图 `file:///C:/Users/52417/AppData/Local/PixPin/Temp/PixPin_2026-06-04_16-29-05.png` 和 `file:///C:/Users/52417/AppData/Local/PixPin/Temp/PixPin_2026-06-04_16-29-12.png`，询问聚合 API 编辑弹窗中的供应商类型和协议模式是否存在重复。
-随后用户明确说明：`Claude / Gemini 相关的代码可以删除`。
+随后用户明确说明：`Claude / Gemini 相关的代码可以删除`，并补充项目以后完全不支持 Claude Code / Gemini CLI，只保留 Codex/OpenAI。
+用户进一步确认：账号模式下不固定官方上游，请求/平台密钥配置的网站是什么就读取什么。
 
 ### 依据
 
@@ -48,6 +49,9 @@
 - 后端聚合 API 供应商常量只保留 `codex`，`normalize_provider_type` 仅接受 Codex/OpenAI 兼容别名。依据：`crates/service/src/aggregate_api.rs:15`、`crates/service/src/aggregate_api.rs:529`
 - 后端协议模式仍只保留 `openai_compat` 和 `codex_cli` 两类，旧值 `responses`、`codex_responses` 会归一到 `codex_cli`。依据：`crates/service/src/aggregate_api.rs:544`
 - 聚合 API 轮转候选只选择启用中的 Codex provider；指定的聚合 API ID 也必须是启用中的 Codex provider 才会参与轮转。依据：`crates/service/src/gateway/upstream/protocol/aggregate_api.rs:588`、`crates/service/src/gateway/upstream/protocol/aggregate_api.rs:849`
+- 平台密钥 profile 只允许 `codex/openai_compat/authorization_bearer`，新增迁移会把存量 profile 归一到该组合，同时保留 `upstream_base_url` 和 `static_headers_json`。依据：`crates/core/migrations/057_api_key_profiles_openai_only.sql:6`、`crates/core/migrations/057_api_key_profiles_openai_only.sql:36`
+- 创建和编辑平台密钥继续保存并沿用 `upstreamBaseUrl`、`staticHeadersJson`，账号模式上游解析仍优先读取平台密钥 `upstream_base_url`，否则读取运行时全局上游配置。依据：`crates/service/src/apikey/apikey_create.rs:44`、`crates/service/src/apikey/apikey_update_model.rs:101`、`crates/service/src/gateway/mod.rs:919`
+- 本地校验结果携带已解析的 `upstream_base`，账号候选准备阶段沿用该值计算上游 URL 和 fallback URL，避免重新读取全局上游覆盖平台密钥自定义上游。依据：`crates/service/src/gateway/local_validation/mod.rs:19`、`crates/service/src/gateway/local_validation/request.rs:1235`、`crates/service/src/gateway/upstream/proxy.rs:560`、`crates/service/src/gateway/upstream/proxy_pipeline/request_setup.rs:30`
 
 ### 修复
 
@@ -57,11 +61,16 @@
 - 将旧值 `responses`、`codex_responses` 在前端编辑回显时归一为 `Codex CLI 兼容`。
 - 删除聚合 API 后端 Claude/Gemini 供应商常量、默认地址、连通性探测、模型发现和轮转分流逻辑。
 - 聚合 API 网关转发不再为旧 Claude provider 设置 Anthropic Native SSE 透传协议。
+- 删除 Claude/Gemini native 请求适配、SSE reader、上游 executor、本地 count tokens 兼容和 Web 入口路由。
+- 平台密钥协议只保留 OpenAI/Codex 兼容；旧 native profile 值不再允许写入。
+- 账号模式上游不固定官方地址，仍按平台密钥自定义上游或运行时全局上游配置解析。
+- 账号模式 HTTP 候选请求不再在候选准备阶段重新解析全局上游，而是复用本地校验阶段解析出的平台密钥有效上游。
 
 ### 影响范围
 
 - 影响聚合 API 的供应商配置、连通性测试和网关轮转候选选择。
-- 不删除全局 Claude/Gemini 请求协议适配模块；本次只清理聚合 API 供应商配置和轮转分支。
+- 影响旧 Claude Code / Gemini CLI 的 native 请求入口、响应转换和本地 token 计数兼容；这些链路不再支持。
+- 不影响账号池透明链路读取配置上游。
 
 ## 2026-06-04 项目协作提示词优化
 
@@ -160,8 +169,8 @@ flowchart TD
 ### 影响范围
 
 - 仅影响聚合 API 下的 OpenAI Responses 请求。
-- 不改变 Claude/Gemini 聚合链路。
-- 不改变账号池透明链路。
+- 后续 2026-06-04 变更已移除 Claude/Gemini native 兼容链路。
+- 不改变账号池透明链路读取配置上游。
 - 不改变前端日志展示。
 
 ## 2026-06-04 请求日志输出内容重复

@@ -239,7 +239,7 @@
                 class="gateway-rules"
                 type="textarea"
                 :autosize="{ minRows: 5, maxRows: 12 }"
-                placeholder="spark*=gpt-5.4-mini&#10;claude-sonnet-4*=gpt-5.4"
+                placeholder="gpt-5.4-mini*=gpt-5.4&#10;o4-mini*=gpt-5.4"
               />
               <div class="settings-help">
                 <strong>模型转发规则</strong>

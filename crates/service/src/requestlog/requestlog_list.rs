@@ -46,11 +46,7 @@ fn derive_canonical_source(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or("Passthrough");
-    if adapter.starts_with("Anthropic") {
-        "anthropic_adapter".to_string()
-    } else if adapter.starts_with("Gemini") {
-        "gemini_adapter".to_string()
-    } else if adapter.starts_with("OpenAI") {
+    if adapter.starts_with("OpenAI") {
         "openai_compat".to_string()
     } else {
         "native_codex".to_string()
@@ -418,14 +414,6 @@ mod tests {
         assert_eq!(
             derive_canonical_source(Some("OpenAIChatCompletionsSse"), None, None, &[]),
             "openai_compat"
-        );
-        assert_eq!(
-            derive_canonical_source(Some("AnthropicSse"), None, None, &[]),
-            "anthropic_adapter"
-        );
-        assert_eq!(
-            derive_canonical_source(Some("GeminiJson"), None, None, &[]),
-            "gemini_adapter"
         );
         assert_eq!(
             derive_canonical_source(

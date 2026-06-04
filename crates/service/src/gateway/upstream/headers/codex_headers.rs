@@ -834,8 +834,8 @@ mod tests {
         let headers = build_codex_upstream_headers(CodexUpstreamHeaderInput {
             auth_token: "token-compat",
             chatgpt_account_id: None,
-            incoming_user_agent: Some("gemini-cli/0.1.14 (Windows 11; x86_64)"),
-            incoming_originator: Some("gemini_cli"),
+            incoming_user_agent: Some("openai-python/2.0.0"),
+            incoming_originator: Some("openai_python"),
             preserve_client_identity: true,
             incoming_session_id: Some("thread-compat"),
             incoming_window_id: Some("thread-compat:0"),
@@ -855,9 +855,9 @@ mod tests {
 
         assert_eq!(
             header_value(&headers, "User-Agent"),
-            Some("gemini-cli/0.1.14 (Windows 11; x86_64)")
+            Some("openai-python/2.0.0")
         );
-        assert_eq!(header_value(&headers, "originator"), Some("gemini_cli"));
+        assert_eq!(header_value(&headers, "originator"), Some("openai_python"));
     }
 
     #[test]

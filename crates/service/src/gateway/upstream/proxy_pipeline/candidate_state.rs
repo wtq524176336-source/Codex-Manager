@@ -10,7 +10,6 @@ pub(in super::super) struct CandidateExecutionState {
     stripped_body: Option<Bytes>,
     rewritten_bodies: HashMap<String, Bytes>,
     stripped_rewritten_bodies: HashMap<String, Bytes>,
-    first_candidate_account_scope: Option<String>,
 }
 
 impl CandidateExecutionState {
@@ -72,33 +71,10 @@ impl CandidateExecutionState {
     /// 返回函数执行结果
     pub(in super::super) fn strip_session_affinity(
         &mut self,
-        account: &Account,
+        _account: &Account,
         idx: usize,
-        anthropic_has_thread_anchor: bool,
     ) -> bool {
-        if !anthropic_has_thread_anchor {
-            return idx > 0;
-        }
-        let candidate_scope = account
-            .chatgpt_account_id
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(|value| value.to_string())
-            .or_else(|| {
-                account
-                    .workspace_id
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .map(|value| value.to_string())
-            });
-        if idx == 0 {
-            self.first_candidate_account_scope = candidate_scope.clone();
-            false
-        } else {
-            candidate_scope != self.first_candidate_account_scope
-        }
+        idx > 0
     }
 
     /// 函数 `rewrite_body_for_model`
@@ -277,7 +253,6 @@ mod tests {
             url: "https://chatgpt.com/backend-api/codex/responses".to_string(),
             url_alt: None,
             candidate_count: 1,
-            anthropic_has_thread_anchor: false,
             has_sticky_fallback_session: false,
             has_sticky_fallback_conversation: false,
             has_body_encrypted_content: false,

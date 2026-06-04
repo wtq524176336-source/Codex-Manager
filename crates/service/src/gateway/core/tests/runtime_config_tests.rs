@@ -386,10 +386,10 @@ fn set_model_forward_rules_updates_env_cache_and_matching() {
     let _guard = crate::test_env_guard();
     let _rules_guard = EnvGuard::clear(ENV_MODEL_FORWARD_RULES);
 
-    let applied = set_model_forward_rules("spark*=gpt-5.4-mini\nclaude-sonnet-4*=gpt-5.4")
+    let applied = set_model_forward_rules("spark*=gpt-5.4-mini\nlegacy-code*=gpt-5.4")
         .expect("set model forward rules");
 
-    assert_eq!(applied, "spark*=gpt-5.4-mini\nclaude-sonnet-4*=gpt-5.4");
+    assert_eq!(applied, "spark*=gpt-5.4-mini\nlegacy-code*=gpt-5.4");
     assert_eq!(current_model_forward_rules(), applied);
     assert_eq!(
         std::env::var(ENV_MODEL_FORWARD_RULES).ok().as_deref(),
@@ -400,7 +400,7 @@ fn set_model_forward_rules_updates_env_cache_and_matching() {
         Some("gpt-5.4-mini".to_string())
     );
     assert_eq!(
-        resolve_forwarded_model("claude-sonnet-4-20250514"),
+        resolve_forwarded_model("legacy-code-20250514"),
         Some("gpt-5.4".to_string())
     );
     assert_eq!(resolve_forwarded_model("gpt-5.4"), None);
@@ -411,13 +411,10 @@ fn set_model_forward_rules_preserves_case_while_matching_case_insensitively() {
     let _guard = crate::test_env_guard();
     let _rules_guard = EnvGuard::clear(ENV_MODEL_FORWARD_RULES);
 
-    let applied = set_model_forward_rules("Spark*=GPT-5.4-mini\nClaude-Sonnet-4*=Gemini-2.5-Pro")
+    let applied = set_model_forward_rules("Spark*=GPT-5.4-mini\nLegacy-Code*=GPT-5.4-Pro")
         .expect("set mixed-case model forward rules");
 
-    assert_eq!(
-        applied,
-        "Spark*=GPT-5.4-mini\nClaude-Sonnet-4*=Gemini-2.5-Pro"
-    );
+    assert_eq!(applied, "Spark*=GPT-5.4-mini\nLegacy-Code*=GPT-5.4-Pro");
     assert_eq!(current_model_forward_rules(), applied);
     assert_eq!(
         std::env::var(ENV_MODEL_FORWARD_RULES).ok().as_deref(),
@@ -428,8 +425,8 @@ fn set_model_forward_rules_preserves_case_while_matching_case_insensitively() {
         Some("GPT-5.4-mini".to_string())
     );
     assert_eq!(
-        resolve_forwarded_model("claude-sonnet-4-20250514"),
-        Some("Gemini-2.5-Pro".to_string())
+        resolve_forwarded_model("legacy-code-20250514"),
+        Some("GPT-5.4-Pro".to_string())
     );
 }
 

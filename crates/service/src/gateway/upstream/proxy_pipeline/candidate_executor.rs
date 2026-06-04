@@ -44,10 +44,6 @@ fn extract_prompt_cache_key_for_trace(body: &[u8]) -> Option<String> {
         .map(str::to_string)
 }
 
-fn should_forward_thread_anchor_as_prompt_cache_key(protocol_type: &str) -> bool {
-    protocol_type != crate::apikey_profile::PROTOCOL_GEMINI_NATIVE
-}
-
 pub(in super::super) enum CandidateExecutionResult {
     Handled,
     Exhausted {
@@ -70,8 +66,6 @@ pub(in super::super) struct CandidateExecutorParams<'a> {
     pub(in super::super) trace_id: &'a str,
     pub(in super::super) model_for_log: Option<&'a str>,
     pub(in super::super) response_adapter: super::super::super::ResponseAdapter,
-    pub(in super::super) gemini_stream_output_mode:
-        Option<super::super::super::GeminiStreamOutputMode>,
     pub(in super::super) tool_name_restore_map: &'a super::super::super::ToolNameRestoreMap,
     pub(in super::super) context: &'a GatewayUpstreamExecutionContext<'a>,
     pub(in super::super) setup: &'a UpstreamRequestSetup,
@@ -169,7 +163,6 @@ pub(in super::super) fn execute_candidate_sequence(
         trace_id,
         model_for_log,
         response_adapter,
-        gemini_stream_output_mode,
         tool_name_restore_map,
         context,
         setup,
@@ -214,7 +207,7 @@ pub(in super::super) fn execute_candidate_sequence(
         let strip_session_affinity = if transparent_mode {
             false
         } else {
-            state.strip_session_affinity(&account, idx, setup.anthropic_has_thread_anchor)
+            state.strip_session_affinity(&account, idx)
         };
         let attempt_thread = if transparent_mode {
             None
@@ -241,9 +234,7 @@ pub(in super::super) fn execute_candidate_sequence(
         let attempt_allow_openai_fallback =
             allow_openai_fallback && allow_openai_fallback_for_account(storage, &account, &token);
         let attempt_model_for_log = attempt_model_override.as_deref().or(model_for_log);
-        let attempt_prompt_cache_key = if !transparent_mode
-            && should_forward_thread_anchor_as_prompt_cache_key(context.protocol_type())
-        {
+        let attempt_prompt_cache_key = if !transparent_mode {
             attempt_thread
                 .as_ref()
                 .map(|thread| thread.thread_anchor.as_str())
@@ -457,7 +448,6 @@ pub(in super::super) fn execute_candidate_sequence(
                     attempt_trace.last_attempt_url.as_deref(),
                     attempt_trace.last_attempt_error.as_deref(),
                     response_adapter,
-                    gemini_stream_output_mode,
                     tool_name_restore_map,
                     client_is_stream,
                     path,
@@ -506,26 +496,4 @@ pub(in super::super) fn execute_candidate_sequence(
         last_attempt_url,
         last_attempt_error,
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::should_forward_thread_anchor_as_prompt_cache_key;
-
-    #[test]
-    fn gemini_native_does_not_forward_thread_anchor_as_prompt_cache_key() {
-        assert!(!should_forward_thread_anchor_as_prompt_cache_key(
-            crate::apikey_profile::PROTOCOL_GEMINI_NATIVE
-        ));
-    }
-
-    #[test]
-    fn non_gemini_protocols_keep_thread_anchor_forwarding() {
-        assert!(should_forward_thread_anchor_as_prompt_cache_key(
-            crate::apikey_profile::PROTOCOL_ANTHROPIC_NATIVE
-        ));
-        assert!(should_forward_thread_anchor_as_prompt_cache_key(
-            crate::apikey_profile::PROTOCOL_OPENAI_COMPAT
-        ));
-    }
 }

@@ -1,4 +1,3 @@
-use crate::apikey_profile::PROTOCOL_ANTHROPIC_NATIVE;
 use crate::gateway::request_log::RequestLogUsage;
 use std::time::Instant;
 use tiny_http::Request;
@@ -137,8 +136,6 @@ fn should_fallback_to_aggregate_after_account_exhaustion(
 fn executor_kind_label(value: GatewayUpstreamExecutorKind) -> &'static str {
     match value {
         GatewayUpstreamExecutorKind::CodexResponses => "codex_responses",
-        GatewayUpstreamExecutorKind::Claude => "claude",
-        GatewayUpstreamExecutorKind::Gemini => "gemini",
     }
 }
 
@@ -213,17 +210,6 @@ fn respond_hybrid_route_error(
         message,
         transparent_mode,
     )
-}
-
-#[cfg(test)]
-fn provider_upstream_hint(
-    value: GatewayUpstreamExecutorKind,
-) -> Option<(&'static str, &'static str)> {
-    match value {
-        GatewayUpstreamExecutorKind::Claude => Some(("Claude", "claude")),
-        GatewayUpstreamExecutorKind::Gemini => Some(("Gemini", "gemini")),
-        GatewayUpstreamExecutorKind::CodexResponses => None,
-    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -367,15 +353,14 @@ pub(in super::super) fn proxy_validated_request(
         path,
         passthrough_body,
         body,
+        upstream_base,
         is_stream,
-        has_prompt_cache_key,
         request_shape,
         protocol_type,
         rotation_strategy,
         aggregate_api_id,
         account_plan_filter,
         response_adapter,
-        gemini_stream_output_mode,
         tool_name_restore_map,
         request_type_for_log,
         request_method,
@@ -410,19 +395,6 @@ pub(in super::super) fn proxy_validated_request(
         protocol_type.as_str(),
     );
     super::super::trace_log::log_request_body_preview(trace_id.as_str(), body.as_ref());
-    if protocol_type == crate::apikey_profile::PROTOCOL_GEMINI_NATIVE {
-        super::super::trace_log::log_gemini_request_diagnostics(
-            trace_id.as_str(),
-            original_path.as_str(),
-            path.as_str(),
-            format!("{response_adapter:?}").as_str(),
-            gemini_stream_output_mode.map(|mode| match mode {
-                super::super::GeminiStreamOutputMode::Sse => "sse",
-                super::super::GeminiStreamOutputMode::Raw => "raw",
-            }),
-            body.as_ref(),
-        );
-    }
 
     let execution_plan =
         resolve_gateway_upstream_execution_plan(protocol_type.as_str(), rotation_strategy.as_str());
@@ -586,9 +558,8 @@ pub(in super::super) fn proxy_validated_request(
         None
     };
     let setup = prepare_request_setup(
+        upstream_base,
         path.as_str(),
-        protocol_type.as_str(),
-        has_prompt_cache_key,
         &incoming_headers,
         &body,
         &mut candidates,
@@ -619,9 +590,7 @@ pub(in super::super) fn proxy_validated_request(
         transparent_mode,
     );
     let allow_openai_fallback = setup.upstream_fallback_base.is_some();
-    let disable_challenge_stateless_retry = !(protocol_type == PROTOCOL_ANTHROPIC_NATIVE
-        && body.len() <= 2 * 1024)
-        && !path.starts_with("/v1/responses");
+    let disable_challenge_stateless_retry = !path.starts_with("/v1/responses");
     let _request_gate_guard = acquire_request_gate(
         trace_id.as_str(),
         key_id.as_str(),
@@ -642,7 +611,6 @@ pub(in super::super) fn proxy_validated_request(
             trace_id: trace_id.as_str(),
             model_for_log: model_for_log.as_deref(),
             response_adapter,
-            gemini_stream_output_mode,
             tool_name_restore_map: &tool_name_restore_map,
             context: &context,
             setup: &setup,
@@ -758,9 +726,8 @@ pub(in super::super) fn proxy_validated_request(
 #[cfg(test)]
 mod tests {
     use super::{
-        exhausted_gateway_error_for_log, hybrid_route_error_message, provider_upstream_hint,
-        request_deadline_for_path, resolve_upstream_is_stream,
-        respond_when_account_candidates_empty,
+        exhausted_gateway_error_for_log, hybrid_route_error_message, request_deadline_for_path,
+        resolve_upstream_is_stream, respond_when_account_candidates_empty,
         should_fallback_to_aggregate_after_account_exhaustion,
         should_route_aggregate_models_to_account, should_try_provider_executor_aggregate_route,
     };
@@ -853,32 +820,8 @@ mod tests {
     fn only_explicit_aggregate_route_uses_aggregate_candidates() {
         assert!(should_try_provider_executor_aggregate_route(
             GatewayUpstreamExecutionPlan {
-                executor_kind: GatewayUpstreamExecutorKind::Claude,
-                route_kind: GatewayUpstreamRouteKind::AggregateApi,
-            }
-        ));
-        assert!(should_try_provider_executor_aggregate_route(
-            GatewayUpstreamExecutionPlan {
-                executor_kind: GatewayUpstreamExecutorKind::Gemini,
-                route_kind: GatewayUpstreamRouteKind::AggregateApi,
-            }
-        ));
-        assert!(!should_try_provider_executor_aggregate_route(
-            GatewayUpstreamExecutionPlan {
-                executor_kind: GatewayUpstreamExecutorKind::Claude,
-                route_kind: GatewayUpstreamRouteKind::AccountRotation,
-            }
-        ));
-        assert!(should_try_provider_executor_aggregate_route(
-            GatewayUpstreamExecutionPlan {
                 executor_kind: GatewayUpstreamExecutorKind::CodexResponses,
                 route_kind: GatewayUpstreamRouteKind::AggregateApi,
-            }
-        ));
-        assert!(!should_try_provider_executor_aggregate_route(
-            GatewayUpstreamExecutionPlan {
-                executor_kind: GatewayUpstreamExecutorKind::Gemini,
-                route_kind: GatewayUpstreamRouteKind::AccountRotation,
             }
         ));
         assert!(!should_try_provider_executor_aggregate_route(
@@ -973,21 +916,5 @@ mod tests {
         assert!(message.contains("账号池与聚合 API 均不可用"));
         assert!(message.contains("no available account"));
         assert!(message.contains("aggregate api not found for provider codex"));
-    }
-
-    #[test]
-    fn provider_upstream_hint_reports_expected_aggregate_provider_type() {
-        assert_eq!(
-            provider_upstream_hint(GatewayUpstreamExecutorKind::Claude),
-            Some(("Claude", "claude"))
-        );
-        assert_eq!(
-            provider_upstream_hint(GatewayUpstreamExecutorKind::Gemini),
-            Some(("Gemini", "gemini"))
-        );
-        assert_eq!(
-            provider_upstream_hint(GatewayUpstreamExecutorKind::CodexResponses),
-            None
-        );
     }
 }

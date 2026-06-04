@@ -366,7 +366,6 @@ pub(super) fn respond_with_upstream(
     inflight_guard: super::AccountInFlightGuard,
     response_adapter: super::ResponseAdapter,
     passthrough_sse_protocol: Option<PassthroughSseProtocol>,
-    gemini_stream_output_mode: Option<super::GeminiStreamOutputMode>,
     request_path: &str,
     tool_name_restore_map: Option<&super::ToolNameRestoreMap>,
     is_stream: bool,
@@ -382,7 +381,6 @@ pub(super) fn respond_with_upstream(
             inflight_guard,
             response_adapter,
             passthrough_sse_protocol,
-            gemini_stream_output_mode,
             request_path,
             tool_name_restore_map,
             is_stream,
@@ -397,7 +395,6 @@ pub(super) fn respond_with_upstream(
             inflight_guard,
             response_adapter,
             passthrough_sse_protocol,
-            gemini_stream_output_mode,
             request_path,
             tool_name_restore_map,
             is_stream,
@@ -413,9 +410,3 @@ pub(super) use stream_readers::{
     OpenAIResponsesPassthroughSseReader, PassthroughSseCollector, PassthroughSseUsageReader,
     SseKeepAliveFrame,
 };
-
-pub(super) use stream_readers::{AnthropicSseReader, GeminiSseReader};
-
-#[cfg(test)]
-#[path = "../tests/http_bridge_tests.rs"]
-mod tests;

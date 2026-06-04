@@ -54,7 +54,6 @@ pub(super) fn mark_first_response_ms_on_usage(
 pub(crate) enum SseKeepAliveFrame {
     Comment,
     OpenAIResponses,
-    Anthropic,
 }
 
 impl SseKeepAliveFrame {
@@ -73,7 +72,6 @@ impl SseKeepAliveFrame {
         match self {
             Self::Comment => b": keep-alive\n\n",
             Self::OpenAIResponses => b"data: {\"type\":\"codexmanager.keepalive\"}\n\n",
-            Self::Anthropic => b"event: ping\ndata: {\"type\":\"ping\"}\n\n",
         }
     }
 }

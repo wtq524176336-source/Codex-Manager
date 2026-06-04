@@ -132,10 +132,7 @@ pub(crate) use metrics::{
     record_usage_refresh_outcome, GatewayCandidateSkipReason,
 };
 pub(super) use official_responses_http::normalize_official_responses_http_body;
-use protocol_adapter::build_gemini_error_body;
-use protocol_adapter::{
-    adapt_request_for_protocol, GeminiStreamOutputMode, ResponseAdapter, ToolNameRestoreMap,
-};
+use protocol_adapter::{adapt_request_for_protocol, ResponseAdapter, ToolNameRestoreMap};
 pub(super) use request_helpers::{
     inspect_service_tier_for_log, inspect_service_tier_value, is_html_content_type,
     is_upstream_challenge_response, normalize_models_path, parse_request_metadata,

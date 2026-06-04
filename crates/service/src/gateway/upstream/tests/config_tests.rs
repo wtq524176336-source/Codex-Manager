@@ -158,7 +158,7 @@ fn chatgpt_account_header_is_limited_to_codex_backend_shape() {
         "https://api.openai.com/v1"
     ));
     assert!(!should_send_chatgpt_account_header(
-        "https://api.anthropic.com/v1/messages"
+        "https://example.com/v1/responses"
     ));
     assert!(!should_send_chatgpt_account_header(
         "https://example.com/v1/responses"

@@ -193,14 +193,6 @@ pub(crate) fn classify_message(message: &str) -> ErrorCode {
     {
         return ErrorCode::ProtocolMappingError;
     }
-    if eq("invalid claude request json")
-        || eq("claude request body must be an object")
-        || eq("invalid gemini request json")
-        || eq("gemini request body must be an object")
-    {
-        return ErrorCode::InvalidRequestPayload;
-    }
-
     ErrorCode::UnknownError
 }
 
@@ -320,14 +312,6 @@ mod tests {
         assert_eq!(
             classify_message("backend proxy error: connection refused"),
             ErrorCode::BackendProxyError
-        );
-        assert_eq!(
-            classify_message("claude request body must be an object"),
-            ErrorCode::InvalidRequestPayload
-        );
-        assert_eq!(
-            classify_message("Claude 请求体必须是对象(claude request body must be an object)"),
-            ErrorCode::InvalidRequestPayload
         );
         assert_eq!(classify_message("上游请求超时"), ErrorCode::UpstreamTimeout);
         assert_eq!(

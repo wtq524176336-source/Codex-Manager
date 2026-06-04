@@ -93,9 +93,6 @@ const MODEL_PRICE_PER_1K_TOKENS: &[(&str, f64, f64, f64)] = &[
     ("o1-pro", 0.15, 0.15, 0.6),
     ("o1-mini", 0.0011, 0.00055, 0.0044),
     ("o1", 0.015, 0.0075, 0.06),
-    ("claude-3-7", 0.003, 0.003, 0.015),
-    ("claude-3-5", 0.003, 0.003, 0.015),
-    ("claude-3", 0.003, 0.003, 0.015),
 ];
 
 /// 函数 `resolve_model_price_per_1k`
@@ -229,9 +226,7 @@ fn normalize_duration_ms(value: Option<u128>) -> Option<i64> {
 /// # 返回
 /// 返回函数执行结果
 fn is_inference_path(path: &str) -> bool {
-    path.starts_with("/v1/responses")
-        || path.starts_with("/v1/chat/completions")
-        || path.starts_with("/v1/messages")
+    path.starts_with("/v1/responses") || path.starts_with("/v1/chat/completions")
 }
 
 fn should_write_gateway_error_fallback(status_code: Option<u16>, error: Option<&str>) -> bool {
@@ -267,14 +262,9 @@ fn should_write_gateway_error_fallback(status_code: Option<u16>, error: Option<&
 fn response_adapter_label(value: super::ResponseAdapter) -> &'static str {
     match value {
         super::ResponseAdapter::Passthrough => "Passthrough",
-        super::ResponseAdapter::AnthropicMessagesFromResponses => "AnthropicMessagesFromResponses",
         super::ResponseAdapter::ChatCompletionsFromResponses => "ChatCompletionsFromResponses",
         super::ResponseAdapter::ImagesB64JsonFromResponses => "ImagesB64JsonFromResponses",
         super::ResponseAdapter::ImagesUrlFromResponses => "ImagesUrlFromResponses",
-        super::ResponseAdapter::GeminiJson => "GeminiJson",
-        super::ResponseAdapter::GeminiSse => "GeminiSse",
-        super::ResponseAdapter::GeminiCliJson => "GeminiCliJson",
-        super::ResponseAdapter::GeminiCliSse => "GeminiCliSse",
     }
 }
 

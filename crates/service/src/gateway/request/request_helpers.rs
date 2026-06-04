@@ -146,9 +146,7 @@ pub(crate) fn validate_text_input_limit_for_path(
 }
 
 fn is_text_input_limit_path(path: &str) -> bool {
-    path.starts_with("/v1/responses")
-        || path.starts_with("/v1/chat/completions")
-        || path.starts_with("/v1/messages")
+    path.starts_with("/v1/responses") || path.starts_with("/v1/chat/completions")
 }
 
 fn count_path_text_input_chars(path: &str, value: &Value) -> usize {
@@ -165,7 +163,7 @@ fn count_path_text_input_chars(path: &str, value: &Value) -> usize {
         }
         return total;
     }
-    if path.starts_with("/v1/chat/completions") || path.starts_with("/v1/messages") {
+    if path.starts_with("/v1/chat/completions") {
         if let Some(messages) = object.get("messages") {
             total += count_message_list_chars(messages);
         }
@@ -345,12 +343,8 @@ pub(crate) fn should_drop_incoming_header(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     name.eq_ignore_ascii_case("Authorization")
         || name.eq_ignore_ascii_case("x-api-key")
-        || name.eq_ignore_ascii_case("x-goog-api-key")
         || name.eq_ignore_ascii_case("Host")
         || name.eq_ignore_ascii_case("Content-Length")
-        // 中文注释：Claude SDK/CLI 会附带 anthropic/x-stainless 指纹头；
-        // 直接透传到 ChatGPT upstream 会提高 challenge 概率，这里统一剔除。
-        || lower.starts_with("anthropic-")
         || lower.starts_with("x-stainless-")
         // 中文注释：resume 会携带旧会话的账号头；若不剔除会把请求强行绑定到过期/耗尽账号，导致无法切换候选账号。
         || name.eq_ignore_ascii_case("ChatGPT-Account-Id")

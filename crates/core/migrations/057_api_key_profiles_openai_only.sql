@@ -4,12 +4,13 @@ PRAGMA foreign_keys = OFF;
 CREATE TABLE api_key_profiles_new (
   key_id TEXT PRIMARY KEY REFERENCES api_keys(id) ON DELETE CASCADE,
   client_type TEXT NOT NULL CHECK (client_type IN ('codex')),
-  protocol_type TEXT NOT NULL CHECK (protocol_type IN ('openai_compat', 'azure_openai')),
-  auth_scheme TEXT NOT NULL CHECK (auth_scheme IN ('authorization_bearer', 'api_key')),
+  protocol_type TEXT NOT NULL CHECK (protocol_type IN ('openai_compat')),
+  auth_scheme TEXT NOT NULL CHECK (auth_scheme IN ('authorization_bearer')),
   upstream_base_url TEXT,
   static_headers_json TEXT,
   default_model TEXT,
   reasoning_effort TEXT,
+  service_tier TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
@@ -23,27 +24,20 @@ INSERT INTO api_key_profiles_new (
   static_headers_json,
   default_model,
   reasoning_effort,
+  service_tier,
   created_at,
   updated_at
 )
 SELECT
   key_id,
-  CASE
-    WHEN lower(client_type) IN ('codex') THEN lower(client_type)
-    ELSE 'codex'
-  END,
-  CASE
-    WHEN lower(replace(protocol_type, '-', '_')) IN ('azure', 'azure_openai') THEN 'azure_openai'
-    ELSE 'openai_compat'
-  END,
-  CASE
-    WHEN lower(replace(auth_scheme, '-', '_')) IN ('api_key') THEN 'api_key'
-    ELSE 'authorization_bearer'
-  END,
+  'codex',
+  'openai_compat',
+  'authorization_bearer',
   upstream_base_url,
   static_headers_json,
   default_model,
   reasoning_effort,
+  service_tier,
   created_at,
   updated_at
 FROM api_key_profiles;

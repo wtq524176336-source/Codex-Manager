@@ -52,6 +52,10 @@ pub(crate) fn update_api_key_model(
         .as_deref()
         .and_then(normalize_reasoning_effort);
     let normalized_service_tier = normalize_service_tier_owned(service_tier)?;
+    let has_upstream_base_url = upstream_base_url.is_some();
+    let has_static_headers_json = static_headers_json.is_some();
+    let normalized_upstream_base_url = normalize_upstream_base_url(upstream_base_url)?;
+    let normalized_static_headers_json = normalize_static_headers_json(static_headers_json)?;
     let normalized_rotation_strategy = normalize_rotation_strategy(rotation_strategy)?;
     let normalized_aggregate_api_id = if normalized_rotation_strategy == ROTATION_AGGREGATE_API {
         aggregate_api_id
@@ -86,11 +90,6 @@ pub(crate) fn update_api_key_model(
             normalized_account_plan_filter.as_deref(),
         )
         .map_err(|e| e.to_string())?;
-    let has_upstream_base_url = upstream_base_url.is_some();
-    let has_static_headers_json = static_headers_json.is_some();
-    let normalized_upstream_base_url = normalize_upstream_base_url(upstream_base_url)?;
-    let normalized_static_headers_json = normalize_static_headers_json(static_headers_json)?;
-
     if protocol_type.is_some() || has_upstream_base_url || has_static_headers_json {
         let current = storage
             .find_api_key_by_id(key_id)

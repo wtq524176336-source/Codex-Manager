@@ -47,7 +47,7 @@ fn gateway_stateless_retry_strips_encrypted_content_on_invalid_encrypted_content
     let storage = Storage::open(&db_path).expect("open db");
     storage.init().expect("init db");
     let now = now_ts();
-    seed_model_catalog_models(&storage, &["claude-3-5-sonnet-20241022", "gpt-5.3-codex"]);
+    seed_model_catalog_models(&storage, &["gpt-5.3-codex"]);
 
     storage
         .insert_account(&Account {
@@ -197,7 +197,7 @@ fn gateway_request_log_keeps_only_final_result_for_multi_attempt_flow() {
     let storage = Storage::open(&db_path).expect("open db");
     storage.init().expect("init db");
     let now = now_ts();
-    seed_model_catalog_models(&storage, &["claude-3-5-sonnet-20241022", "gpt-5.3-codex"]);
+    seed_model_catalog_models(&storage, &["gpt-5.3-codex"]);
 
     for index in 1..=2 {
         storage
@@ -239,8 +239,8 @@ fn gateway_request_log_keeps_only_final_result_for_multi_attempt_flow() {
             account_plan_filter: None,
             aggregate_api_url: None,
             client_type: "codex".to_string(),
-            protocol_type: "anthropic_native".to_string(),
-            auth_scheme: "x_api_key".to_string(),
+            protocol_type: "openai_compat".to_string(),
+            auth_scheme: "authorization_bearer".to_string(),
             upstream_base_url: None,
             static_headers_json: None,
             key_hash: hash_platform_key_for_test(platform_key),
@@ -253,18 +253,17 @@ fn gateway_request_log_keeps_only_final_result_for_multi_attempt_flow() {
     let server = codexmanager_service::start_one_shot_server().expect("start server");
     let body = serde_json::json!({
         "model": "gpt-5.3-codex",
-        "messages": [{ "role": "user", "content": "hello" }],
+        "input": "hello",
         "stream": false
     });
     let body = serde_json::to_string(&body).expect("serialize request");
     let (status, response_body) = post_http_raw(
         &server.addr,
-        "/v1/messages",
+        "/v1/responses",
         &body,
         &[
             ("Content-Type", "application/json"),
-            ("x-api-key", platform_key),
-            ("anthropic-version", "2023-06-01"),
+            ("Authorization", &format!("Bearer {platform_key}")),
             ("x-stainless-lang", "js"),
         ],
     );
@@ -293,11 +292,14 @@ fn gateway_request_log_keeps_only_final_result_for_multi_attempt_flow() {
     assert_eq!(final_logs.len(), 1, "logs: {final_logs:#?}");
     assert_eq!(final_logs[0].status_code, Some(200));
     assert!(!final_logs[0].trace_id.as_deref().unwrap_or("").is_empty());
-    assert_eq!(final_logs[0].original_path.as_deref(), Some("/v1/messages"));
+    assert_eq!(
+        final_logs[0].original_path.as_deref(),
+        Some("/v1/responses")
+    );
     assert_eq!(final_logs[0].adapted_path.as_deref(), Some("/v1/responses"));
     assert_eq!(
         final_logs[0].response_adapter.as_deref(),
-        Some("AnthropicMessagesFromResponses")
+        Some("Passthrough")
     );
 
     assert!(
@@ -345,7 +347,7 @@ fn gateway_error_logging_writes_only_trace_log_file() {
     let storage = Storage::open(&db_path).expect("open db");
     storage.init().expect("init db");
     let now = now_ts();
-    seed_model_catalog_models(&storage, &["claude-3-5-sonnet-20241022", "gpt-5.3-codex"]);
+    seed_model_catalog_models(&storage, &["gpt-5.3-codex"]);
 
     storage
         .insert_account(&Account {

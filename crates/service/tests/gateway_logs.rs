@@ -1,5 +1,3 @@
-#[path = "gateway_logs/anthropic.rs"]
-mod anthropic;
 #[path = "gateway_logs/basic.rs"]
 mod basic;
 #[path = "gateway_logs/images.rs"]

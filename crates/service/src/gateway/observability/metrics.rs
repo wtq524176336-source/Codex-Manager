@@ -573,12 +573,6 @@ fn classify_gateway_route(path: &str) -> &'static str {
     if path.starts_with("/v1/chat/completions") {
         return "chat_completions";
     }
-    if path.starts_with("/v1/messages/count_tokens") {
-        return "messages_count_tokens";
-    }
-    if path.starts_with("/v1/messages") {
-        return "messages";
-    }
     if path.starts_with("/v1/models") {
         return "models";
     }
@@ -632,16 +626,6 @@ fn classify_protocol(protocol_type: Option<&str>) -> &'static str {
         || protocol_type.eq_ignore_ascii_case("openai")
     {
         return "openai_compat";
-    }
-    if protocol_type.eq_ignore_ascii_case("anthropic_native")
-        || protocol_type.eq_ignore_ascii_case("anthropic")
-    {
-        return "anthropic_native";
-    }
-    if protocol_type.eq_ignore_ascii_case("gemini_native")
-        || protocol_type.eq_ignore_ascii_case("gemini")
-    {
-        return "gemini_native";
     }
     "other"
 }

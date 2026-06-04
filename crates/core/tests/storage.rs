@@ -1529,18 +1529,18 @@ fn storage_api_keys_include_profile_fields() {
         .insert_api_key(&ApiKey {
             id: "key-1".to_string(),
             name: Some("main".to_string()),
-            model_slug: Some("claude-sonnet-4".to_string()),
+            model_slug: Some("gpt-5.4".to_string()),
             reasoning_effort: Some("medium".to_string()),
             service_tier: Some("fast".to_string()),
             rotation_strategy: "account_rotation".to_string(),
             aggregate_api_id: None,
             account_plan_filter: None,
             aggregate_api_url: None,
-            client_type: "claude_code".to_string(),
-            protocol_type: "anthropic_native".to_string(),
-            auth_scheme: "x_api_key".to_string(),
-            upstream_base_url: Some("https://api.anthropic.com".to_string()),
-            static_headers_json: Some("{\"anthropic-version\":\"2023-06-01\"}".to_string()),
+            client_type: "codex".to_string(),
+            protocol_type: "openai_compat".to_string(),
+            auth_scheme: "authorization_bearer".to_string(),
+            upstream_base_url: Some("https://api.openai.com/v1".to_string()),
+            static_headers_json: Some("{\"x-test\":\"1\"}".to_string()),
             key_hash: "hash-1".to_string(),
             status: "active".to_string(),
             created_at: now_ts(),
@@ -1554,10 +1554,10 @@ fn storage_api_keys_include_profile_fields() {
         .into_iter()
         .find(|item| item.id == "key-1")
         .expect("key exists");
-    assert_eq!(key.client_type, "claude_code");
-    assert_eq!(key.protocol_type, "anthropic_native");
-    assert_eq!(key.auth_scheme, "x_api_key");
-    assert_eq!(key.model_slug.as_deref(), Some("claude-sonnet-4"));
+    assert_eq!(key.client_type, "codex");
+    assert_eq!(key.protocol_type, "openai_compat");
+    assert_eq!(key.auth_scheme, "authorization_bearer");
+    assert_eq!(key.model_slug.as_deref(), Some("gpt-5.4"));
     assert_eq!(key.service_tier.as_deref(), Some("fast"));
 }
 

@@ -1,7 +1,6 @@
 use bytes::Bytes;
 use codexmanager_core::storage::Account;
 use futures_util::StreamExt;
-use rand::Rng;
 use std::sync::mpsc;
 use std::thread;
 use std::time::Instant;
@@ -152,72 +151,6 @@ fn should_preserve_client_identity(protocol_type: &str) -> bool {
     false
 }
 
-fn is_gemini_codex_compat(protocol_type: &str, request_path: &str, target_url: &str) -> bool {
-    protocol_type == crate::apikey_profile::PROTOCOL_GEMINI_NATIVE
-        && request_path.starts_with("/v1/responses")
-        && super::super::config::is_chatgpt_backend_base(target_url)
-}
-
-const CPA_GEMINI_CODEX_USER_AGENT: &str =
-    "codex-tui/0.118.0 (Mac OS 26.3.1; arm64) iTerm.app/3.6.9 (codex-tui; 0.118.0)";
-const CPA_GEMINI_CODEX_ORIGINATOR: &str = "codex-tui";
-
-fn normalize_header_value(value: Option<&str>) -> Option<&str> {
-    value.map(str::trim).filter(|value| !value.is_empty())
-}
-
-fn set_or_replace_header(headers: &mut Vec<(String, String)>, name: &str, value: String) {
-    if let Some((_, current)) = headers
-        .iter_mut()
-        .find(|(header_name, _)| header_name.eq_ignore_ascii_case(name))
-    {
-        *current = value;
-    } else {
-        headers.push((name.to_string(), value));
-    }
-}
-
-fn remove_header(headers: &mut Vec<(String, String)>, name: &str) {
-    headers.retain(|(header_name, _)| !header_name.eq_ignore_ascii_case(name));
-}
-
-fn random_cpa_session_id() -> String {
-    let mut rng = rand::thread_rng();
-    let a: u32 = rng.gen();
-    let b: u16 = rng.gen();
-    let c: u16 = (rng.gen::<u16>() & 0x0fff) | 0x4000;
-    let d: u16 = (rng.gen::<u16>() & 0x3fff) | 0x8000;
-    let e: u64 = rng.gen::<u64>() & 0x0000_ffff_ffff_ffff;
-    format!("{a:08x}-{b:04x}-{c:04x}-{d:04x}-{e:012x}")
-}
-
-fn apply_gemini_codex_compat_header_profile(
-    headers: &mut Vec<(String, String)>,
-    incoming_originator: Option<&str>,
-) {
-    set_or_replace_header(
-        headers,
-        "User-Agent",
-        CPA_GEMINI_CODEX_USER_AGENT.to_string(),
-    );
-    set_or_replace_header(
-        headers,
-        "originator",
-        normalize_header_value(incoming_originator)
-            .unwrap_or(CPA_GEMINI_CODEX_ORIGINATOR)
-            .to_string(),
-    );
-    set_or_replace_header(headers, "Connection", "Keep-Alive".to_string());
-    // 中文注释：CPA 的 Gemini->Codex 兼容路径只补 Session_id，不带窗口/turn 粘性头。
-    remove_header(headers, "x-codex-window-id");
-    remove_header(headers, "x-codex-turn-state");
-    remove_header(headers, "x-codex-parent-thread-id");
-    remove_header(headers, "x-openai-subagent");
-    if !has_header(headers, "session_id") {
-        headers.push(("Session_id".to_string(), random_cpa_session_id()));
-    }
-}
-
 /// 函数 `has_header`
 ///
 /// 作者: gaohongshun
@@ -315,15 +248,10 @@ fn resolve_request_compression_with_flag(
 /// # 返回
 /// 返回函数执行结果
 fn resolve_request_compression(
-    protocol_type: &str,
     target_url: &str,
     request_path: &str,
     is_stream: bool,
 ) -> RequestCompression {
-    if is_gemini_codex_compat(protocol_type, request_path, target_url) {
-        // 中文注释：CPA 的 Gemini->Codex 路径不做 zstd 请求压缩。
-        return RequestCompression::None;
-    }
     resolve_request_compression_with_flag(
         super::super::super::request_compression_enabled(),
         target_url,
@@ -615,11 +543,6 @@ fn send_upstream_request_with_compression_override(
         .chatgpt_account_id
         .as_deref()
         .or_else(|| account.workspace_id.as_deref());
-    let gemini_codex_compat = is_gemini_codex_compat(
-        request_ctx.protocol_type,
-        request_ctx.request_path,
-        target_url,
-    );
     super::super::super::session_affinity::log_thread_anchor_conflict(
         request_ctx.request_path,
         account_id,
@@ -640,13 +563,9 @@ fn send_upstream_request_with_compression_override(
     let mut upstream_headers = if request_ctx.transparent_mode {
         build_transparent_upstream_headers(incoming_headers, auth_token, chatgpt_account_header)
     } else if is_compact_request {
-        let installation_id = if gemini_codex_compat {
-            None
-        } else {
-            super::super::header_profile::resolve_codex_installation_id(
-                incoming_headers.codex_installation_id(),
-            )
-        };
+        let installation_id = super::super::header_profile::resolve_codex_installation_id(
+            incoming_headers.codex_installation_id(),
+        );
         let header_input = super::super::header_profile::CodexCompactUpstreamHeaderInput {
             auth_token,
             chatgpt_account_id: chatgpt_account_header,
@@ -654,37 +573,13 @@ fn send_upstream_request_with_compression_override(
             incoming_user_agent: incoming_headers.user_agent(),
             incoming_originator: incoming_headers.originator(),
             preserve_client_identity: should_preserve_client_identity(request_ctx.protocol_type),
-            incoming_session_id: if gemini_codex_compat {
-                incoming_headers.session_id()
-            } else {
-                request_affinity.incoming_session_id
-            },
-            thread_id: if gemini_codex_compat {
-                None
-            } else {
-                request_affinity.fallback_session_id
-            },
-            incoming_window_id: if gemini_codex_compat {
-                None
-            } else {
-                incoming_headers.window_id()
-            },
-            incoming_subagent: if gemini_codex_compat {
-                None
-            } else {
-                incoming_headers.subagent()
-            },
-            incoming_parent_thread_id: if gemini_codex_compat {
-                None
-            } else {
-                incoming_headers.parent_thread_id()
-            },
+            incoming_session_id: request_affinity.incoming_session_id,
+            thread_id: request_affinity.fallback_session_id,
+            incoming_window_id: incoming_headers.window_id(),
+            incoming_subagent: incoming_headers.subagent(),
+            incoming_parent_thread_id: incoming_headers.parent_thread_id(),
             passthrough_codex_headers: incoming_headers.passthrough_codex_headers(),
-            fallback_session_id: if gemini_codex_compat {
-                None
-            } else {
-                request_affinity.fallback_session_id
-            },
+            fallback_session_id: request_affinity.fallback_session_id,
             strip_session_affinity,
             has_body: !body_for_transport.is_empty(),
         };
@@ -696,58 +591,24 @@ fn send_upstream_request_with_compression_override(
             incoming_user_agent: incoming_headers.user_agent(),
             incoming_originator: incoming_headers.originator(),
             preserve_client_identity: should_preserve_client_identity(request_ctx.protocol_type),
-            incoming_session_id: if gemini_codex_compat {
-                incoming_headers.session_id()
-            } else {
-                request_affinity.incoming_session_id
-            },
-            incoming_window_id: if gemini_codex_compat {
-                None
-            } else {
-                incoming_headers.window_id()
-            },
-            incoming_client_request_id: if gemini_codex_compat {
-                incoming_headers.client_request_id()
-            } else {
-                request_affinity.incoming_client_request_id
-            },
-            incoming_subagent: if gemini_codex_compat {
-                None
-            } else {
-                incoming_headers.subagent()
-            },
+            incoming_session_id: request_affinity.incoming_session_id,
+            incoming_window_id: incoming_headers.window_id(),
+            incoming_client_request_id: request_affinity.incoming_client_request_id,
+            incoming_subagent: incoming_headers.subagent(),
             incoming_beta_features: incoming_headers.beta_features(),
             incoming_turn_metadata: incoming_headers.turn_metadata(),
-            incoming_parent_thread_id: if gemini_codex_compat {
-                None
-            } else {
-                incoming_headers.parent_thread_id()
-            },
+            incoming_parent_thread_id: incoming_headers.parent_thread_id(),
             incoming_responsesapi_include_timing_metrics: incoming_headers
                 .responsesapi_include_timing_metrics(),
             passthrough_codex_headers: incoming_headers.passthrough_codex_headers(),
-            fallback_session_id: if gemini_codex_compat {
-                None
-            } else {
-                request_affinity.fallback_session_id
-            },
-            incoming_turn_state: if gemini_codex_compat {
-                None
-            } else {
-                request_affinity.incoming_turn_state
-            },
-            include_turn_state: !gemini_codex_compat,
+            fallback_session_id: request_affinity.fallback_session_id,
+            incoming_turn_state: request_affinity.incoming_turn_state,
+            include_turn_state: true,
             strip_session_affinity,
             has_body: !body_for_transport.is_empty(),
         };
         super::super::header_profile::build_codex_upstream_headers(header_input)
     };
-    if !request_ctx.transparent_mode && gemini_codex_compat {
-        apply_gemini_codex_compat_header_profile(
-            &mut upstream_headers,
-            incoming_headers.originator(),
-        );
-    }
     if !request_ctx.transparent_mode && should_force_connection_close(target_url) {
         // 中文注释：本地 loopback mock/代理更容易复用到脏 keep-alive 连接；
         // 对 localhost/127.0.0.1 强制 close，避免请求落到已失效连接。
@@ -758,12 +619,7 @@ fn send_upstream_request_with_compression_override(
         RequestCompression::None
     } else {
         compression_override.unwrap_or_else(|| {
-            resolve_request_compression(
-                request_ctx.protocol_type,
-                target_url,
-                request_ctx.request_path,
-                is_stream,
-            )
+            resolve_request_compression(target_url, request_ctx.request_path, is_stream)
         })
     };
     let body_for_request = encode_request_body(
@@ -966,10 +822,10 @@ fn send_upstream_request_with_compression_override(
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_gemini_codex_compat_header_profile, build_transparent_upstream_headers,
-        encode_request_body, resolve_request_compression, resolve_request_compression_with_flag,
-        should_retry_transport_without_compression, should_wrap_upstream_as_stream_response,
-        strip_compact_service_tier_for_transport, RequestCompression, CPA_GEMINI_CODEX_USER_AGENT,
+        build_transparent_upstream_headers, encode_request_body,
+        resolve_request_compression_with_flag, should_retry_transport_without_compression,
+        should_wrap_upstream_as_stream_response, strip_compact_service_tier_for_transport,
+        RequestCompression,
     };
     use crate::gateway::IncomingHeaderSnapshot;
     use axum::http::{HeaderMap, HeaderValue};
@@ -1040,58 +896,6 @@ mod tests {
             ),
             RequestCompression::None
         );
-    }
-
-    #[test]
-    fn gemini_codex_compat_disables_request_compression_like_cpa() {
-        assert_eq!(
-            resolve_request_compression(
-                crate::apikey_profile::PROTOCOL_GEMINI_NATIVE,
-                "https://chatgpt.com/backend-api/codex/responses",
-                "/v1/responses",
-                true,
-            ),
-            RequestCompression::None
-        );
-    }
-
-    #[test]
-    fn gemini_codex_compat_does_not_preserve_client_identity_like_cpa() {
-        assert!(!super::should_preserve_client_identity(
-            crate::apikey_profile::PROTOCOL_GEMINI_NATIVE
-        ));
-    }
-
-    #[test]
-    fn gemini_codex_compat_header_profile_matches_cpa_executor_shape() {
-        let mut headers = vec![
-            (
-                "User-Agent".to_string(),
-                "gemini-cli/0.1.14 (Windows 11; x86_64)".to_string(),
-            ),
-            ("originator".to_string(), "gemini_cli".to_string()),
-            ("x-codex-window-id".to_string(), "thread:0".to_string()),
-            ("x-codex-turn-state".to_string(), "turn-state".to_string()),
-            (
-                "x-codex-parent-thread-id".to_string(),
-                "parent-thread".to_string(),
-            ),
-            ("x-openai-subagent".to_string(), "subagent".to_string()),
-        ];
-
-        apply_gemini_codex_compat_header_profile(&mut headers, None);
-
-        assert_eq!(
-            header_value(&headers, "User-Agent"),
-            Some(CPA_GEMINI_CODEX_USER_AGENT)
-        );
-        assert_eq!(header_value(&headers, "originator"), Some("codex-tui"));
-        assert_eq!(header_value(&headers, "Connection"), Some("Keep-Alive"));
-        assert_eq!(header_value(&headers, "x-codex-window-id"), None);
-        assert_eq!(header_value(&headers, "x-codex-turn-state"), None);
-        assert_eq!(header_value(&headers, "x-codex-parent-thread-id"), None);
-        assert_eq!(header_value(&headers, "x-openai-subagent"), None);
-        assert_eq!(header_value(&headers, "session_id").map(str::len), Some(36));
     }
 
     #[test]

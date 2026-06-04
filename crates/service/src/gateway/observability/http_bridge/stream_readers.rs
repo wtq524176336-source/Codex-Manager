@@ -13,14 +13,10 @@ use super::{
     inspect_sse_frame_for_protocol, ImagesResponseFormat, OpenAIResponsesEvent,
     PassthroughSseProtocol, SseTerminal, UpstreamResponseUsage,
 };
-#[path = "stream_readers/anthropic.rs"]
-mod anthropic;
 #[path = "stream_readers/chat_completions.rs"]
 mod chat_completions;
 #[path = "stream_readers/common.rs"]
 mod common;
-#[path = "stream_readers/gemini.rs"]
-mod gemini;
 #[path = "stream_readers/images.rs"]
 mod images;
 #[path = "stream_readers/openai_responses.rs"]
@@ -28,7 +24,6 @@ mod openai_responses;
 #[path = "stream_readers/passthrough.rs"]
 mod passthrough;
 
-pub(crate) use anthropic::AnthropicSseReader;
 pub(crate) use chat_completions::ChatCompletionsFromResponsesSseReader;
 use common::{
     classify_upstream_stream_read_error, mark_first_response_ms, should_emit_keepalive,
@@ -39,7 +34,6 @@ use common::{mark_collector_terminal_success, mark_first_response_ms_on_usage};
 pub(crate) use common::{
     PassthroughSseCollector, SseKeepAliveFrame, UpstreamSseFramePump, UpstreamSseFramePumpItem,
 };
-pub(crate) use gemini::GeminiSseReader;
 pub(crate) use images::ImagesFromResponsesSseReader;
 pub(crate) use openai_responses::OpenAIResponsesPassthroughSseReader;
 pub(crate) use passthrough::PassthroughSseUsageReader;

@@ -1,7 +1,4 @@
-use crate::apikey_profile::{
-    is_gemini_generate_content_request_path, resolve_gateway_protocol_type,
-    PROTOCOL_ANTHROPIC_NATIVE, PROTOCOL_GEMINI_NATIVE, ROTATION_AGGREGATE_API,
-};
+use crate::apikey_profile::{resolve_gateway_protocol_type, ROTATION_AGGREGATE_API};
 use crate::gateway::request_helpers::ParsedRequestMetadata;
 use base64::Engine;
 use bytes::Bytes;
@@ -62,72 +59,15 @@ fn resolve_effective_request_overrides(
     )
 }
 
-fn is_removed_openai_compat_request_path(normalized_path: &str) -> bool {
-    normalized_path.starts_with("/v1/completions")
+fn is_removed_legacy_request_path(normalized_path: &str) -> bool {
+    normalized_path == "/v1/messages"
+        || normalized_path.starts_with("/v1/messages/")
+        || normalized_path.starts_with("/v1/messages?")
 }
 
-/// 函数 `ensure_anthropic_model_is_listed`
-///
-/// 作者: gaohongshun
-///
-/// 时间: 2026-04-02
-///
-/// # 参数
-/// - storage: 参数 storage
-/// - protocol_type: 参数 protocol_type
-/// - model: 参数 model
-///
-/// # 返回
-/// 返回函数执行结果
-fn ensure_anthropic_model_is_listed(
-    storage: &codexmanager_core::storage::Storage,
-    protocol_type: &str,
-    model: Option<&str>,
-) -> Result<(), LocalValidationError> {
-    if protocol_type != PROTOCOL_ANTHROPIC_NATIVE {
-        return Ok(());
-    }
-
-    let Some(model) = model.map(str::trim).filter(|value| !value.is_empty()) else {
-        return Err(LocalValidationError::new(
-            400,
-            crate::gateway::bilingual_error("Claude 模型必填", "claude model is required"),
-        ));
-    };
-
-    let models = crate::apikey_models::read_model_options_from_storage(storage).map_err(|err| {
-        LocalValidationError::new(
-            500,
-            crate::gateway::bilingual_error(
-                "读取模型缓存失败",
-                format!("model options cache read failed: {err}"),
-            ),
-        )
-    })?;
-    if models.is_empty() {
-        return Err(LocalValidationError::new(
-            400,
-            crate::gateway::bilingual_error(
-                "Claude 模型不在模型列表中",
-                format!("claude model not found in model list: {model}"),
-            ),
-        ));
-    }
-    let found = models
-        .models
-        .iter()
-        .any(|item| item.slug.trim().eq_ignore_ascii_case(model));
-    if found {
-        Ok(())
-    } else {
-        Err(LocalValidationError::new(
-            400,
-            crate::gateway::bilingual_error(
-                "Claude 模型不在模型列表中",
-                format!("claude model not found in model list: {model}"),
-            ),
-        ))
-    }
+fn is_removed_gateway_request_path(normalized_path: &str) -> bool {
+    normalized_path.starts_with("/v1/completions")
+        || is_removed_legacy_request_path(normalized_path)
 }
 
 /// 函数 `allow_openai_responses_path_rewrite`
@@ -143,13 +83,11 @@ fn ensure_anthropic_model_is_listed(
 /// # 返回
 /// 返回函数执行结果
 fn allow_compat_responses_path_rewrite(protocol_type: &str, normalized_path: &str) -> bool {
-    (protocol_type == crate::apikey_profile::PROTOCOL_OPENAI_COMPAT
+    protocol_type == crate::apikey_profile::PROTOCOL_OPENAI_COMPAT
         && (normalized_path.starts_with("/v1/chat/completions")
             || normalized_path.starts_with("/v1/responses")
             || normalized_path.starts_with("/v1/images/generations")
-            || normalized_path.starts_with("/v1/images/edits")))
-        || (protocol_type == PROTOCOL_GEMINI_NATIVE
-            && is_gemini_generate_content_request_path(normalized_path))
+            || normalized_path.starts_with("/v1/images/edits"))
 }
 
 fn allow_codex_compat_rewrite_for_client(
@@ -1002,8 +940,7 @@ fn adapt_openai_images_edits_body_to_responses(
 /// # 返回
 /// 返回函数执行结果
 fn should_derive_compat_conversation_anchor(protocol_type: &str, normalized_path: &str) -> bool {
-    (protocol_type == PROTOCOL_ANTHROPIC_NATIVE && normalized_path.starts_with("/v1/messages"))
-        || allow_compat_responses_path_rewrite(protocol_type, normalized_path)
+    allow_compat_responses_path_rewrite(protocol_type, normalized_path)
 }
 
 /// 函数 `is_native_codex_client_request`
@@ -1061,9 +998,7 @@ fn should_normalize_compat_service_tier_for_codex_backend(
     adapted_path: &str,
 ) -> bool {
     adapted_path.starts_with("/v1/responses")
-        && ((protocol_type == PROTOCOL_ANTHROPIC_NATIVE
-            && normalized_path.starts_with("/v1/messages"))
-            || allow_compat_responses_path_rewrite(protocol_type, normalized_path))
+        && allow_compat_responses_path_rewrite(protocol_type, normalized_path)
 }
 
 fn normalize_compat_service_tier_for_codex_backend(body: Vec<u8>) -> Vec<u8> {
@@ -1090,15 +1025,10 @@ fn normalize_compat_service_tier_for_codex_backend(body: Vec<u8>) -> Vec<u8> {
 }
 
 fn resolve_preferred_client_prompt_cache_key(
-    protocol_type: &str,
     incoming_headers: &super::super::IncomingHeaderSnapshot,
     initial_request_meta: &ParsedRequestMetadata,
     client_request_meta: &ParsedRequestMetadata,
 ) -> Option<String> {
-    if protocol_type == PROTOCOL_ANTHROPIC_NATIVE {
-        return None;
-    }
-
     let preferred = initial_request_meta.prompt_cache_key.clone().or_else(|| {
         if client_request_meta.has_prompt_cache_key {
             client_request_meta.prompt_cache_key.clone()
@@ -1161,8 +1091,6 @@ fn resolve_client_is_stream(
             normalized_path,
             native_codex_client,
         ) && !client_stream_specified)
-        || (protocol_type == PROTOCOL_GEMINI_NATIVE
-            && normalized_path.contains(":streamGenerateContent"))
 }
 
 fn client_accepts_sse(incoming_headers: &super::super::IncomingHeaderSnapshot) -> bool {
@@ -1293,17 +1221,18 @@ pub(super) fn build_local_validation_result(
 ) -> Result<LocalValidationResult, LocalValidationError> {
     // 按当前策略取消每次请求都更新 api_keys.last_used_at，减少并发写入冲突。
     let normalized_path = super::super::normalize_models_path(request.url());
-    if is_removed_openai_compat_request_path(normalized_path.as_str()) {
+    if is_removed_gateway_request_path(normalized_path.as_str()) {
         return Err(LocalValidationError::new(
             410,
             crate::gateway::bilingual_error(
-                "OpenAI 兼容请求链路已移除",
+                "旧请求链路已移除",
                 format!("removed request path: {normalized_path}"),
             ),
         ));
     }
     let effective_protocol_type =
         resolve_gateway_protocol_type(api_key.protocol_type.as_str(), normalized_path.as_str());
+    let upstream_base = super::super::gateway_resolve_effective_upstream_base(&api_key);
     let request_method = request.method().as_str().to_string();
     let method = Method::from_bytes(request_method.as_bytes()).map_err(|_| {
         LocalValidationError::new(
@@ -1363,7 +1292,6 @@ pub(super) fn build_local_validation_result(
         let reasoning_for_log = initial_request_meta.reasoning_effort;
         let service_tier_for_log = initial_request_meta.service_tier.clone();
         let effective_service_tier_for_log = initial_request_meta.service_tier;
-        let has_prompt_cache_key = initial_request_meta.has_prompt_cache_key;
         let request_shape = initial_request_meta.request_shape;
         return Ok(LocalValidationResult {
             trace_id,
@@ -1374,15 +1302,14 @@ pub(super) fn build_local_validation_result(
             path: normalized_path,
             passthrough_body: Bytes::from(body.clone()),
             body: Bytes::from(body),
+            upstream_base,
             is_stream,
-            has_prompt_cache_key,
             request_shape,
             protocol_type: effective_protocol_type.to_string(),
             rotation_strategy: api_key.rotation_strategy,
             aggregate_api_id: api_key.aggregate_api_id,
             account_plan_filter: api_key.account_plan_filter,
             response_adapter: super::super::ResponseAdapter::Passthrough,
-            gemini_stream_output_mode: None,
             tool_name_restore_map: super::super::ToolNameRestoreMap::default(),
             request_type_for_log,
             request_method,
@@ -1508,15 +1435,14 @@ pub(super) fn build_local_validation_result(
             path: normalized_path,
             passthrough_body: Bytes::from(rewritten_body.clone()),
             body: Bytes::from(rewritten_body),
+            upstream_base,
             is_stream,
-            has_prompt_cache_key,
             request_shape,
             protocol_type: effective_protocol_type.to_string(),
             rotation_strategy: ROTATION_AGGREGATE_API.to_string(),
             aggregate_api_id: api_key.aggregate_api_id,
             account_plan_filter: api_key.account_plan_filter,
             response_adapter: super::super::ResponseAdapter::Passthrough,
-            gemini_stream_output_mode: None,
             tool_name_restore_map: super::super::ToolNameRestoreMap::default(),
             request_type_for_log,
             request_method,
@@ -1551,7 +1477,7 @@ pub(super) fn build_local_validation_result(
     super::super::validate_text_input_limit_for_path(&normalized_path, &passthrough_body)
         .map_err(|err| LocalValidationError::new(400, err.message()))?;
     let original_body = body.clone();
-    let (mut path, mut response_adapter, mut gemini_stream_output_mode, mut tool_name_restore_map) =
+    let (mut path, mut response_adapter, mut tool_name_restore_map) =
         if effective_protocol_type == crate::apikey_profile::PROTOCOL_OPENAI_COMPAT
             && is_openai_images_generations_path(normalized_path.as_str())
             && !native_codex_client
@@ -1576,7 +1502,6 @@ pub(super) fn build_local_validation_result(
             (
                 "/v1/responses".to_string(),
                 response_adapter,
-                None,
                 super::super::ToolNameRestoreMap::default(),
             )
         } else if effective_protocol_type == crate::apikey_profile::PROTOCOL_OPENAI_COMPAT
@@ -1605,7 +1530,6 @@ pub(super) fn build_local_validation_result(
             (
                 "/v1/responses".to_string(),
                 response_adapter,
-                None,
                 super::super::ToolNameRestoreMap::default(),
             )
         } else {
@@ -1624,7 +1548,6 @@ pub(super) fn build_local_validation_result(
             (
                 adapted.path,
                 adapted.response_adapter,
-                adapted.gemini_stream_output_mode,
                 adapted.tool_name_restore_map,
             )
         };
@@ -1649,8 +1572,7 @@ pub(super) fn build_local_validation_result(
     ) {
         body = default_omitted_responses_stream_to_true(body);
     }
-    if effective_protocol_type != PROTOCOL_ANTHROPIC_NATIVE
-        && !normalized_path.starts_with("/v1/responses")
+    if !normalized_path.starts_with("/v1/responses")
         && path.starts_with("/v1/responses")
         && !allow_compat_responses_path_rewrite(effective_protocol_type, &normalized_path)
     {
@@ -1665,16 +1587,14 @@ pub(super) fn build_local_validation_result(
         path = normalized_path.clone();
         body = original_body;
         response_adapter = super::super::ResponseAdapter::Passthrough;
-        gemini_stream_output_mode = None;
         tool_name_restore_map.clear();
     }
     // 中文注释：下游调用方的 stream 语义必须来自原始客户端请求；
-    // 否则协议适配（例如 Anthropic/Gemini 转 /responses 强制 stream=true）会污染响应模式判断。
+    // 否则兼容改写到 /responses 时会污染响应模式判断。
     let client_request_meta = initial_request_meta.clone();
     let (effective_model, effective_reasoning, effective_service_tier) =
         resolve_effective_request_overrides(&api_key);
     let preferred_prompt_cache_key = resolve_preferred_client_prompt_cache_key(
-        effective_protocol_type,
         &incoming_headers,
         &initial_request_meta,
         &client_request_meta,
@@ -1766,8 +1686,6 @@ pub(super) fn build_local_validation_result(
     let request_shape = client_request_meta.request_shape;
     let request_type_for_log = request_type_for_log(&incoming_headers, &body);
 
-    ensure_anthropic_model_is_listed(&storage, effective_protocol_type, model_for_log.as_deref())?;
-
     Ok(LocalValidationResult {
         trace_id,
         incoming_headers,
@@ -1777,12 +1695,11 @@ pub(super) fn build_local_validation_result(
         path,
         passthrough_body: Bytes::from(passthrough_body),
         body: Bytes::from(body),
+        upstream_base,
         is_stream,
-        has_prompt_cache_key,
         request_shape,
         protocol_type: effective_protocol_type.to_string(),
         response_adapter,
-        gemini_stream_output_mode,
         tool_name_restore_map,
         request_type_for_log,
         request_method,
@@ -1801,10 +1718,6 @@ pub(super) fn build_local_validation_result(
         transparent_mode: false,
     })
 }
-
-#[cfg(test)]
-#[path = "tests/request_tests.rs"]
-mod tests;
 
 #[cfg(test)]
 mod images_generation_tests {
@@ -2014,34 +1927,22 @@ mod images_generation_tests {
 
 #[cfg(test)]
 mod removed_path_tests {
-    use super::is_removed_openai_compat_request_path;
+    use super::is_removed_gateway_request_path;
 
     #[test]
-    fn identifies_removed_openai_compat_paths() {
-        assert!(!is_removed_openai_compat_request_path("/v1/responses"));
-        assert!(!is_removed_openai_compat_request_path(
-            "/v1/responses/compact"
-        ));
-        assert!(!is_removed_openai_compat_request_path(
-            "/v1/chat/completions"
-        ));
-        assert!(is_removed_openai_compat_request_path("/v1/completions"));
-        assert!(!is_removed_openai_compat_request_path("/v1/messages"));
-        assert!(!is_removed_openai_compat_request_path(
-            "/v1beta/models/gemini-2.5-pro:generateContent"
-        ));
-        assert!(!is_removed_openai_compat_request_path(
-            "/v1/images/generations"
-        ));
-        assert!(!is_removed_openai_compat_request_path("/v1/images/edits"));
+    fn identifies_removed_gateway_paths() {
+        assert!(!is_removed_gateway_request_path("/v1/responses"));
+        assert!(!is_removed_gateway_request_path("/v1/responses/compact"));
+        assert!(!is_removed_gateway_request_path("/v1/chat/completions"));
+        assert!(is_removed_gateway_request_path("/v1/completions"));
+        assert!(is_removed_gateway_request_path("/v1/messages"));
+        assert!(!is_removed_gateway_request_path("/v1/images/generations"));
+        assert!(!is_removed_gateway_request_path("/v1/images/edits"));
     }
 
     #[test]
-    fn removed_openai_compat_paths_are_still_limited_to_legacy_completions() {
-        assert!(is_removed_openai_compat_request_path("/v1/completions"));
-        assert!(!is_removed_openai_compat_request_path("/v1/messages"));
-        assert!(!is_removed_openai_compat_request_path(
-            "/v1beta/models/gemini-2.5-pro:generateContent"
-        ));
+    fn removed_gateway_paths_include_legacy_and_removed_native_cli_paths() {
+        assert!(is_removed_gateway_request_path("/v1/completions"));
+        assert!(is_removed_gateway_request_path("/v1/messages"));
     }
 }
