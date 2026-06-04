@@ -1,8 +1,9 @@
 use super::{
-    classify_upstream_stream_read_error, mark_first_response_ms, merge_usage,
-    stream_idle_timed_out, stream_idle_timeout_message, stream_reader_disconnected_message,
-    stream_wait_timeout, upstream_hint_or_stream_incomplete_message, Arc, Cursor, Mutex,
-    OpenAIResponsesEvent, PassthroughSseCollector, Read, SseKeepAliveFrame, SseTerminal,
+    append_output_text_raw, classify_upstream_stream_read_error, mark_first_response_ms,
+    merge_usage, stream_idle_timed_out, stream_idle_timeout_message,
+    stream_reader_disconnected_message, stream_wait_timeout,
+    upstream_hint_or_stream_incomplete_message, Arc, Cursor, Mutex, OpenAIResponsesEvent,
+    PassthroughSseCollector, Read, SseKeepAliveFrame, SseTerminal,
 };
 use crate::gateway::upstream::{GatewayByteStream, GatewayByteStreamItem, GatewayStreamResponse};
 use eventsource_stream::{Event, Eventsource};
@@ -104,6 +105,49 @@ fn event_to_sse_lines(event: &Event) -> Vec<String> {
     lines
 }
 
+fn merge_snapshot_output_text(collector: &mut PassthroughSseCollector, text: String) {
+    if text.trim().is_empty() {
+        return;
+    }
+
+    let Some(current) = collector.usage.output_text.as_mut() else {
+        collector.usage.output_text = Some(text);
+        return;
+    };
+    if current.is_empty() || text.starts_with(current.as_str()) {
+        *current = text;
+        return;
+    }
+    if current.starts_with(text.as_str()) || collector.saw_output_text_delta {
+        return;
+    }
+    append_output_text_raw(current, text.as_str());
+}
+
+fn merge_event_output_text(
+    collector: &mut PassthroughSseCollector,
+    text: Option<String>,
+    is_incremental: bool,
+    is_snapshot: bool,
+) {
+    let Some(text) = text else {
+        return;
+    };
+    if text.trim().is_empty() {
+        return;
+    }
+    if is_snapshot {
+        merge_snapshot_output_text(collector, text);
+        return;
+    }
+
+    let target = collector.usage.output_text.get_or_insert_with(String::new);
+    append_output_text_raw(target, text.as_str());
+    if is_incremental {
+        collector.saw_output_text_delta = true;
+    }
+}
+
 pub(crate) struct OpenAIResponsesPassthroughSseReader {
     raw_upstream: GatewayByteStream,
     observer: OpenAIResponsesSidecarObserver,
@@ -149,12 +193,16 @@ impl OpenAIResponsesPassthroughSseReader {
         }
     }
 
-    fn update_usage_from_event(&self, event: OpenAIResponsesEvent) {
+    fn update_usage_from_event(&self, mut event: OpenAIResponsesEvent) {
         if let Ok(mut collector) = self.usage_collector.lock() {
-            if let Some(event_type) = event.event_type {
-                collector.last_event_type = Some(event_type);
+            if let Some(event_type) = event.event_type.as_ref() {
+                collector.last_event_type = Some(event_type.clone());
             }
+            let is_incremental = event.has_incremental_output_text();
+            let is_snapshot = event.has_output_text_snapshot();
+            let output_text = event.usage.output_text.take();
             merge_usage(&mut collector.usage, event.usage);
+            merge_event_output_text(&mut collector, output_text, is_incremental, is_snapshot);
             if let Some(upstream_error_hint) = event.upstream_error_hint {
                 collector.upstream_error_hint = Some(upstream_error_hint);
             }

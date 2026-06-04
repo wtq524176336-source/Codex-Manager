@@ -21,6 +21,7 @@ pub(crate) struct PassthroughSseCollector {
     pub(crate) terminal_error: Option<String>,
     pub(crate) upstream_error_hint: Option<String>,
     pub(crate) last_event_type: Option<String>,
+    pub(crate) saw_output_text_delta: bool,
 }
 
 fn elapsed_ms_since(started_at: Instant) -> i64 {

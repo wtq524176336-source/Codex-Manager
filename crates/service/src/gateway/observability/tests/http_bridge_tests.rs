@@ -1991,6 +1991,46 @@ fn openai_responses_passthrough_reader_parses_split_events_with_eventsource_stre
 }
 
 #[test]
+fn openai_responses_passthrough_reader_deduplicates_snapshot_output_text() {
+    let (upstream, server) = open_streaming_mock_http_response(
+        "text/event-stream",
+        &[(
+            "event: response.output_text.delta\n\
+             data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello \"}\n\n\
+             event: response.output_text.delta\n\
+             data: {\"type\":\"response.output_text.delta\",\"delta\":\"world\"}\n\n\
+             event: response.output_text.done\n\
+             data: {\"type\":\"response.output_text.done\",\"delta\":\"hello world\"}\n\n\
+             event: response.completed\n\
+             data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_dedup\",\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"hello world\"}]}],\"usage\":{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3}}}\n\n\
+             data: [DONE]\n\n",
+            0,
+        )],
+    );
+    let usage_collector = Arc::new(Mutex::new(PassthroughSseCollector::default()));
+    let mut reader = OpenAIResponsesPassthroughSseReader::new(
+        upstream,
+        Arc::clone(&usage_collector),
+        SseKeepAliveFrame::OpenAIResponses,
+        std::time::Instant::now(),
+    );
+    let mut mapped = String::new();
+    reader
+        .read_to_string(&mut mapped)
+        .expect("read dedup openai responses stream");
+    server.join().expect("join dedup openai responses upstream");
+
+    let collector = usage_collector
+        .lock()
+        .expect("lock usage collector")
+        .clone();
+    assert!(mapped.contains("event: response.output_text.done"));
+    assert!(mapped.contains("event: response.completed"));
+    assert_eq!(collector.usage.output_text.as_deref(), Some("hello world"));
+    assert_eq!(collector.usage.total_tokens, Some(3));
+}
+
+#[test]
 fn openai_responses_passthrough_reader_collects_output_item_field_text() {
     let (upstream, server) = open_streaming_mock_http_response(
         "text/event-stream",

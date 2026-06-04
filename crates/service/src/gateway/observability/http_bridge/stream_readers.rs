@@ -3,8 +3,9 @@ use std::io::{Cursor, Read};
 use std::sync::{Arc, Mutex};
 
 use super::{
-    append_output_text, collect_output_text_from_event_fields, collect_response_output_text,
-    extract_error_hint_from_body, extract_error_message_from_json, merge_usage,
+    append_output_text, append_output_text_raw, collect_output_text_from_event_fields,
+    collect_response_output_text, extract_error_hint_from_body, extract_error_message_from_json,
+    merge_usage,
 };
 use super::{
     build_images_api_response, chat_image_payload, collect_image_generation_data_urls,

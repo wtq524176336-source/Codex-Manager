@@ -10,7 +10,8 @@ use aggregate::openai_responses_event::OpenAIResponsesEvent;
 pub(crate) use aggregate::PassthroughSseProtocol;
 #[allow(unused_imports)]
 use aggregate::{
-    append_output_text, collect_output_text_from_event_fields, collect_response_output_text,
+    append_output_text, append_output_text_raw, collect_output_text_from_event_fields,
+    collect_response_output_text,
 };
 use aggregate::{
     collect_non_stream_json_from_sse_bytes, extract_error_hint_from_body,

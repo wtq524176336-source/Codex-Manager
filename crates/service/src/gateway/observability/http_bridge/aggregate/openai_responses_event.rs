@@ -48,6 +48,7 @@ impl OpenAIResponsesEventKind {
 #[derive(Debug, Clone)]
 pub(in super::super) struct OpenAIResponsesEvent {
     pub(in super::super) event_type: Option<String>,
+    pub(in super::super) kind: OpenAIResponsesEventKind,
     pub(in super::super) usage: UpstreamResponseUsage,
     pub(in super::super) terminal: Option<SseTerminal>,
     pub(in super::super) upstream_error_hint: Option<String>,
@@ -88,10 +89,26 @@ impl OpenAIResponsesEvent {
 
         Some(Self {
             event_type,
+            kind,
             usage,
             terminal,
             upstream_error_hint,
         })
+    }
+
+    pub(in super::super) fn has_incremental_output_text(&self) -> bool {
+        matches!(self.kind, OpenAIResponsesEventKind::OutputTextDelta)
+            || self.event_type.as_deref() == Some("response.content_part.delta")
+    }
+
+    pub(in super::super) fn has_output_text_snapshot(&self) -> bool {
+        matches!(
+            self.kind,
+            OpenAIResponsesEventKind::Completed
+                | OpenAIResponsesEventKind::Done
+                | OpenAIResponsesEventKind::OutputTextDone
+                | OpenAIResponsesEventKind::OutputItemDone
+        ) || self.event_type.as_deref() == Some("response.content_part.done")
     }
 }
 
