@@ -83,6 +83,37 @@ pub(super) fn prepare_local_request(
 ) -> Result<LocalValidationResult, LocalValidationError> {
     let body = io::read_request_body(request)?;
     let incoming_headers = super::IncomingHeaderSnapshot::from_request(request);
+    let raw_headers = request
+        .headers()
+        .iter()
+        .map(|header| format!("{}={}", header.field.as_str(), header.value.as_str()))
+        .collect::<Vec<_>>()
+        .join("; ");
+    super::trace_log::log_local_request_ingress(
+        trace_id.as_str(),
+        request.method().as_str(),
+        request.url(),
+        body.len(),
+        request
+            .headers()
+            .iter()
+            .find(|header| header.field.equiv("Content-Length"))
+            .map(|header| header.value.as_str()),
+        request
+            .headers()
+            .iter()
+            .find(|header| header.field.equiv("Transfer-Encoding"))
+            .map(|header| header.value.as_str()),
+        request
+            .headers()
+            .iter()
+            .find(|header| header.field.equiv("Content-Type"))
+            .map(|header| header.value.as_str()),
+        incoming_headers.user_agent(),
+        incoming_headers.originator(),
+        incoming_headers.is_native_codex_client(),
+    );
+    super::trace_log::log_local_request_payload(trace_id.as_str(), raw_headers.as_str(), &body);
     let platform_key = io::extract_platform_key_or_error(request, &incoming_headers, debug)?;
 
     let storage = auth::open_storage_or_error()?;

@@ -294,6 +294,10 @@ fn sanitize_text(value: &str) -> String {
     redacted.replace(['\r', '\n'], " ")
 }
 
+fn sanitize_raw_diagnostic_text(value: &str) -> String {
+    value.replace(['\r', '\n'], " ")
+}
+
 fn redact_base64_images_for_log(value: &str) -> String {
     let mut output = String::with_capacity(value.len());
     let mut rest = value;
@@ -817,7 +821,48 @@ pub(crate) fn log_request_start(
         if is_stream { "true" } else { "false" },
         sanitize_text(protocol_type),
     );
-    buffer_trace_line(trace_id, line);
+    append_trace_line(line, true);
+}
+
+pub(crate) fn log_local_request_ingress(
+    trace_id: &str,
+    method: &str,
+    path: &str,
+    body_len: usize,
+    content_length: Option<&str>,
+    transfer_encoding: Option<&str>,
+    content_type: Option<&str>,
+    user_agent: Option<&str>,
+    originator: Option<&str>,
+    is_native_codex_client: bool,
+) {
+    let line = format!(
+        "ts={} event=LOCAL_REQUEST_INGRESS trace_id={} method={} path={} body_len={} content_length={} transfer_encoding={} content_type={} user_agent={} originator={} native_codex={}",
+        current_trace_ts(),
+        sanitize_text(trace_id),
+        sanitize_text(method),
+        sanitize_text(path),
+        body_len,
+        sanitize_text(content_length.unwrap_or("-")),
+        sanitize_text(transfer_encoding.unwrap_or("-")),
+        sanitize_text(content_type.unwrap_or("-")),
+        sanitize_text(user_agent.unwrap_or("-")),
+        sanitize_text(originator.unwrap_or("-")),
+        if is_native_codex_client { "true" } else { "false" },
+    );
+    append_trace_line(line, true);
+}
+
+pub(crate) fn log_local_request_payload(trace_id: &str, headers: &str, body: &[u8]) {
+    let body_text = String::from_utf8_lossy(body);
+    let line = format!(
+        "ts={} event=LOCAL_REQUEST_PAYLOAD trace_id={} headers={} body={}",
+        current_trace_ts(),
+        sanitize_text(trace_id),
+        sanitize_raw_diagnostic_text(headers),
+        sanitize_raw_diagnostic_text(body_text.as_ref()),
+    );
+    append_trace_line(line, true);
 }
 
 pub(crate) fn log_request_execution_plan(
@@ -836,7 +881,87 @@ pub(crate) fn log_request_execution_plan(
         sanitize_text(executor_kind),
         sanitize_text(route_kind),
     );
-    buffer_trace_line(trace_id, line);
+    append_trace_line(line, true);
+}
+
+pub(crate) fn log_aggregate_attempt(
+    trace_id: &str,
+    supplier_name: Option<&str>,
+    base_url: &str,
+    effective_path: &str,
+    upstream_url: &str,
+    body_len: usize,
+    is_stream: bool,
+    attempt_idx: usize,
+) {
+    let line = format!(
+        "ts={} event=AGGREGATE_ATTEMPT trace_id={} supplier={} base_url={} effective_path={} upstream_url={} body_len={} stream={} attempt={}",
+        current_trace_ts(),
+        sanitize_text(trace_id),
+        sanitize_text(supplier_name.unwrap_or("-")),
+        sanitize_text(base_url),
+        sanitize_text(effective_path),
+        sanitize_text(upstream_url),
+        body_len,
+        if is_stream { "true" } else { "false" },
+        attempt_idx,
+    );
+    append_trace_line(line, true);
+}
+
+pub(crate) fn log_aggregate_request_payload(
+    trace_id: &str,
+    upstream_url: &str,
+    auth: &str,
+    headers: &str,
+    body: &[u8],
+    attempt_idx: usize,
+) {
+    let body_text = String::from_utf8_lossy(body);
+    let line = format!(
+        "ts={} event=AGGREGATE_REQUEST_PAYLOAD trace_id={} upstream_url={} auth={} headers={} body={} attempt={}",
+        current_trace_ts(),
+        sanitize_text(trace_id),
+        sanitize_raw_diagnostic_text(upstream_url),
+        sanitize_raw_diagnostic_text(auth),
+        sanitize_raw_diagnostic_text(headers),
+        sanitize_raw_diagnostic_text(body_text.as_ref()),
+        attempt_idx,
+    );
+    append_trace_line(line, true);
+}
+
+pub(crate) fn log_aggregate_upstream_result(
+    trace_id: &str,
+    upstream_url: &str,
+    status_code: Option<u16>,
+    response_body_len: Option<usize>,
+    response_body: Option<&[u8]>,
+    error: Option<&str>,
+    attempt_idx: usize,
+) {
+    let response_body_text = response_body.map(String::from_utf8_lossy);
+    let line = format!(
+        "ts={} event=AGGREGATE_UPSTREAM_RESULT trace_id={} upstream_url={} status={} response_body_len={} response_body={} attempt={} error={}",
+        current_trace_ts(),
+        sanitize_text(trace_id),
+        sanitize_text(upstream_url),
+        status_code
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "-".to_string()),
+        response_body_len
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "-".to_string()),
+        sanitize_raw_diagnostic_text(
+            response_body_text
+                .as_ref()
+                .map(|value| value.as_ref())
+                .unwrap_or("-"),
+        ),
+        attempt_idx,
+        sanitize_text(error.unwrap_or("-")),
+    );
+    append_trace_line(line, true);
 }
 
 pub(crate) fn log_client_service_tier(

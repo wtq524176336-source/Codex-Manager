@@ -123,6 +123,53 @@ fn build_upstream_url(base_url: &str, effective_path: &str) -> Result<reqwest::U
     Ok(url)
 }
 
+fn upstream_url_for_log(url: &reqwest::Url) -> String {
+    url.to_string()
+}
+
+fn request_headers_for_log(request: &Request) -> String {
+    request
+        .headers()
+        .iter()
+        .map(|header| format!("{}={}", header.field.as_str(), header.value.as_str()))
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+fn aggregate_auth_for_log(secret: &str, auth_config: &AggregateApiAuthConfig) -> String {
+    let secret_trimmed = secret.trim();
+    match auth_config {
+        AggregateApiAuthConfig::ApiKeyDefaultBearer => {
+            format!("Authorization=Bearer {secret_trimmed}")
+        }
+        AggregateApiAuthConfig::ApiKeyHeader { name, format } => {
+            if format == "raw" {
+                format!("{name}={secret_trimmed}")
+            } else {
+                format!("{name}=Bearer {secret_trimmed}")
+            }
+        }
+        AggregateApiAuthConfig::ApiKeyQuery { name } => {
+            format!("query:{name}={secret_trimmed}")
+        }
+        AggregateApiAuthConfig::UserPassBasic => {
+            format!("basic={secret_trimmed}")
+        }
+        AggregateApiAuthConfig::UserPassHeaderPair {
+            username_name,
+            password_name,
+        } => {
+            format!("headers:{username_name}/{password_name}={secret_trimmed}")
+        }
+        AggregateApiAuthConfig::UserPassQueryPair {
+            username_name,
+            password_name,
+        } => {
+            format!("query:{username_name}/{password_name}={secret_trimmed}")
+        }
+    }
+}
+
 fn rewrite_body_model_override(body: &Bytes, model_override: Option<&str>) -> Bytes {
     let Some(model_override) = model_override
         .map(str::trim)
@@ -953,12 +1000,38 @@ pub(in super::super) fn proxy_aggregate_request(
                 _ => {}
             }
 
+            let rewritten_body =
+                rewrite_body_for_aggregate_api(body, candidate.model_override.as_deref());
+            let upstream_url_log = upstream_url_for_log(&url);
+            let request_headers_log = request_headers_for_log(
+                request.as_ref().expect("request should still be available"),
+            );
+            let auth_log = aggregate_auth_for_log(secret.as_str(), &auth_config);
+            super::super::super::trace_log::log_aggregate_attempt(
+                trace_id,
+                candidate_supplier_name.as_deref(),
+                candidate_url.as_str(),
+                effective_path.as_str(),
+                upstream_url_log.as_str(),
+                rewritten_body.len(),
+                is_stream,
+                attempt_idx,
+            );
+            super::super::super::trace_log::log_aggregate_request_payload(
+                trace_id,
+                upstream_url_log.as_str(),
+                auth_log.as_str(),
+                request_headers_log.as_str(),
+                rewritten_body.as_ref(),
+                attempt_idx,
+            );
+
             let builder = build_aggregate_api_request(
                 &client,
                 request.as_ref().expect("request should still be available"),
                 method,
                 url.clone(),
-                &rewrite_body_for_aggregate_api(body, candidate.model_override.as_deref()),
+                &rewritten_body,
                 secret.as_str(),
                 &auth_config,
                 &injected_headers,
@@ -985,7 +1058,16 @@ pub(in super::super) fn proxy_aggregate_request(
                         true,
                     );
                     let message = format!("aggregate api upstream error: {err}");
-                    last_attempt_url = Some(url.as_str().to_string());
+                    super::super::super::trace_log::log_aggregate_upstream_result(
+                        trace_id,
+                        upstream_url_log.as_str(),
+                        None,
+                        None,
+                        None,
+                        Some(message.as_str()),
+                        attempt_idx,
+                    );
+                    last_attempt_url = Some(upstream_url_log.clone());
                     last_attempt_supplier_name = candidate_supplier_name.clone();
                     last_attempt_error = Some(message);
                     last_failure_status = 502;
@@ -1018,7 +1100,16 @@ pub(in super::super) fn proxy_aggregate_request(
                     upstream_auth_error.as_deref(),
                     upstream_identity_error_code.as_deref(),
                 );
-                last_attempt_url = Some(url.as_str().to_string());
+                super::super::super::trace_log::log_aggregate_upstream_result(
+                    trace_id,
+                    upstream_url_log.as_str(),
+                    Some(status_code),
+                    Some(upstream_body.len()),
+                    Some(upstream_body.as_ref()),
+                    Some(message.as_str()),
+                    attempt_idx,
+                );
+                last_attempt_url = Some(upstream_url_log.clone());
                 last_attempt_supplier_name = candidate_supplier_name.clone();
                 last_attempt_error = Some(message);
                 last_failure_status = 502;
@@ -1028,6 +1119,15 @@ pub(in super::super) fn proxy_aggregate_request(
                 break;
             }
 
+            super::super::super::trace_log::log_aggregate_upstream_result(
+                trace_id,
+                upstream_url_log.as_str(),
+                Some(upstream.status().as_u16()),
+                None,
+                None,
+                None,
+                attempt_idx,
+            );
             let inflight_guard = super::super::super::acquire_account_inflight(key_id);
             let passthrough_sse_protocol =
                 resolve_passthrough_sse_protocol(&candidate, path, response_adapter);
