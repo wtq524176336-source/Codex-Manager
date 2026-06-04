@@ -3,6 +3,7 @@ use codexmanager_core::storage::{AggregateApi, Storage};
 use reqwest::header::{HeaderName, HeaderValue};
 use serde::Deserialize;
 use std::collections::HashSet;
+use std::io::Cursor;
 use std::time::Instant;
 use tiny_http::Request;
 
@@ -127,10 +128,11 @@ fn upstream_url_for_log(url: &reqwest::Url) -> String {
     url.to_string()
 }
 
-fn request_headers_for_log(request: &Request) -> String {
+fn request_headers_for_log(request: &Request, skip_content_encoding: bool) -> String {
     request
         .headers()
         .iter()
+        .filter(|header| !(skip_content_encoding && header.field.equiv("Content-Encoding")))
         .map(|header| format!("{}={}", header.field.as_str(), header.value.as_str()))
         .collect::<Vec<_>>()
         .join("; ")
@@ -199,8 +201,22 @@ fn rewrite_body_model_override(body: &Bytes, model_override: Option<&str>) -> By
         .unwrap_or_else(|_| body.clone())
 }
 
-fn strip_image_generation_tool_when_disabled(body: &Bytes) -> Bytes {
-    if crate::gateway::runtime_config::codex_image_generation_enabled() {
+fn request_uses_zstd_encoding(request: &Request) -> bool {
+    request.headers().iter().any(|header| {
+        header.field.equiv("Content-Encoding")
+            && header
+                .value
+                .as_str()
+                .split(',')
+                .any(|value| value.trim().eq_ignore_ascii_case("zstd"))
+    })
+}
+
+fn strip_image_generation_tool_when_aggregate_unsupported(body: &Bytes) -> Bytes {
+    let image_generation_passthrough_enabled =
+        crate::gateway::runtime_config::codex_image_generation_enabled()
+            && crate::gateway::runtime_config::codex_image_generation_third_party_auto_inject_tool_enabled();
+    if image_generation_passthrough_enabled {
         return body.clone();
     }
     let Ok(mut value) = serde_json::from_slice::<Value>(body.as_ref()) else {
@@ -242,9 +258,29 @@ fn strip_image_generation_tool_when_disabled(body: &Bytes) -> Bytes {
         .unwrap_or_else(|_| body.clone())
 }
 
-fn rewrite_body_for_aggregate_api(body: &Bytes, model_override: Option<&str>) -> Bytes {
+fn rewrite_decoded_body_for_aggregate_api(body: &Bytes, model_override: Option<&str>) -> Bytes {
     let rewritten = rewrite_body_model_override(body, model_override);
-    strip_image_generation_tool_when_disabled(&rewritten)
+    strip_image_generation_tool_when_aggregate_unsupported(&rewritten)
+}
+
+fn rewrite_body_for_aggregate_api(
+    request: &Request,
+    body: &Bytes,
+    model_override: Option<&str>,
+) -> (Bytes, bool) {
+    if request_uses_zstd_encoding(request) {
+        let Ok(decoded) = zstd::stream::decode_all(Cursor::new(body.as_ref())) else {
+            return (body.clone(), false);
+        };
+        let decoded_body = Bytes::from(decoded);
+        let rewritten_decoded =
+            rewrite_decoded_body_for_aggregate_api(&decoded_body, model_override);
+        return (rewritten_decoded, true);
+    }
+    (
+        rewrite_decoded_body_for_aggregate_api(body, model_override),
+        false,
+    )
 }
 
 fn replace_query_param(mut url: reqwest::Url, name: &str, value: &str) -> reqwest::Url {
@@ -439,8 +475,12 @@ fn should_skip_forward_header_for_aggregate_request(
     name: &str,
     injected: &HashSet<String>,
     is_stream: bool,
+    skip_content_encoding: bool,
 ) -> bool {
     if should_skip_forward_header_with_overrides(name, injected) {
+        return true;
+    }
+    if skip_content_encoding && normalize_header_key(name) == "content-encoding" {
         return true;
     }
     is_stream && normalize_header_key(name) == "accept"
@@ -663,6 +703,7 @@ fn build_aggregate_api_request(
     secret: &str,
     auth_config: &AggregateApiAuthConfig,
     injected_headers: &HashSet<String>,
+    skip_content_encoding: bool,
     request_deadline: Option<Instant>,
     is_stream: bool,
 ) -> Result<reqwest::blocking::RequestBuilder, String> {
@@ -678,6 +719,7 @@ fn build_aggregate_api_request(
             header.field.as_str().into(),
             injected_headers,
             is_stream,
+            skip_content_encoding,
         ) {
             continue;
         }
@@ -1000,12 +1042,14 @@ pub(in super::super) fn proxy_aggregate_request(
                 _ => {}
             }
 
-            let rewritten_body =
-                rewrite_body_for_aggregate_api(body, candidate.model_override.as_deref());
-            let upstream_url_log = upstream_url_for_log(&url);
-            let request_headers_log = request_headers_for_log(
-                request.as_ref().expect("request should still be available"),
+            let request_ref = request.as_ref().expect("request should still be available");
+            let (rewritten_body, skip_content_encoding) = rewrite_body_for_aggregate_api(
+                request_ref,
+                body,
+                candidate.model_override.as_deref(),
             );
+            let upstream_url_log = upstream_url_for_log(&url);
+            let request_headers_log = request_headers_for_log(request_ref, skip_content_encoding);
             let auth_log = aggregate_auth_for_log(secret.as_str(), &auth_config);
             super::super::super::trace_log::log_aggregate_attempt(
                 trace_id,
@@ -1028,13 +1072,14 @@ pub(in super::super) fn proxy_aggregate_request(
 
             let builder = build_aggregate_api_request(
                 &client,
-                request.as_ref().expect("request should still be available"),
+                request_ref,
                 method,
                 url.clone(),
                 &rewritten_body,
                 secret.as_str(),
                 &auth_config,
                 &injected_headers,
+                skip_content_encoding,
                 request_deadline,
                 is_stream,
             )?;
@@ -1412,11 +1457,19 @@ mod bridge_tests {
             "Accept",
             &injected_headers,
             true,
+            false,
         ));
         assert!(!should_skip_forward_header_for_aggregate_request(
             "Accept",
             &injected_headers,
             false,
+            false,
+        ));
+        assert!(should_skip_forward_header_for_aggregate_request(
+            "Content-Encoding",
+            &injected_headers,
+            false,
+            true,
         ));
     }
 
@@ -1586,7 +1639,7 @@ mod tests {
             br#"{"model":"gpt-5.4","tools":[{"type":"image_generation"},{"type":"web_search_preview"}],"tool_choice":{"type":"image_generation"},"input":"hello"}"#,
         );
 
-        let rewritten = rewrite_body_for_aggregate_api(&body, None);
+        let rewritten = rewrite_decoded_body_for_aggregate_api(&body, None);
 
         let value: serde_json::Value =
             serde_json::from_slice(rewritten.as_ref()).expect("parse rewritten body");
@@ -1599,6 +1652,45 @@ mod tests {
             std::env::set_var("CODEXMANAGER_CODEX_IMAGE_GENERATION_ENABLED", value);
         } else {
             std::env::remove_var("CODEXMANAGER_CODEX_IMAGE_GENERATION_ENABLED");
+        }
+        crate::gateway::reload_runtime_config_from_env();
+    }
+
+    #[test]
+    fn aggregate_body_strips_image_generation_for_third_party_by_default() {
+        let _guard = crate::test_env_guard();
+        let previous_enabled = std::env::var("CODEXMANAGER_CODEX_IMAGE_GENERATION_ENABLED").ok();
+        let previous_third_party =
+            std::env::var("CODEXMANAGER_CODEX_IMAGE_GENERATION_THIRD_PARTY_AUTO_INJECT_TOOL").ok();
+        std::env::remove_var("CODEXMANAGER_CODEX_IMAGE_GENERATION_ENABLED");
+        std::env::remove_var("CODEXMANAGER_CODEX_IMAGE_GENERATION_THIRD_PARTY_AUTO_INJECT_TOOL");
+        crate::gateway::reload_runtime_config_from_env();
+        let body = Bytes::from_static(
+            br#"{"model":"gpt-5.4","tools":[{"type":"image_generation"},{"type":"web_search_preview"}],"input":"hello"}"#,
+        );
+
+        let rewritten = rewrite_decoded_body_for_aggregate_api(&body, None);
+
+        let value: serde_json::Value =
+            serde_json::from_slice(rewritten.as_ref()).expect("parse rewritten body");
+        let tools = value["tools"].as_array().expect("tools array");
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["type"], "web_search_preview");
+
+        if let Some(value) = previous_enabled {
+            std::env::set_var("CODEXMANAGER_CODEX_IMAGE_GENERATION_ENABLED", value);
+        } else {
+            std::env::remove_var("CODEXMANAGER_CODEX_IMAGE_GENERATION_ENABLED");
+        }
+        if let Some(value) = previous_third_party {
+            std::env::set_var(
+                "CODEXMANAGER_CODEX_IMAGE_GENERATION_THIRD_PARTY_AUTO_INJECT_TOOL",
+                value,
+            );
+        } else {
+            std::env::remove_var(
+                "CODEXMANAGER_CODEX_IMAGE_GENERATION_THIRD_PARTY_AUTO_INJECT_TOOL",
+            );
         }
         crate::gateway::reload_runtime_config_from_env();
     }
