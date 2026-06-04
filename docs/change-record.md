@@ -1,5 +1,37 @@
 # 变更记录
 
+## 2026-06-04 项目协作提示词优化
+
+### 需求
+
+根据用户提供的项目协作规则，优化根目录 `AGENTS.md`，让规则更清晰、可执行，并统一指向 `docs/change-record.md` 作为需求、变更和项目知识记录文件。
+
+### 依据
+
+用户在 2026-06-04 明确提供以下要求：
+
+| 要求 | 处理 |
+| --- | --- |
+| 记录写入 `docs/change-record.md` | 改为项目相对路径，避免 Windows/WSL 路径差异 |
+| MD 内容不能猜测，必须有确实依据 | 增加记录依据要求和待验证处理方式 |
+| 发现旧 MD 内容有问题允许修改 | 增加可修正规则 |
+| 排查依靠日志和 Codex CLI 官方源码 | 增加排查依据优先级 |
+| 不确认就新增日志后复现 | 增加最小诊断日志规则 |
+| 尽可能删除废弃和无效兜底代码 | 增加代码清理要求和询问边界 |
+
+### 修复
+
+- 将原本散落的口语规则整理为 `记录要求`、`排查要求`、`代码清理要求` 三组。
+- 将绝对路径改为项目相对路径 `docs/change-record.md`。
+- 明确 `docs/change-record.md` 只能记录有依据的结论，不能记录猜测。
+- 明确不确定时优先补最小诊断日志，等待用户重新发版复现。
+- 明确可删除已确认无效的废弃兼容和兜底逻辑，不确定时先询问用户。
+
+### 影响范围
+
+- 根目录 `AGENTS.md`。
+- 本变更记录文件。
+
 ## 2026-06-04 聚合 API 连续对话缓存偶发失效
 
 ### 需求
@@ -47,10 +79,10 @@ flowchart TD
 
 ### 修复
 
-- 将 `prompt_cache_key` 加入 `/v1/responses` 官方字段白名单。
+- 将当前官方 `/v1/responses` 请求体字段补齐到官方字段白名单，包括 `background`、`conversation`、`max_tool_calls`、`prompt`、`prompt_cache_key`、`prompt_cache_retention`、`safety_identifier`、`stream_options`、`top_logprobs`。
 - 聚合 API 不再根据 header 猜测并注入新的 `prompt_cache_key`。
 - 增加 `AGGREGATE_PROMPT_CACHE_KEY` 诊断日志，只记录字段来源状态和指纹。
-- 增加覆盖用例，验证严格字段过滤开启时仍保留官方 body 中的 `prompt_cache_key`。
+- 增加覆盖用例，验证严格字段过滤开启时仍保留官方 body 字段，同时继续删除非官方字段。
 
 ### 影响范围
 

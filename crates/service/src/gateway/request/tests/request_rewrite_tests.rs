@@ -1226,6 +1226,84 @@ fn responses_official_allowlist_drops_stream_passthrough() {
     assert!(value.get("unknown_field").is_none());
 }
 
+#[test]
+fn responses_official_allowlist_preserves_prompt_cache_key() {
+    let _guard = crate::test_env_guard();
+    let _strict_guard = RuntimeEnvGuard::set(STRICT_REQUEST_PARAM_ALLOWLIST_ENV, "true");
+    let body = json!({
+        "background": false,
+        "conversation": "conv_123",
+        "model": "gpt-5.5",
+        "input": "hello",
+        "max_tool_calls": 8,
+        "prompt": {
+            "id": "pmpt_123",
+            "variables": {
+                "topic": "cache"
+            }
+        },
+        "prompt_cache_key": "official_cli_thread_1",
+        "prompt_cache_retention": "24h",
+        "safety_identifier": "user_hash",
+        "stream_options": {
+            "include_obfuscation": false
+        },
+        "top_logprobs": 2,
+        "unknown_field": "drop-me"
+    });
+    let out = apply_request_overrides(
+        "/v1/responses",
+        serde_json::to_vec(&body).expect("serialize request body"),
+        None,
+        None,
+        Some("https://api.openai.com/v1"),
+    );
+    let value: serde_json::Value = serde_json::from_slice(&out).expect("parse output body");
+    assert_eq!(
+        value
+            .get("prompt_cache_key")
+            .and_then(serde_json::Value::as_str),
+        Some("official_cli_thread_1")
+    );
+    assert_eq!(
+        value.get("background").and_then(serde_json::Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        value
+            .get("conversation")
+            .and_then(serde_json::Value::as_str),
+        Some("conv_123")
+    );
+    assert_eq!(
+        value
+            .get("max_tool_calls")
+            .and_then(serde_json::Value::as_i64),
+        Some(8)
+    );
+    assert!(value.get("prompt").is_some());
+    assert_eq!(
+        value
+            .get("prompt_cache_retention")
+            .and_then(serde_json::Value::as_str),
+        Some("24h")
+    );
+    assert_eq!(
+        value
+            .get("safety_identifier")
+            .and_then(serde_json::Value::as_str),
+        Some("user_hash")
+    );
+    assert!(value.get("stream_options").is_some());
+    assert_eq!(
+        value
+            .get("top_logprobs")
+            .and_then(serde_json::Value::as_i64),
+        Some(2)
+    );
+    assert!(value.get("unknown_field").is_none());
+}
+
 /// 函数 `responses_dynamic_tools_are_mapped_to_tools_for_codex_backend`
 ///
 /// 作者: gaohongshun
