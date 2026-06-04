@@ -52,6 +52,8 @@
 - 平台密钥 profile 只允许 `codex/openai_compat/authorization_bearer`，新增迁移会把存量 profile 归一到该组合，同时保留 `upstream_base_url` 和 `static_headers_json`。依据：`crates/core/migrations/057_api_key_profiles_openai_only.sql:6`、`crates/core/migrations/057_api_key_profiles_openai_only.sql:36`
 - 创建和编辑平台密钥继续保存并沿用 `upstreamBaseUrl`、`staticHeadersJson`，账号模式上游解析仍优先读取平台密钥 `upstream_base_url`，否则读取运行时全局上游配置。依据：`crates/service/src/apikey/apikey_create.rs:44`、`crates/service/src/apikey/apikey_update_model.rs:101`、`crates/service/src/gateway/mod.rs:919`
 - 本地校验结果携带已解析的 `upstream_base`，账号候选准备阶段沿用该值计算上游 URL 和 fallback URL，避免重新读取全局上游覆盖平台密钥自定义上游。依据：`crates/service/src/gateway/local_validation/mod.rs:19`、`crates/service/src/gateway/local_validation/request.rs:1235`、`crates/service/src/gateway/upstream/proxy.rs:560`、`crates/service/src/gateway/upstream/proxy_pipeline/request_setup.rs:30`
+- 删除 Claude/Gemini 响应转换后，流式上游兼容分支仍会把 `tool_name_restore_map` 传入成功响应转换函数，因此该参数不能加未使用前缀。依据：`crates/service/src/gateway/observability/http_bridge/delivery.rs:1951`、`crates/service/src/gateway/observability/http_bridge/delivery.rs:2035`
+- 删除旧 stream reader 后，`stream_readers.rs` 顶层只保留现存子模块仍通过 `super::` 使用的桥接导入。依据：`crates/service/src/gateway/observability/http_bridge/stream_readers.rs:4`
 
 ### 修复
 
@@ -65,6 +67,8 @@
 - 平台密钥协议只保留 OpenAI/Codex 兼容；旧 native profile 值不再允许写入。
 - 账号模式上游不固定官方地址，仍按平台密钥自定义上游或运行时全局上游配置解析。
 - 账号模式 HTTP 候选请求不再在候选准备阶段重新解析全局上游，而是复用本地校验阶段解析出的平台密钥有效上游。
+- 修复删除旧响应转换后 `respond_with_stream_upstream` 中 `tool_name_restore_map` 参数名不一致导致的编译错误。
+- 清理删除旧链路后遗留的未使用导入、未使用 re-export 和无用局部变量。
 
 ### 影响范围
 
@@ -212,3 +216,32 @@ response.completed
 - 服务端请求日志输出内容采集。
 - `/v1/responses` passthrough SSE 流。
 - 前端详情弹窗仅显示后端字段，本次未修改前端展示逻辑。
+
+## 2026-06-04 切换聚合 API 后旧 WebSocket 仍走账号模式
+
+### 需求
+
+排查对话进行到一半时，将平台密钥从账号模式切换为聚合 API 模式后继续请求，请求日志仍显示账号模式的问题，并确认是日志错误还是实际仍在走账号模式。
+
+### 结论
+
+| 链路 | 已确认行为 | 依据 |
+| --- | --- | --- |
+| 普通 HTTP 请求 | 每次请求都会重新读取平台密钥配置；切到 `aggregate_api_rotation` 后会进入聚合 API 分支，不会因为旧会话绑定继续强制走账号池。 | `crates/service/src/gateway/local_validation/mod.rs:118`、`crates/service/src/gateway/local_validation/request.rs:1342` |
+| 本机 HTTP 近期日志 | 本机 `gateway-trace.log` 中已出现 `/v1/responses` 的 `route_kind=aggregate_api` 和 `AGGREGATE_ATTEMPT`，说明普通 HTTP 链路已实际走聚合 API。 | `/mnt/c/Users/52417/AppData/Roaming/com.codexmanager.desktop/gateway-trace.log` |
+| Responses WebSocket | 握手阶段会把当时的平台密钥配置保存进 `WsRequestContext`，且该链路只支持官方账号 WebSocket；后续同一条连接里的帧继续使用握手时的账号上游。 | `crates/service/src/http/responses_websocket.rs:56`、`crates/service/src/http/responses_websocket.rs:640`、`crates/service/src/http/responses_websocket.rs:1109` |
+
+因此，如果请求是普通 HTTP，请求日志仍显示账号模式通常要继续看日志字段或具体记录；但如果请求来自切换前已经建立的 Responses WebSocket 长连接，则不是单纯日志错误，实际请求也仍在走握手时的账号模式。
+
+### 修复
+
+- 在 Responses WebSocket 首帧发往上游前，重新读取当前平台密钥配置并校验是否仍支持账号 WebSocket。
+- 在 Responses WebSocket 后续文本帧和二进制帧发往上游前，继续执行同样校验。
+- 如果平台密钥已经切换到聚合 API 或其他不支持 WebSocket 的模式，返回 `responses_websocket_route_changed` 错误并关闭旧连接，要求客户端重新发起请求，避免继续把新请求发到旧账号上游。
+- 新增 `responses_ws_route_changed` 诊断日志，记录初始模式、当前模式、当前协议和当前有效上游。
+
+### 影响范围
+
+- 仅影响 Responses WebSocket 长连接。
+- 不改变普通 HTTP 聚合 API 路由。
+- 不新增前端展示逻辑。

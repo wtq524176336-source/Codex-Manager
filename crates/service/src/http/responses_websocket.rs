@@ -30,6 +30,7 @@ use crate::http::proxy_response::{text_error_response, text_response};
 use crate::storage_helpers::{hash_platform_key, open_storage};
 
 const RESPONSES_WS_ERROR_CODE: &str = "responses_websocket_error";
+const RESPONSES_WS_ROUTE_CHANGED_CODE: &str = "responses_websocket_route_changed";
 const RESPONSES_COMPACT_ENDPOINT: &str = "/v1/responses/compact";
 const CODEX_COMPACT_SUBAGENT: &str = "compact";
 const TURN_METADATA_COMPACTION_REQUEST_KIND: &str = "compaction";
@@ -243,6 +244,10 @@ async fn run_responses_websocket_session(mut socket: WebSocket, context: WsReque
             return;
         }
     };
+    if let Err(err) = ensure_current_websocket_route(&context) {
+        send_ws_error_and_close(&mut socket, err, context.prefer_raw_errors).await;
+        return;
+    }
 
     let mut upstream = match connect_upstream_websocket(&context).await {
         Ok(stream) => stream,
@@ -302,6 +307,11 @@ async fn run_responses_websocket_session(mut socket: WebSocket, context: WsReque
                 };
                 match client_result {
                     Ok(Message::Text(text)) => {
+                        if let Err(err) = ensure_current_websocket_route(&context) {
+                            send_ws_error_and_close(&mut socket, err, context.prefer_raw_errors).await;
+                            let _ = upstream.stream.close(None).await;
+                            break;
+                        }
                         match rewrite_client_frame(text.as_str(), &context) {
                             Ok(prepared) => {
                                 if let Some(previous_pending) = pending_request.take() {
@@ -373,6 +383,11 @@ async fn run_responses_websocket_session(mut socket: WebSocket, context: WsReque
                         let _ = upstream.stream.send(UpstreamMessage::Pong(payload)).await;
                     }
                     Ok(Message::Binary(bytes)) => {
+                        if let Err(err) = ensure_current_websocket_route(&context) {
+                            send_ws_error_and_close(&mut socket, err, context.prefer_raw_errors).await;
+                            let _ = upstream.stream.close(None).await;
+                            break;
+                        }
                         if let Err(err) = upstream.stream.send(UpstreamMessage::Binary(bytes)).await {
                             send_ws_error_and_close(
                                 &mut socket,
@@ -498,6 +513,64 @@ async fn run_responses_websocket_session(mut socket: WebSocket, context: WsReque
             }
         }
     }
+}
+
+fn ensure_current_websocket_route(context: &WsRequestContext) -> Result<(), WsSessionError> {
+    let storage = open_storage().ok_or_else(|| {
+        WsSessionError::service_unavailable_bilingual("存储不可用", "storage unavailable")
+    })?;
+    let current = storage
+        .find_api_key_by_id(context.api_key.id.as_str())
+        .map_err(|err| {
+            WsSessionError::service_unavailable_bilingual(
+                "读取平台密钥失败",
+                format!("load platform api key failed: {err}"),
+            )
+        })?
+        .ok_or_else(|| {
+            WsSessionError::bad_request_bilingual(
+                "平台 API Key 不存在",
+                "platform api key not found",
+            )
+        })?;
+    if current.key_hash != context.api_key.key_hash {
+        return Err(WsSessionError::bad_request_bilingual(
+            "平台 API Key 已变更",
+            "platform api key has changed",
+        ));
+    }
+    if crate::gateway::gateway_supports_official_responses_websocket(&current) {
+        return Ok(());
+    }
+
+    let current_upstream = crate::gateway::gateway_resolve_effective_upstream_base(&current);
+    log::warn!(
+        "event=responses_ws_route_changed api_key_id={} initial_rotation_strategy={} current_rotation_strategy={} current_protocol_type={} current_upstream_base={}",
+        context.api_key.id.as_str(),
+        context.api_key.rotation_strategy.as_str(),
+        current.rotation_strategy.as_str(),
+        current.protocol_type.as_str(),
+        current_upstream.as_str()
+    );
+    let message = if current.rotation_strategy != context.api_key.rotation_strategy {
+        crate::gateway::bilingual_error(
+            "平台密钥模式已切换，请重新发起请求",
+            format!(
+                "api key rotation strategy changed from {} to {}",
+                context.api_key.rotation_strategy, current.rotation_strategy
+            ),
+        )
+    } else {
+        crate::gateway::bilingual_error(
+            "平台密钥当前不支持 Responses WebSocket，请重新发起请求",
+            "responses websocket is no longer available for current api key",
+        )
+    };
+    Err(WsSessionError::new(
+        426,
+        RESPONSES_WS_ROUTE_CHANGED_CODE,
+        message,
+    ))
 }
 
 fn client_close_frame_to_upstream(frame: ClientCloseFrame) -> UpstreamCloseFrame {
