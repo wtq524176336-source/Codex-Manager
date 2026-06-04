@@ -1020,6 +1020,10 @@ fn is_native_codex_client_request(incoming_headers: &super::super::IncomingHeade
     incoming_headers.is_native_codex_client()
 }
 
+fn should_use_transparent_account_mode(native_codex_client: bool, rotation_strategy: &str) -> bool {
+    native_codex_client && rotation_strategy != ROTATION_AGGREGATE_API
+}
+
 fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
     !needle.is_empty()
         && haystack.len() >= needle.len()
@@ -1278,7 +1282,10 @@ pub(super) fn build_local_validation_result(
     );
     let initial_request_meta = super::super::parse_request_metadata(&body);
     let native_codex_client = is_native_codex_client_request(&incoming_headers);
-    let transparent_mode = native_codex_client;
+    let transparent_mode = should_use_transparent_account_mode(
+        native_codex_client,
+        api_key.rotation_strategy.as_str(),
+    );
     log::debug!(
         "event=gateway_client_profile trace_id={} path={} originator={} user_agent={} session_affinity={} native_codex={}",
         trace_id.as_str(),

@@ -528,6 +528,22 @@ fn native_codex_client_detection_uses_codex_signals_instead_of_client_brand() {
 }
 
 #[test]
+fn native_codex_client_is_transparent_only_for_account_mode() {
+    assert!(should_use_transparent_account_mode(
+        true,
+        crate::apikey_profile::ROTATION_ACCOUNT,
+    ));
+    assert!(!should_use_transparent_account_mode(
+        true,
+        crate::apikey_profile::ROTATION_AGGREGATE_API,
+    ));
+    assert!(!should_use_transparent_account_mode(
+        false,
+        crate::apikey_profile::ROTATION_ACCOUNT,
+    ));
+}
+
+#[test]
 fn openai_responses_api_clients_use_codex_compat_rewrite_but_native_codex_does_not() {
     assert!(allow_codex_compat_rewrite_for_client(
         crate::apikey_profile::PROTOCOL_OPENAI_COMPAT,
