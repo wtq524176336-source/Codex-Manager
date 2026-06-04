@@ -604,6 +604,7 @@ pub(crate) fn retain_official_fields(path: &str, obj: &mut Map<String, Value>) -
             "metadata",
             "model",
             "parallel_tool_calls",
+            "prompt_cache_key",
             "previous_response_id",
             "reasoning",
             "service_tier",

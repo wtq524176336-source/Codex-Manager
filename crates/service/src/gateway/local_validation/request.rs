@@ -1438,14 +1438,15 @@ pub(super) fn build_local_validation_result(
             aggregate_decoded_zstd,
             aggregate_decode_note,
         );
+        let aggregate_pre_rewrite_meta = super::super::parse_request_metadata(&body);
         let (
             mut rewritten_body,
             model_for_log,
             reasoning_for_log,
             service_tier_for_log,
             effective_service_tier_for_log,
-            has_prompt_cache_key,
-            request_shape,
+            _has_prompt_cache_key,
+            _request_shape,
         ) = apply_passthrough_request_overrides(
             &normalized_path,
             body,
@@ -1459,6 +1460,32 @@ pub(super) fn build_local_validation_result(
         ) {
             rewritten_body = default_omitted_responses_stream_to_true(rewritten_body);
         }
+        let request_meta = super::super::parse_request_metadata(&rewritten_body);
+        let has_prompt_cache_key = request_meta.has_prompt_cache_key;
+        let prompt_cache_key_for_log = request_meta
+            .prompt_cache_key
+            .clone()
+            .or_else(|| aggregate_pre_rewrite_meta.prompt_cache_key.clone());
+        let request_shape = request_meta.request_shape;
+        let prompt_cache_key_source = match (
+            aggregate_pre_rewrite_meta.has_prompt_cache_key,
+            has_prompt_cache_key,
+        ) {
+            (true, true) => "client_body",
+            (true, false) => "dropped_by_rewrite",
+            (false, true) => "added_by_rewrite",
+            (false, false) => "missing",
+        };
+        super::super::trace_log::log_aggregate_prompt_cache_key_decision(
+            trace_id.as_str(),
+            normalized_path.as_str(),
+            native_codex_client,
+            prompt_cache_key_source,
+            aggregate_pre_rewrite_meta.has_prompt_cache_key,
+            has_prompt_cache_key,
+            prompt_cache_key_for_log.as_deref(),
+            initial_local_conversation_id.as_deref(),
+        );
         super::super::validate_text_input_limit_for_path(&normalized_path, &rewritten_body)
             .map_err(|err| LocalValidationError::new(400, err.message()))?;
         let incoming_headers = incoming_headers

@@ -1004,6 +1004,37 @@ pub(crate) fn log_aggregate_body_rewrite(
     append_trace_line(line, true);
 }
 
+pub(crate) fn log_aggregate_prompt_cache_key_decision(
+    trace_id: &str,
+    path: &str,
+    native_codex_client: bool,
+    source: &str,
+    before_has_prompt_cache_key: bool,
+    after_has_prompt_cache_key: bool,
+    prompt_cache_key: Option<&str>,
+    local_conversation_id: Option<&str>,
+) {
+    let prompt_cache_key_fp = prompt_cache_key
+        .map(short_fingerprint)
+        .unwrap_or_else(|| "-".to_string());
+    let local_conversation_fp = local_conversation_id
+        .map(short_fingerprint)
+        .unwrap_or_else(|| "-".to_string());
+    let line = format!(
+        "ts={} event=AGGREGATE_PROMPT_CACHE_KEY trace_id={} path={} native_codex={} source={} before_has_prompt_cache_key={} after_has_prompt_cache_key={} prompt_cache_key_fp={} local_conversation_fp={}",
+        current_trace_ts(),
+        sanitize_text(trace_id),
+        sanitize_text(path),
+        if native_codex_client { "true" } else { "false" },
+        sanitize_text(source),
+        if before_has_prompt_cache_key { "true" } else { "false" },
+        if after_has_prompt_cache_key { "true" } else { "false" },
+        sanitize_text(prompt_cache_key_fp.as_str()),
+        sanitize_text(local_conversation_fp.as_str()),
+    );
+    append_trace_line(line, true);
+}
+
 pub(crate) fn log_aggregate_request_payload(
     trace_id: &str,
     upstream_url: &str,
