@@ -2,7 +2,7 @@
 
 ## 记录要求
 
-- 变更记录、需求记录和项目知识统一写入 `docs/change-record.md`。
+- 变更记录、需求记录、项目知识以及其他需要留档的项目事实统一写入 `docs/change-record.md`。
 - 每次改动代码或记录用户需求，都要同步更新 `docs/change-record.md`。
 - `docs/change-record.md` 中的内容必须有明确依据，依据可以来自代码、日志、配置、数据库、截图、真实数据、官方文档或 Codex CLI 官方源码。
 - 禁止把猜测写入 `docs/change-record.md`。无法确认时先标记为待验证，或增加诊断日志后等待用户重新发版复现。

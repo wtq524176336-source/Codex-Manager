@@ -598,6 +598,7 @@ pub(crate) fn retain_official_fields(path: &str, obj: &mut Map<String, Value>) -
         obj,
         &[
             "background",
+            "client_metadata",
             "conversation",
             "include",
             "input",

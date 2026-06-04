@@ -1232,6 +1232,9 @@ fn responses_official_allowlist_preserves_prompt_cache_key() {
     let _strict_guard = RuntimeEnvGuard::set(STRICT_REQUEST_PARAM_ALLOWLIST_ENV, "true");
     let body = json!({
         "background": false,
+        "client_metadata": {
+            "x-codex-installation-id": "install-1"
+        },
         "conversation": "conv_123",
         "model": "gpt-5.5",
         "input": "hello",
@@ -1268,6 +1271,13 @@ fn responses_official_allowlist_preserves_prompt_cache_key() {
     assert_eq!(
         value.get("background").and_then(serde_json::Value::as_bool),
         Some(false)
+    );
+    assert_eq!(
+        value
+            .get("client_metadata")
+            .and_then(|metadata| metadata.get("x-codex-installation-id"))
+            .and_then(serde_json::Value::as_str),
+        Some("install-1")
     );
     assert_eq!(
         value
