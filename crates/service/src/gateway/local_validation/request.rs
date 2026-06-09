@@ -1532,22 +1532,10 @@ pub(super) fn build_local_validation_result(
                 super::super::ToolNameRestoreMap::default(),
             )
         } else {
-            let adapted = super::super::adapt_request_for_protocol(
-                effective_protocol_type.as_str(),
-                &normalized_path,
-                body,
-            )
-            .map_err(|err| {
-                LocalValidationError::new(
-                    400,
-                    crate::gateway::bilingual_error("请求协议适配失败", err),
-                )
-            })?;
-            body = adapted.body;
             (
-                adapted.path,
-                adapted.response_adapter,
-                adapted.tool_name_restore_map,
+                normalized_path.clone(),
+                super::super::ResponseAdapter::Passthrough,
+                super::super::ToolNameRestoreMap::default(),
             )
         };
     if should_adapt_openai_chat_completions_to_responses(
