@@ -228,7 +228,11 @@ async fn responses_handler(
     if request.method() == axum::http::Method::GET
         && crate::http::responses_websocket::is_websocket_upgrade_request(request.headers())
     {
-        return crate::http::responses_websocket::upgrade_responses_websocket(request).await;
+        return crate::http::responses_websocket::upgrade_responses_websocket(
+            request,
+            state.backend_base_url.clone(),
+        )
+        .await;
     }
     if request.method() == axum::http::Method::GET
         && request.uri().path() == "/v1/responses"
@@ -255,13 +259,9 @@ async fn responses_handler(
     }
     if request.method() == axum::http::Method::POST
         && request.uri().path() == "/v1/responses"
-        && crate::http::responses_websocket::should_reject_http_post_for_websocket_mode(
-            request.headers(),
-        )
+        && crate::http::responses_websocket::should_bridge_http_post_to_websocket(request.headers())
     {
-        return crate::http::responses_websocket::reject_http_post_for_websocket_mode(
-            request.headers(),
-        );
+        return crate::http::responses_websocket::bridge_http_post_to_websocket(request).await;
     }
     proxy_handler(State(state), request).await
 }

@@ -25,7 +25,7 @@
 - 创建和更新平台密钥时，`aggregate_api_id` 只在聚合 API 模式保存，`account_plan_filter` 只在账号模式保存。依据：`crates/service/src/apikey/apikey_create.rs:46`、`crates/service/src/apikey/apikey_create.rs:56`、`crates/service/src/apikey/apikey_update_model.rs:59`、`crates/service/src/apikey/apikey_update_model.rs:69`
 - 网关执行计划只剩账号轮转和聚合 API 两类；聚合 API 模式直接走聚合候选，账号模式走账号候选。依据：`crates/service/src/gateway/upstream/executor/mod.rs:9`、`crates/service/src/gateway/upstream/executor/mod.rs:20`、`crates/service/src/gateway/upstream/proxy.rs:299`、`crates/service/src/gateway/upstream/proxy.rs:308`
 - 账号透明模式只由“原生 Codex 客户端 + 账号策略”触发，聚合 API 策略不会进入账号透明模式。依据：`crates/service/src/gateway/local_validation/request.rs:961`、`crates/service/src/gateway/local_validation/request.rs:1253`、`crates/service/src/gateway/local_validation/request.rs:1341`
-- Responses WebSocket 支持只接受账号模式且上游为 ChatGPT 后端；聚合 API 模式不支持 WebSocket，会走 upgrade required / route changed 处理。依据：`crates/service/src/gateway/mod.rs:939`、`crates/service/src/http/responses_websocket.rs:683`
+- Responses WebSocket 官方账号上游只支持账号模式且上游为 ChatGPT 后端；原生 Codex 旧 WebSocket 在平台密钥切到聚合 API 后会由前端代理桥接到本地 HTTP 聚合链路。依据：`crates/service/src/gateway/mod.rs:939`、`crates/service/src/http/responses_websocket.rs:659`、`crates/service/src/http/responses_websocket.rs:957`
 - 账号候选预检查只保留 `Ready` 和 `Responded` 两种结果，旧混合兜底需要的空候选返回分支已移除；允许空候选仅用于原生 active turn replay 继续恢复绑定账号。依据：`crates/service/src/gateway/upstream/support/precheck.rs:4`、`crates/service/src/gateway/upstream/support/precheck.rs:93`、`crates/service/src/gateway/upstream/proxy.rs:358`
 - 上游执行器不再保留单一 executor 的枚举分发，账号候选执行直接进入 Codex Responses 执行器。依据：`crates/service/src/gateway/upstream/executor/mod.rs:37`、`crates/service/src/gateway/upstream/executor/mod.rs:62`、`crates/service/src/gateway/upstream/proxy_pipeline/candidate_attempt.rs:72`
 - 存量 `hybrid_rotation` 数据通过迁移改为 `account_rotation` 并清空 `aggregate_api_id`。依据：`crates/core/src/storage/mod.rs:649`、`crates/core/migrations/058_api_key_rotation_strategy_cleanup.sql:1`
@@ -48,33 +48,35 @@
 - 聚合 API 模式不再为 `/models` 请求切回账号候选。
 - 账号候选为空或账号耗尽时不再转入聚合 API 兜底。
 
-## 2026-06-09 聚合 API 旧对象切回账号模式仍走 HTTP POST
+## 2026-06-09 同一对话切换账号模式与聚合 API 模式
 
 ### 需求
 
-用户补充说明：一开始就是账号模式时走 WebSocket，一开始就是聚合 API 模式时走 HTTP POST，这两个行为符合预期；问题只发生在同一个旧 Codex 对象先以某个模式运行，中途切到另一种模式后仍沿用旧 transport。聚合 API 旧对象切到账号模式时不应继续 HTTP POST；账号模式旧对象切到聚合 API 时也不应继续 WebSocket。中途切断对话后再切换模式，应尽量等同于在当前模式下重新发起一个新请求。
+用户补充说明：一开始就是账号模式时走 WebSocket，一开始就是聚合 API 模式时走 HTTP POST，这两个行为符合预期；问题只发生在同一个旧 Codex 对象先以某个模式运行，中途切到另一种模式后仍沿用旧 transport。用户要求四条路线分开处理：账号模式 + WebSocket 走正常账号透明链路，聚合 API 模式 + HTTP POST 走正常聚合 API 链路，聚合 API 旧 HTTP 对象切到账号模式后继续对话，账号旧 WebSocket 对象切到聚合 API 模式后也要继续对话。
 
 ### 依据
 
 - 用户截图 `file:///C:/Users/52417/AppData/Local/PixPin/Temp/PixPin_2026-06-09_18-36-53.png` 显示 Codex 前端出现 `Stream disconnected before completion: stream closed before response.completed`。
 - 用户截图 `file:///C:/Users/52417/AppData/Local/PixPin/Temp/PixPin_2026-06-09_18-42-22.png` 显示切换前后请求日志中有账号请求 200，也有聚合 API 502。
+- 用户截图 `file:///C:/Users/52417/AppData/Local/PixPin/Temp/PixPin_2026-06-09_20-16-37.png` 明确四条路线：`账号模式 + WebSocket`、`账号模式 + HTTP POST`、`聚合 API 模式 + HTTP POST`、`聚合 API 模式 + WebSocket` 必须分开处理。
 - 本机数据库请求日志中，2026-06-09 18:36 到 18:39 多条账号请求上游为 `https://chatgpt.com/backend-api/codex/responses`，状态 200；对应 trace 仍记录 `request_type=http`、`route_kind=account_rotation`，说明旧对象切到账号模式后仍通过 HTTP POST 进入账号透明链路。依据：`/mnt/c/Users/52417/AppData/Roaming/com.codexmanager.desktop/codexmanager.db`、`/mnt/c/Users/52417/AppData/Roaming/com.codexmanager.desktop/gateway-trace.log`
 - 前端代理此前只有 `GET /v1/responses` 且带 WebSocket upgrade 头时才进入 Responses WebSocket 处理，普通 `POST /v1/responses` 会继续转发到后端 HTTP 网关。依据：`crates/service/src/http/proxy_runtime.rs:224`
 - 本地校验当前只在原生 Codex 且账号策略时进入透明账号模式；聚合 API 策略单独进入聚合 API 分支。依据：`crates/service/src/gateway/local_validation/request.rs:961`、`crates/service/src/gateway/local_validation/request.rs:1253`、`crates/service/src/gateway/local_validation/request.rs:1341`
-- 反向切换已有 Responses WebSocket 路由变更检测：当平台密钥从账号模式切到聚合 API 或其他不支持 WebSocket 的模式时，旧 WebSocket 请求会返回 `responses_websocket_route_changed` 并关闭连接。依据：`crates/service/src/http/responses_websocket.rs:561`
+- 本次代码将当前平台密钥模式归一为当前应走 transport：官方账号 WSS 为 `WebSocket`，聚合 API 策略为 `Http`。依据：`crates/service/src/http/responses_websocket.rs:1269`
 
 ### 修复
 
-- 前端代理新增窄分流：仅当请求是原生 Codex 的 `POST /v1/responses`，且当前平台密钥已经是支持官方账号 Responses WebSocket 的账号模式时，返回 `426 Upgrade Required` 和 `responses_websocket_route_changed`，提示客户端重新发起请求。
-- 不做 HTTP 到 WSS 或 WSS 到 HTTP 的协议桥接；模式切换后的旧 transport 直接失效，下一次新建请求按当前平台密钥模式重新选择 WebSocket 或 HTTP。
-- 保留已有账号模式旧 WebSocket 切到聚合 API 时的 route changed 关闭逻辑。
+- 保留正常账号模式：`GET /v1/responses` WebSocket upgrade 仍进入原有 Responses WebSocket 会话，不改变账号透明 WSS 主链路。依据：`crates/service/src/http/proxy_runtime.rs:231`、`crates/service/src/http/responses_websocket.rs:209`
+- 保留正常聚合 API 模式：`POST /v1/responses` 且当前平台密钥不是官方账号 WSS 时仍落回原 HTTP 代理和后端聚合 API 链路。依据：`crates/service/src/http/proxy_runtime.rs:262`
+- 新增 `账号模式 + HTTP POST` 桥接：仅原生 Codex `POST /v1/responses` 且当前平台密钥支持官方账号 WSS 时进入 HTTP -> WSS 桥接；桥接会解压旧 HTTP body，补齐 `type=response.create`，连接账号上游 WSS，并把上游 WSS 文本帧编码回 Responses SSE 返回给旧 HTTP 客户端。依据：`crates/service/src/http/responses_websocket.rs:246`、`crates/service/src/http/responses_websocket.rs:263`
+- 新增 `聚合 API 模式 + WebSocket` 桥接：旧 WebSocket 会话在首帧和后续文本帧发送前重新读取当前平台密钥；当前已切到聚合 API 时，关闭账号上游 WSS，改为把该 WS 帧转成 HTTP Responses body，POST 到本地后端 `/v1/responses`，再把本地 HTTP/SSE 结果转回客户端 WebSocket 文本帧。依据：`crates/service/src/http/responses_websocket.rs:659`、`crates/service/src/http/responses_websocket.rs:740`、`crates/service/src/http/responses_websocket.rs:957`、`crates/service/src/http/responses_websocket.rs:998`、`crates/service/src/http/responses_websocket.rs:1154`
+- 桥接日志区分真实入口方法，HTTP->WSS 与 WS->HTTP 桥接记录为 `POST`，正常账号 WebSocket 仍记录 `GET`。依据：`crates/service/src/http/responses_websocket.rs:2920`、`crates/service/src/http/responses_websocket.rs:3031`
 
 ### 影响范围
 
-- 只影响原生 Codex 旧对象在 `/v1/responses` 上从聚合 API 模式切回账号模式后的 HTTP POST 请求。
-- 不改变初始账号模式的客户端 WebSocket upgrade 链路。
-- 不改变聚合 API 模式的 HTTP POST 链路。
-- 不改变账号模式旧 WebSocket 切到聚合 API 时已有的关闭逻辑。
+- 只影响原生 Codex `/v1/responses` 在当前模式与客户端旧 transport 不匹配时的桥接。
+- 不改变初始账号模式的客户端 WebSocket upgrade 主链路。
+- 不改变初始聚合 API 模式的 HTTP POST 主链路。
 - 不改变非原生 Codex 客户端的 HTTP Responses 请求。
 
 ## 2026-06-09 聚合 API 连通性测试误报失败和错误展示不完整
@@ -322,19 +324,20 @@ response.completed
 | --- | --- | --- |
 | 普通 HTTP 请求 | 每次请求都会重新读取平台密钥配置；切到 `aggregate_api_rotation` 后会进入聚合 API 分支，不会因为旧会话绑定继续强制走账号池。 | `crates/service/src/gateway/local_validation/mod.rs:118`、`crates/service/src/gateway/local_validation/request.rs:1342` |
 | 本机 HTTP 近期日志 | 本机 `gateway-trace.log` 中已出现 `/v1/responses` 的 `route_kind=aggregate_api` 和 `AGGREGATE_ATTEMPT`，说明普通 HTTP 链路已实际走聚合 API。 | `/mnt/c/Users/52417/AppData/Roaming/com.codexmanager.desktop/gateway-trace.log` |
-| Responses WebSocket | 握手阶段会把当时的平台密钥配置保存进 `WsRequestContext`，且该链路只支持官方账号 WebSocket；后续同一条连接里的帧继续使用握手时的账号上游。 | `crates/service/src/http/responses_websocket.rs:56`、`crates/service/src/http/responses_websocket.rs:640`、`crates/service/src/http/responses_websocket.rs:1109` |
+| Responses WebSocket | 握手阶段会把当时的平台密钥配置保存进 `WsRequestContext`；本次修复前，同一条连接里的帧继续使用握手时的账号上游。 | `crates/service/src/http/responses_websocket.rs:63`、`crates/service/src/http/responses_websocket.rs:675` |
 
 因此，如果请求是普通 HTTP，请求日志仍显示账号模式通常要继续看日志字段或具体记录；但如果请求来自切换前已经建立的 Responses WebSocket 长连接，则不是单纯日志错误，实际请求也仍在走握手时的账号模式。
 
 ### 修复
 
-- 在 Responses WebSocket 首帧发往上游前，重新读取当前平台密钥配置并校验是否仍支持账号 WebSocket。
-- 在 Responses WebSocket 后续文本帧和二进制帧发往上游前，继续执行同样校验。
-- 如果平台密钥已经切换到聚合 API 或其他不支持 WebSocket 的模式，返回 `responses_websocket_route_changed` 错误并关闭旧连接，要求客户端重新发起请求，避免继续把新请求发到旧账号上游。
+- 在 Responses WebSocket 首帧发往上游前，重新读取当前平台密钥配置并判断当前应走 WebSocket 还是 HTTP。
+- 在 Responses WebSocket 后续文本帧发往上游前，继续执行同样判断。
+- 如果平台密钥已经切换到聚合 API 模式，旧 WebSocket 文本帧进入 WS -> HTTP 桥接，避免继续把新请求发到旧账号上游。
+- 如果平台密钥切到其他不支持 WebSocket 且不是聚合 API 的模式，仍返回 `responses_websocket_route_changed` 错误并关闭旧连接。
 - 新增 `responses_ws_route_changed` 诊断日志，记录初始模式、当前模式、当前协议和当前有效上游。
 
 ### 影响范围
 
-- 仅影响 Responses WebSocket 长连接。
-- 不改变普通 HTTP 聚合 API 路由。
+- 影响 Responses WebSocket 长连接切到聚合 API 模式后的文本帧。
+- 不改变普通 HTTP 聚合 API 主路由。
 - 不新增前端展示逻辑。

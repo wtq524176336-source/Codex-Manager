@@ -1,14 +1,19 @@
-use axum::body::Body;
+use axum::body::{to_bytes, Body};
 use axum::extract::ws::{CloseFrame as ClientCloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::extract::FromRequestParts;
 use axum::http::header::{self, HeaderMap, HeaderValue};
 use axum::http::{Request as HttpRequest, Response, StatusCode};
 use base64::Engine as _;
-use futures_util::{SinkExt, StreamExt};
+use bytes::Bytes;
+use eventsource_stream::Eventsource;
+use futures_util::{stream, SinkExt, StreamExt};
+use reqwest::Client;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::convert::Infallible;
 use std::future::Future;
+use std::io::Cursor;
 use std::net::IpAddr;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -60,6 +65,7 @@ struct WsRequestContext {
     incoming_headers: crate::gateway::IncomingHeaderSnapshot,
     prompt_cache_key: Option<String>,
     effective_upstream_base: String,
+    backend_base_url: Option<String>,
     prefer_raw_errors: bool,
     transparent_mode: bool,
 }
@@ -87,6 +93,7 @@ struct ConnectedUpstreamWebsocket {
     stream: tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>,
     account_id: String,
     upstream_url: String,
+    turn_state: Option<HeaderValue>,
 }
 
 struct WebsocketTarget {
@@ -104,6 +111,7 @@ struct PendingWsRequestLog {
     service_tier: Option<String>,
     effective_service_tier: Option<String>,
     started_at: Instant,
+    request_method: &'static str,
     first_response_ms: Option<i64>,
     output_text: String,
 }
@@ -114,6 +122,11 @@ struct WsFrameDiagnostics {
     previous_response_id_fp: String,
     response_id_fp: String,
     generate: String,
+}
+
+enum CurrentResponsesRoute {
+    WebSocket,
+    Http,
 }
 
 struct WsSessionError {
@@ -193,10 +206,13 @@ pub(super) fn is_websocket_upgrade_request(headers: &HeaderMap) -> bool {
     upgrade_is_websocket && (connection_has_upgrade || has_websocket_key)
 }
 
-pub(super) async fn upgrade_responses_websocket(request: HttpRequest<Body>) -> Response<Body> {
+pub(super) async fn upgrade_responses_websocket(
+    request: HttpRequest<Body>,
+    backend_base_url: String,
+) -> Response<Body> {
     let (mut parts, _) = request.into_parts();
 
-    let context = match authorize_websocket_request(&parts.headers) {
+    let context = match authorize_websocket_request(&parts.headers, Some(backend_base_url)) {
         Ok(context) => context,
         Err(response) => return response,
     };
@@ -227,7 +243,7 @@ pub(super) async fn upgrade_responses_websocket(request: HttpRequest<Body>) -> R
     })
 }
 
-pub(super) fn should_reject_http_post_for_websocket_mode(headers: &HeaderMap) -> bool {
+pub(super) fn should_bridge_http_post_to_websocket(headers: &HeaderMap) -> bool {
     let incoming_headers = crate::gateway::IncomingHeaderSnapshot::from_http_headers(headers);
     if !incoming_headers.is_native_codex_client() {
         return false;
@@ -244,30 +260,383 @@ pub(super) fn should_reject_http_post_for_websocket_mode(headers: &HeaderMap) ->
     crate::gateway::gateway_supports_official_responses_websocket(&api_key)
 }
 
-pub(super) fn reject_http_post_for_websocket_mode(headers: &HeaderMap) -> Response<Body> {
-    let prefer_raw_errors = crate::gateway::prefers_raw_errors_for_http_headers(headers);
-    let incoming_headers = crate::gateway::IncomingHeaderSnapshot::from_http_headers(headers);
-    log::warn!(
-        "event=responses_http_route_changed_to_websocket originator={} user_agent={}",
-        incoming_headers.originator().unwrap_or("-"),
-        incoming_headers.user_agent().unwrap_or("-")
+pub(super) async fn bridge_http_post_to_websocket(request: HttpRequest<Body>) -> Response<Body> {
+    let (parts, body) = request.into_parts();
+    let prefer_raw_errors = crate::gateway::prefers_raw_errors_for_http_headers(&parts.headers);
+    let bridge_headers = http_post_websocket_bridge_headers(&parts.headers);
+    let context = match authorize_websocket_request(&bridge_headers, None) {
+        Ok(context) => context,
+        Err(response) => return response,
+    };
+    let max_body_bytes = crate::gateway::front_proxy_max_body_bytes();
+    let read_limit = if max_body_bytes == 0 {
+        usize::MAX
+    } else {
+        max_body_bytes
+    };
+    let body = match to_bytes(body, read_limit).await {
+        Ok(body) => body,
+        Err(err) => {
+            return text_error_response(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                crate::gateway::error_message_for_client(
+                    prefer_raw_errors,
+                    crate::gateway::bilingual_error(
+                        "读取 HTTP 桥接请求体失败",
+                        format!("read HTTP bridge request body failed: {err}"),
+                    ),
+                ),
+            );
+        }
+    };
+    let prepared = match prepare_http_bridge_frame(body.as_ref(), &parts.headers, &context) {
+        Ok(prepared) => prepared,
+        Err(err) => {
+            return text_error_response(
+                StatusCode::from_u16(err.status).unwrap_or(StatusCode::BAD_GATEWAY),
+                crate::gateway::error_message_for_client(prefer_raw_errors, err.message),
+            );
+        }
+    };
+    let mut upstream = match connect_upstream_websocket(&context).await {
+        Ok(upstream) => upstream,
+        Err(err) => {
+            return text_error_response(
+                StatusCode::from_u16(err.status).unwrap_or(StatusCode::BAD_GATEWAY),
+                crate::gateway::error_message_for_client(prefer_raw_errors, err.message),
+            );
+        }
+    };
+    let pending = PendingWsRequestState {
+        log: begin_ws_request_log_with_method(&context, &prepared, "POST"),
+        prepared,
+    };
+    log_ws_frame_route(
+        &context,
+        &pending,
+        upstream.account_id.as_str(),
+        upstream.upstream_url.as_str(),
+        "http_bridge",
     );
-    let message = crate::gateway::error_message_for_client(
-        prefer_raw_errors,
-        crate::gateway::bilingual_error(
-            "平台密钥已切换为账号 WebSocket 模式，请重新发起请求",
-            "api key switched to account websocket mode; recreate request",
-        ),
+    if let Err(err) = upstream
+        .stream
+        .send(pending.prepared.upstream_message.clone())
+        .await
+    {
+        let message = crate::gateway::bilingual_error(
+            "发送 HTTP 桥接 WebSocket 首帧失败",
+            format!("send HTTP bridge websocket frame failed: {err}"),
+        );
+        finalize_ws_request_log(
+            &context,
+            &pending.log,
+            Some(upstream.account_id.as_str()),
+            Some(upstream.upstream_url.as_str()),
+            502,
+            crate::gateway::RequestLogUsage::default(),
+            Some(message.clone()),
+        );
+        return text_error_response(
+            StatusCode::BAD_GATEWAY,
+            crate::gateway::error_message_for_client(prefer_raw_errors, message),
+        );
+    }
+
+    log::info!(
+        "event=responses_http_to_ws_bridge_started api_key_id={} account_id={} upstream_url={}",
+        context.api_key.id,
+        upstream.account_id,
+        upstream.upstream_url
     );
-    let mut response = text_response(StatusCode::UPGRADE_REQUIRED, message);
+    let turn_state = upstream.turn_state.clone();
+    let bridge_stream = stream::unfold(
+        HttpToWsBridgeState {
+            upstream,
+            pending: Some(pending),
+            context,
+            done: false,
+        },
+        next_http_to_ws_bridge_chunk,
+    );
+    let mut response = Response::new(Body::from_stream(bridge_stream));
+    *response.status_mut() = StatusCode::OK;
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("text/event-stream"),
+    );
     response
         .headers_mut()
-        .insert(header::UPGRADE, HeaderValue::from_static("websocket"));
-    response.headers_mut().insert(
-        crate::error_codes::ERROR_CODE_HEADER_NAME,
-        HeaderValue::from_static(RESPONSES_WS_ROUTE_CHANGED_CODE),
-    );
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+    if let Some(turn_state) = turn_state {
+        response.headers_mut().insert(
+            crate::http::codex_source::X_CODEX_TURN_STATE_HEADER,
+            turn_state,
+        );
+    }
     response
+}
+
+fn http_post_websocket_bridge_headers(headers: &HeaderMap) -> HeaderMap {
+    let mut bridge_headers = headers.clone();
+    bridge_headers.remove(header::ACCEPT);
+    bridge_headers.remove(header::CONTENT_LENGTH);
+    bridge_headers.remove(header::CONTENT_TYPE);
+    bridge_headers.remove(header::CONTENT_ENCODING);
+    bridge_headers.remove(header::TRANSFER_ENCODING);
+    if !bridge_headers.contains_key("openai-beta") {
+        bridge_headers.insert(
+            "openai-beta",
+            HeaderValue::from_static("responses_websockets=2026-02-06"),
+        );
+    }
+    bridge_headers
+}
+
+fn prepare_http_bridge_frame(
+    body: &[u8],
+    headers: &HeaderMap,
+    context: &WsRequestContext,
+) -> Result<PreparedClientFrame, WsSessionError> {
+    let body = maybe_decode_zstd_body(body, headers).map_err(|err| {
+        WsSessionError::bad_request_bilingual(
+            "HTTP 桥接请求体解压失败",
+            format!("decode HTTP bridge request body failed: {err}"),
+        )
+    })?;
+    let mut payload = serde_json::from_slice::<Value>(body.as_ref()).map_err(|err| {
+        WsSessionError::bad_request_bilingual(
+            "HTTP 桥接请求体不是有效 JSON",
+            format!("HTTP bridge request body is not valid JSON: {err}"),
+        )
+    })?;
+    let Some(object) = payload.as_object_mut() else {
+        return Err(WsSessionError::bad_request_bilingual(
+            "HTTP 桥接请求体必须是 JSON 对象",
+            "HTTP bridge request body must be a JSON object",
+        ));
+    };
+    match object.get("type").and_then(Value::as_str) {
+        Some("response.create") => {}
+        Some(other) => {
+            return Err(WsSessionError::bad_request_bilingual(
+                "HTTP 桥接不支持该 WebSocket 消息类型",
+                format!("unsupported HTTP bridge websocket message type: {other}"),
+            ));
+        }
+        None => {
+            object.insert(
+                "type".to_string(),
+                Value::String("response.create".to_string()),
+            );
+        }
+    }
+    let text = serde_json::to_string(&payload).map_err(|err| {
+        WsSessionError::bad_request_bilingual(
+            "序列化 HTTP 桥接 WebSocket 帧失败",
+            format!("serialize HTTP bridge websocket frame failed: {err}"),
+        )
+    })?;
+    rewrite_client_frame(text.as_str(), context)
+}
+
+fn maybe_decode_zstd_body(body: &[u8], headers: &HeaderMap) -> Result<Bytes, String> {
+    if !headers
+        .get_all(header::CONTENT_ENCODING)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .any(|value| {
+            value
+                .split(',')
+                .any(|item| item.trim().eq_ignore_ascii_case("zstd"))
+        })
+    {
+        return Ok(Bytes::copy_from_slice(body));
+    }
+    zstd::stream::decode_all(Cursor::new(body))
+        .map(Bytes::from)
+        .map_err(|err| err.to_string())
+}
+
+fn sse_data_frame(data: &str) -> Bytes {
+    let mut frame = String::new();
+    if let Some(event_type) = serde_json::from_str::<Value>(data).ok().and_then(|value| {
+        value
+            .get("type")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    }) {
+        frame.push_str("event: ");
+        frame.push_str(event_type.as_str());
+        frame.push('\n');
+    }
+    for line in data.split('\n') {
+        frame.push_str("data: ");
+        frame.push_str(line);
+        frame.push('\n');
+    }
+    frame.push('\n');
+    Bytes::from(frame)
+}
+
+fn sse_error_frame(message: String, status: u16, code: &str, prefer_raw_errors: bool) -> Bytes {
+    let message = crate::gateway::error_message_for_client(prefer_raw_errors, message);
+    sse_data_frame(
+        json!({
+            "type": "error",
+            "status": status,
+            "error": {
+                "code": code,
+                "message": message,
+            }
+        })
+        .to_string()
+        .as_str(),
+    )
+}
+
+async fn next_http_to_ws_bridge_chunk(
+    mut state: HttpToWsBridgeState,
+) -> Option<(Result<Bytes, Infallible>, HttpToWsBridgeState)> {
+    if state.done {
+        return None;
+    }
+    loop {
+        let message = match state.upstream.stream.next().await {
+            Some(Ok(message)) => message,
+            Some(Err(err)) => {
+                if let Some(pending) = state.pending.take() {
+                    let message = crate::gateway::bilingual_error(
+                        "HTTP 桥接接收上游 WebSocket 帧失败",
+                        format!("HTTP bridge receive upstream websocket frame failed: {err}"),
+                    );
+                    finalize_ws_request_log(
+                        &state.context,
+                        &pending.log,
+                        Some(state.upstream.account_id.as_str()),
+                        Some(state.upstream.upstream_url.as_str()),
+                        502,
+                        crate::gateway::RequestLogUsage::default(),
+                        Some(message.clone()),
+                    );
+                    state.done = true;
+                    return Some((
+                        Ok(sse_error_frame(
+                            message,
+                            502,
+                            RESPONSES_WS_ERROR_CODE,
+                            state.context.prefer_raw_errors,
+                        )),
+                        state,
+                    ));
+                }
+                state.done = true;
+                return None;
+            }
+            None => {
+                if let Some(pending) = state.pending.take() {
+                    let message = crate::gateway::bilingual_error(
+                        "HTTP 桥接上游 WebSocket 在完成前关闭",
+                        "HTTP bridge upstream websocket closed before response.completed",
+                    );
+                    finalize_ws_request_log(
+                        &state.context,
+                        &pending.log,
+                        Some(state.upstream.account_id.as_str()),
+                        Some(state.upstream.upstream_url.as_str()),
+                        502,
+                        crate::gateway::RequestLogUsage::default(),
+                        Some(message.clone()),
+                    );
+                    state.done = true;
+                    return Some((
+                        Ok(sse_error_frame(
+                            message,
+                            502,
+                            RESPONSES_WS_ERROR_CODE,
+                            state.context.prefer_raw_errors,
+                        )),
+                        state,
+                    ));
+                }
+                state.done = true;
+                return None;
+            }
+        };
+
+        match message {
+            UpstreamMessage::Text(text) => {
+                if let Some(pending) = state.pending.as_mut() {
+                    collect_ws_output_text_from_frame(&mut pending.log.output_text, text.as_str());
+                    mark_ws_first_response(pending);
+                }
+                if let Some(terminal) = inspect_ws_terminal_event(text.as_str()) {
+                    if let Some(pending) = state.pending.as_ref() {
+                        log_ws_terminal_diagnostic(
+                            &state.context,
+                            &state.upstream,
+                            pending,
+                            &terminal,
+                            "http_bridge_received",
+                        );
+                    }
+                    if let Some(pending) = state.pending.take() {
+                        finalize_ws_request_log(
+                            &state.context,
+                            &pending.log,
+                            Some(state.upstream.account_id.as_str()),
+                            Some(state.upstream.upstream_url.as_str()),
+                            terminal.status_code,
+                            terminal.usage,
+                            terminal.error,
+                        );
+                    }
+                    state.done = true;
+                }
+                return Some((Ok(sse_data_frame(text.as_str())), state));
+            }
+            UpstreamMessage::Binary(bytes) => {
+                return Some((Ok(sse_data_frame(&String::from_utf8_lossy(&bytes))), state));
+            }
+            UpstreamMessage::Ping(payload) => {
+                let _ = state
+                    .upstream
+                    .stream
+                    .send(UpstreamMessage::Pong(payload))
+                    .await;
+            }
+            UpstreamMessage::Pong(_) => {}
+            UpstreamMessage::Close(_) => {
+                if let Some(pending) = state.pending.take() {
+                    let message = crate::gateway::bilingual_error(
+                        "HTTP 桥接上游 WebSocket 在完成前关闭",
+                        "HTTP bridge upstream websocket closed before response.completed",
+                    );
+                    finalize_ws_request_log(
+                        &state.context,
+                        &pending.log,
+                        Some(state.upstream.account_id.as_str()),
+                        Some(state.upstream.upstream_url.as_str()),
+                        502,
+                        crate::gateway::RequestLogUsage::default(),
+                        Some(message.clone()),
+                    );
+                    state.done = true;
+                    return Some((
+                        Ok(sse_error_frame(
+                            message,
+                            502,
+                            RESPONSES_WS_ERROR_CODE,
+                            state.context.prefer_raw_errors,
+                        )),
+                        state,
+                    ));
+                }
+                state.done = true;
+                return None;
+            }
+            UpstreamMessage::Frame(_) => {}
+        }
+    }
 }
 
 async fn run_responses_websocket_session(mut socket: WebSocket, context: WsRequestContext) {
@@ -287,24 +656,40 @@ async fn run_responses_websocket_session(mut socket: WebSocket, context: WsReque
             return;
         }
     };
-    if let Err(err) = ensure_current_websocket_route(&context) {
-        send_ws_error_and_close(&mut socket, err, context.prefer_raw_errors).await;
-        return;
-    }
-
-    let mut upstream = match connect_upstream_websocket(&context).await {
-        Ok(stream) => stream,
+    match current_responses_route(&context) {
+        Ok(CurrentResponsesRoute::WebSocket) => {
+            run_websocket_account_loop(&mut socket, &context, prepared_first).await;
+            return;
+        }
+        Ok(CurrentResponsesRoute::Http) => {
+            run_websocket_to_http_bridge_loop(&mut socket, &context, prepared_first).await;
+            return;
+        }
         Err(err) => {
             send_ws_error_and_close(&mut socket, err, context.prefer_raw_errors).await;
             return;
         }
+    }
+}
+
+async fn run_websocket_account_loop(
+    socket: &mut WebSocket,
+    context: &WsRequestContext,
+    prepared_first: PreparedClientFrame,
+) {
+    let mut upstream = match connect_upstream_websocket(context).await {
+        Ok(stream) => stream,
+        Err(err) => {
+            send_ws_error_and_close(socket, err, context.prefer_raw_errors).await;
+            return;
+        }
     };
     let first_pending = PendingWsRequestState {
-        log: begin_ws_request_log(&context, &prepared_first),
+        log: begin_ws_request_log(context, &prepared_first),
         prepared: prepared_first.clone(),
     };
     log_ws_frame_route(
-        &context,
+        context,
         &first_pending,
         upstream.account_id.as_str(),
         upstream.upstream_url.as_str(),
@@ -317,7 +702,7 @@ async fn run_responses_websocket_session(mut socket: WebSocket, context: WsReque
         .await
     {
         finalize_ws_request_log(
-            &context,
+            context,
             &first_pending.log,
             Some(upstream.account_id.as_str()),
             Some(upstream.upstream_url.as_str()),
@@ -329,7 +714,7 @@ async fn run_responses_websocket_session(mut socket: WebSocket, context: WsReque
             )),
         );
         send_ws_error_and_close(
-            &mut socket,
+            socket,
             WsSessionError::bad_gateway_bilingual(
                 "发送上游 WebSocket 首帧失败",
                 format!("send first upstream websocket frame failed: {err}"),
@@ -350,16 +735,27 @@ async fn run_responses_websocket_session(mut socket: WebSocket, context: WsReque
                 };
                 match client_result {
                     Ok(Message::Text(text)) => {
-                        if let Err(err) = ensure_current_websocket_route(&context) {
-                            send_ws_error_and_close(&mut socket, err, context.prefer_raw_errors).await;
-                            let _ = upstream.stream.close(None).await;
-                            break;
-                        }
-                        match rewrite_client_frame(text.as_str(), &context) {
+                        match rewrite_client_frame(text.as_str(), context) {
                             Ok(prepared) => {
+                                match current_responses_route(context) {
+                                    Ok(CurrentResponsesRoute::WebSocket) => {}
+                                    Ok(CurrentResponsesRoute::Http) => {
+                                        let _ = upstream.stream.close(None).await;
+                                        Box::pin(run_websocket_to_http_bridge_loop(
+                                            socket, context, prepared,
+                                        ))
+                                        .await;
+                                        break;
+                                    }
+                                    Err(err) => {
+                                        send_ws_error_and_close(socket, err, context.prefer_raw_errors).await;
+                                        let _ = upstream.stream.close(None).await;
+                                        break;
+                                    }
+                                }
                                 if let Some(previous_pending) = pending_request.take() {
                                     finalize_ws_request_log(
-                                        &context,
+                                        context,
                                         &previous_pending.log,
                                         Some(upstream.account_id.as_str()),
                                         Some(upstream.upstream_url.as_str()),
@@ -372,11 +768,11 @@ async fn run_responses_websocket_session(mut socket: WebSocket, context: WsReque
                                     );
                                 }
                                 let current_pending = PendingWsRequestState {
-                                    log: begin_ws_request_log(&context, &prepared),
+                                    log: begin_ws_request_log(context, &prepared),
                                     prepared,
                                 };
                                 log_ws_frame_route(
-                                    &context,
+                                    context,
                                     &current_pending,
                                     upstream.account_id.as_str(),
                                     upstream.upstream_url.as_str(),
@@ -388,7 +784,7 @@ async fn run_responses_websocket_session(mut socket: WebSocket, context: WsReque
                                     .await
                                 {
                                     finalize_ws_request_log(
-                                        &context,
+                                        context,
                                         &current_pending.log,
                                         Some(upstream.account_id.as_str()),
                                         Some(upstream.upstream_url.as_str()),
@@ -400,7 +796,7 @@ async fn run_responses_websocket_session(mut socket: WebSocket, context: WsReque
                                         )),
                                     );
                                     send_ws_error_and_close(
-                                        &mut socket,
+                                        socket,
                                         WsSessionError::bad_gateway_bilingual(
                                             "发送上游 WebSocket 帧失败",
                                             format!("send upstream websocket frame failed: {err}"),
@@ -413,7 +809,7 @@ async fn run_responses_websocket_session(mut socket: WebSocket, context: WsReque
                                 pending_request = Some(current_pending);
                             }
                             Err(err) => {
-                                send_ws_error_and_close(&mut socket, err, context.prefer_raw_errors).await;
+                                send_ws_error_and_close(socket, err, context.prefer_raw_errors).await;
                                 let _ = upstream.stream.close(None).await;
                                 break;
                             }
@@ -426,14 +822,14 @@ async fn run_responses_websocket_session(mut socket: WebSocket, context: WsReque
                         let _ = upstream.stream.send(UpstreamMessage::Pong(payload)).await;
                     }
                     Ok(Message::Binary(bytes)) => {
-                        if let Err(err) = ensure_current_websocket_route(&context) {
-                            send_ws_error_and_close(&mut socket, err, context.prefer_raw_errors).await;
+                        if let Err(err) = ensure_current_websocket_route(context) {
+                            send_ws_error_and_close(socket, err, context.prefer_raw_errors).await;
                             let _ = upstream.stream.close(None).await;
                             break;
                         }
                         if let Err(err) = upstream.stream.send(UpstreamMessage::Binary(bytes)).await {
                             send_ws_error_and_close(
-                                &mut socket,
+                                socket,
                                 WsSessionError::bad_gateway_bilingual(
                                     "发送上游 WebSocket 二进制消息失败",
                                     format!("send upstream websocket binary failed: {err}"),
@@ -454,7 +850,7 @@ async fn run_responses_websocket_session(mut socket: WebSocket, context: WsReque
                     }
                     Err(err) => {
                         send_ws_error_and_close(
-                            &mut socket,
+                            socket,
                             WsSessionError::bad_request_bilingual(
                                 "接收客户端 WebSocket 帧失败",
                                 format!("receive client websocket frame failed: {err}"),
@@ -482,7 +878,7 @@ async fn run_responses_websocket_session(mut socket: WebSocket, context: WsReque
                         if let Some(terminal) = inspect_ws_terminal_event(text.as_str()) {
                             if let Some(pending) = pending_request.as_ref() {
                                 log_ws_terminal_diagnostic(
-                                    &context,
+                                    context,
                                     &upstream,
                                     pending,
                                     &terminal,
@@ -492,7 +888,7 @@ async fn run_responses_websocket_session(mut socket: WebSocket, context: WsReque
                             if let Some(mut pending) = pending_request.take() {
                                 mark_ws_first_response(&mut pending);
                                 finalize_ws_request_log(
-                                    &context,
+                                    context,
                                     &pending.log,
                                     Some(upstream.account_id.as_str()),
                                     Some(upstream.upstream_url.as_str()),
@@ -543,7 +939,7 @@ async fn run_responses_websocket_session(mut socket: WebSocket, context: WsReque
                     Ok(UpstreamMessage::Frame(_)) => {}
                     Err(err) => {
                         send_ws_error_and_close(
-                            &mut socket,
+                            socket,
                             WsSessionError::bad_gateway_bilingual(
                                 "接收上游 WebSocket 帧失败",
                                 format!("receive upstream websocket frame failed: {err}"),
@@ -558,7 +954,321 @@ async fn run_responses_websocket_session(mut socket: WebSocket, context: WsReque
     }
 }
 
-fn ensure_current_websocket_route(context: &WsRequestContext) -> Result<(), WsSessionError> {
+async fn run_websocket_to_http_bridge_loop(
+    socket: &mut WebSocket,
+    context: &WsRequestContext,
+    mut prepared: PreparedClientFrame,
+) {
+    loop {
+        match current_responses_route(context) {
+            Ok(CurrentResponsesRoute::Http) => {}
+            Ok(CurrentResponsesRoute::WebSocket) => {
+                Box::pin(run_websocket_account_loop(socket, context, prepared)).await;
+                return;
+            }
+            Err(err) => {
+                send_ws_error_and_close(socket, err, context.prefer_raw_errors).await;
+                return;
+            }
+        }
+
+        if let Err(err) = send_prepared_websocket_frame_to_http(socket, context, &prepared).await {
+            send_ws_error_and_close(socket, err, context.prefer_raw_errors).await;
+            return;
+        }
+
+        let next_message = match receive_initial_request(socket).await {
+            Ok(Some(message)) => message,
+            Ok(None) => return,
+            Err(err) => {
+                send_ws_error_and_close(socket, err, context.prefer_raw_errors).await;
+                return;
+            }
+        };
+        prepared = match prepare_initial_client_frame(next_message, context) {
+            Ok(prepared) => prepared,
+            Err(err) => {
+                send_ws_error_and_close(socket, err, context.prefer_raw_errors).await;
+                return;
+            }
+        };
+    }
+}
+
+async fn send_prepared_websocket_frame_to_http(
+    socket: &mut WebSocket,
+    context: &WsRequestContext,
+    prepared: &PreparedClientFrame,
+) -> Result<(), WsSessionError> {
+    let backend_base_url = context.backend_base_url.as_deref().ok_or_else(|| {
+        WsSessionError::service_unavailable_bilingual(
+            "本地后端地址不可用",
+            "local backend base url is unavailable",
+        )
+    })?;
+    let body = websocket_frame_to_http_body(prepared.text.as_str())?;
+    let target_url = format!(
+        "{}{}",
+        backend_base_url.trim_end_matches('/'),
+        prepared.request_path
+    );
+    let client = Client::builder().no_proxy().build().map_err(|err| {
+        WsSessionError::bad_gateway_bilingual(
+            "创建 WS 到 HTTP 桥接客户端失败",
+            format!("build websocket to HTTP bridge client failed: {err}"),
+        )
+    })?;
+    let mut builder = client.post(target_url.as_str());
+    builder = apply_websocket_bridge_http_headers(builder, context)?;
+    let pending = PendingWsRequestState {
+        log: begin_ws_request_log_with_method(context, prepared, "POST"),
+        prepared: prepared.clone(),
+    };
+    log::info!(
+        "event=responses_ws_to_http_bridge_started trace_id={} api_key_id={} target_url={} request_type={} model={}",
+        pending.log.trace_id,
+        context.api_key.id,
+        target_url,
+        pending.prepared.request_type,
+        pending.prepared.model.as_deref().unwrap_or("-")
+    );
+
+    let response = builder.body(body).send().await.map_err(|err| {
+        WsSessionError::bad_gateway_bilingual(
+            "WS 到 HTTP 桥接请求失败",
+            format!("websocket to HTTP bridge request failed: {err}"),
+        )
+    })?;
+    let status = response.status();
+    if !status.is_success() {
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|err| format!("read bridge HTTP error body failed: {err}"));
+        finalize_ws_request_log(
+            context,
+            &pending.log,
+            None,
+            Some(target_url.as_str()),
+            status.as_u16(),
+            crate::gateway::RequestLogUsage::default(),
+            Some(error_text.clone()),
+        );
+        return Err(WsSessionError::new(
+            status.as_u16(),
+            RESPONSES_WS_ERROR_CODE,
+            crate::gateway::bilingual_error(
+                "WS 到 HTTP 桥接上游返回失败",
+                format!(
+                    "websocket to HTTP bridge returned status {}: {}",
+                    status.as_u16(),
+                    error_text
+                ),
+            ),
+        ));
+    }
+
+    let content_type = response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default();
+    if content_type.starts_with("text/event-stream") {
+        stream_http_sse_response_to_websocket(socket, context, pending, target_url, response).await
+    } else {
+        send_http_body_response_to_websocket(socket, context, pending, target_url, response).await
+    }
+}
+
+fn websocket_frame_to_http_body(text: &str) -> Result<Vec<u8>, WsSessionError> {
+    let mut payload = serde_json::from_str::<Value>(text).map_err(|err| {
+        WsSessionError::bad_request_bilingual(
+            "WS 到 HTTP 桥接帧不是有效 JSON",
+            format!("websocket to HTTP bridge frame is not valid JSON: {err}"),
+        )
+    })?;
+    let Some(object) = payload.as_object_mut() else {
+        return Err(WsSessionError::bad_request_bilingual(
+            "WS 到 HTTP 桥接帧必须是 JSON 对象",
+            "websocket to HTTP bridge frame must be a JSON object",
+        ));
+    };
+    if let Some(message_type) = object
+        .remove("type")
+        .and_then(|value| value.as_str().map(str::to_string))
+    {
+        if message_type != "response.create" {
+            return Err(WsSessionError::bad_request_bilingual(
+                "WS 到 HTTP 桥接不支持该消息类型",
+                format!("unsupported websocket to HTTP bridge message type: {message_type}"),
+            ));
+        }
+    }
+    object.insert("stream".to_string(), Value::Bool(true));
+    serde_json::to_vec(&payload).map_err(|err| {
+        WsSessionError::bad_request_bilingual(
+            "序列化 WS 到 HTTP 桥接请求失败",
+            format!("serialize websocket to HTTP bridge request failed: {err}"),
+        )
+    })
+}
+
+fn apply_websocket_bridge_http_headers(
+    mut builder: reqwest::RequestBuilder,
+    context: &WsRequestContext,
+) -> Result<reqwest::RequestBuilder, WsSessionError> {
+    for (name, value) in context.incoming_headers.raw_headers() {
+        if should_skip_ws_to_http_bridge_header(name.as_str()) {
+            continue;
+        }
+        builder = builder.header(name.as_str(), value.as_str());
+    }
+    Ok(builder
+        .header(header::CONTENT_TYPE.as_str(), "application/json")
+        .header(header::ACCEPT.as_str(), "text/event-stream"))
+}
+
+fn should_skip_ws_to_http_bridge_header(name: &str) -> bool {
+    let normalized = name.trim().to_ascii_lowercase();
+    matches!(
+        normalized.as_str(),
+        "host"
+            | "content-length"
+            | "content-type"
+            | "content-encoding"
+            | "accept"
+            | "connection"
+            | "openai-beta"
+            | "transfer-encoding"
+            | "keep-alive"
+            | "proxy-authorization"
+            | "proxy-authenticate"
+            | "proxy-connection"
+            | "te"
+            | "trailer"
+            | "upgrade"
+    ) || normalized.starts_with("sec-websocket-")
+}
+
+async fn stream_http_sse_response_to_websocket(
+    socket: &mut WebSocket,
+    context: &WsRequestContext,
+    mut pending: PendingWsRequestState,
+    target_url: String,
+    response: reqwest::Response,
+) -> Result<(), WsSessionError> {
+    let mut terminal_seen = false;
+    let mut stream = response.bytes_stream().eventsource();
+    while let Some(event) = stream.next().await {
+        let event = event.map_err(|err| {
+            WsSessionError::bad_gateway_bilingual(
+                "读取 WS 到 HTTP 桥接 SSE 失败",
+                format!("read websocket to HTTP bridge SSE failed: {err}"),
+            )
+        })?;
+        let data = event.data.trim();
+        if data.is_empty() || data == "[DONE]" {
+            continue;
+        }
+        mark_ws_first_response(&mut pending);
+        collect_ws_output_text_from_frame(&mut pending.log.output_text, data);
+        if let Some(terminal) = inspect_ws_terminal_event(data) {
+            log::info!(
+                "event=responses_ws_to_http_bridge_terminal trace_id={} api_key_id={} status={} event_type={}",
+                pending.log.trace_id,
+                context.api_key.id,
+                terminal.status_code,
+                terminal.event_type
+            );
+            finalize_ws_request_log(
+                context,
+                &pending.log,
+                None,
+                Some(target_url.as_str()),
+                terminal.status_code,
+                terminal.usage,
+                terminal.error,
+            );
+            terminal_seen = true;
+        }
+        socket
+            .send(Message::Text(data.to_string().into()))
+            .await
+            .map_err(|err| {
+                WsSessionError::bad_gateway_bilingual(
+                    "发送 WS 到 HTTP 桥接帧给客户端失败",
+                    format!("send websocket to HTTP bridge frame to client failed: {err}"),
+                )
+            })?;
+        if terminal_seen {
+            return Ok(());
+        }
+    }
+
+    if !terminal_seen {
+        let message = crate::gateway::bilingual_error(
+            "WS 到 HTTP 桥接流在完成前结束",
+            "websocket to HTTP bridge stream ended before response.completed",
+        );
+        finalize_ws_request_log(
+            context,
+            &pending.log,
+            None,
+            Some(target_url.as_str()),
+            502,
+            crate::gateway::RequestLogUsage::default(),
+            Some(message.clone()),
+        );
+        return Err(WsSessionError::bad_gateway(message));
+    }
+    Ok(())
+}
+
+async fn send_http_body_response_to_websocket(
+    socket: &mut WebSocket,
+    context: &WsRequestContext,
+    mut pending: PendingWsRequestState,
+    target_url: String,
+    response: reqwest::Response,
+) -> Result<(), WsSessionError> {
+    let text = response.text().await.map_err(|err| {
+        WsSessionError::bad_gateway_bilingual(
+            "读取 WS 到 HTTP 桥接响应失败",
+            format!("read websocket to HTTP bridge response failed: {err}"),
+        )
+    })?;
+    mark_ws_first_response(&mut pending);
+    collect_ws_output_text_from_frame(&mut pending.log.output_text, text.as_str());
+    let terminal = inspect_ws_terminal_event(text.as_str());
+    let (status, usage, error) = if let Some(terminal) = terminal {
+        (terminal.status_code, terminal.usage, terminal.error)
+    } else {
+        (200, crate::gateway::RequestLogUsage::default(), None)
+    };
+    finalize_ws_request_log(
+        context,
+        &pending.log,
+        None,
+        Some(target_url.as_str()),
+        status,
+        usage,
+        error,
+    );
+    socket
+        .send(Message::Text(text.into()))
+        .await
+        .map_err(|err| {
+            WsSessionError::bad_gateway_bilingual(
+                "发送 WS 到 HTTP 桥接响应给客户端失败",
+                format!("send websocket to HTTP bridge response to client failed: {err}"),
+            )
+        })
+}
+
+fn current_responses_route(
+    context: &WsRequestContext,
+) -> Result<CurrentResponsesRoute, WsSessionError> {
     let storage = open_storage().ok_or_else(|| {
         WsSessionError::service_unavailable_bilingual("存储不可用", "storage unavailable")
     })?;
@@ -583,7 +1293,10 @@ fn ensure_current_websocket_route(context: &WsRequestContext) -> Result<(), WsSe
         ));
     }
     if crate::gateway::gateway_supports_official_responses_websocket(&current) {
-        return Ok(());
+        return Ok(CurrentResponsesRoute::WebSocket);
+    }
+    if current.rotation_strategy == crate::apikey_profile::ROTATION_AGGREGATE_API {
+        return Ok(CurrentResponsesRoute::Http);
     }
 
     let current_upstream = crate::gateway::gateway_resolve_effective_upstream_base(&current);
@@ -616,6 +1329,20 @@ fn ensure_current_websocket_route(context: &WsRequestContext) -> Result<(), WsSe
     ))
 }
 
+fn ensure_current_websocket_route(context: &WsRequestContext) -> Result<(), WsSessionError> {
+    match current_responses_route(context)? {
+        CurrentResponsesRoute::WebSocket => Ok(()),
+        CurrentResponsesRoute::Http => Err(WsSessionError::new(
+            426,
+            RESPONSES_WS_ROUTE_CHANGED_CODE,
+            crate::gateway::bilingual_error(
+                "平台密钥当前是聚合 API 模式",
+                "api key is currently in aggregate API mode",
+            ),
+        )),
+    }
+}
+
 fn client_close_frame_to_upstream(frame: ClientCloseFrame) -> UpstreamCloseFrame {
     UpstreamCloseFrame {
         code: UpstreamCloseCode::from(frame.code),
@@ -630,7 +1357,10 @@ fn upstream_close_frame_to_client(frame: UpstreamCloseFrame) -> ClientCloseFrame
     }
 }
 
-fn authorize_websocket_request(headers: &HeaderMap) -> Result<WsRequestContext, Response<Body>> {
+fn authorize_websocket_request(
+    headers: &HeaderMap,
+    backend_base_url: Option<String>,
+) -> Result<WsRequestContext, Response<Body>> {
     let prefer_raw_errors = crate::gateway::prefers_raw_errors_for_http_headers(headers);
     let incoming_headers = crate::gateway::IncomingHeaderSnapshot::from_http_headers(headers);
     let transparent_mode = incoming_headers.is_native_codex_client();
@@ -680,7 +1410,8 @@ fn authorize_websocket_request(headers: &HeaderMap) -> Result<WsRequestContext, 
             )
         })?;
 
-    if !crate::gateway::gateway_supports_official_responses_websocket(&api_key) {
+    if !transparent_mode && !crate::gateway::gateway_supports_official_responses_websocket(&api_key)
+    {
         return Err(upgrade_required_response(
             crate::gateway::error_message_for_client(
                 prefer_raw_errors,
@@ -712,6 +1443,7 @@ fn authorize_websocket_request(headers: &HeaderMap) -> Result<WsRequestContext, 
         api_key,
         incoming_headers,
         prompt_cache_key,
+        backend_base_url,
         prefer_raw_errors,
         transparent_mode,
     })
@@ -1168,7 +1900,7 @@ async fn connect_upstream_websocket(
         })?;
     let request =
         build_upstream_websocket_request(ws_url.as_str(), &account, bearer.as_str(), context)?;
-    let (stream, _) =
+    let (stream, response) =
         connect_upstream_websocket_for_account(request, ws_url.as_str(), &account, context)
             .await
             .map_err(|err| {
@@ -1180,11 +1912,16 @@ async fn connect_upstream_websocket(
                     ),
                 )
             })?;
+    let turn_state = response
+        .headers()
+        .get(crate::http::codex_source::X_CODEX_TURN_STATE_HEADER)
+        .cloned();
 
     Ok(ConnectedUpstreamWebsocket {
         stream,
         account_id: account.id,
         upstream_url: ws_url,
+        turn_state,
     })
 }
 
@@ -2177,12 +2914,20 @@ fn begin_ws_request_log(
     context: &WsRequestContext,
     prepared: &PreparedClientFrame,
 ) -> PendingWsRequestLog {
+    begin_ws_request_log_with_method(context, prepared, "GET")
+}
+
+fn begin_ws_request_log_with_method(
+    context: &WsRequestContext,
+    prepared: &PreparedClientFrame,
+    request_method: &'static str,
+) -> PendingWsRequestLog {
     let trace_id = crate::gateway::next_trace_id();
     let effective_protocol_type = context.api_key.protocol_type.as_str();
     crate::gateway::log_request_start(
         trace_id.as_str(),
         context.api_key.id.as_str(),
-        "GET",
+        request_method,
         prepared.request_path,
         prepared.model.as_deref(),
         prepared.reasoning_effort.as_deref(),
@@ -2230,6 +2975,7 @@ fn begin_ws_request_log(
         service_tier: prepared.service_tier.clone(),
         effective_service_tier: prepared.effective_service_tier.clone(),
         started_at: Instant::now(),
+        request_method,
         first_response_ms: None,
         output_text: String::new(),
     }
@@ -2282,7 +3028,7 @@ fn finalize_ws_request_log(
         Some(context.api_key.id.as_str()),
         account_id,
         pending.request_path,
-        "GET",
+        pending.request_method,
         pending.model.as_deref(),
         pending.reasoning_effort.as_deref(),
         upstream_url,
@@ -2308,6 +3054,13 @@ struct WsTerminalEvent {
     error_param: Option<String>,
     usage: crate::gateway::RequestLogUsage,
     error: Option<String>,
+}
+
+struct HttpToWsBridgeState {
+    upstream: ConnectedUpstreamWebsocket,
+    pending: Option<PendingWsRequestState>,
+    context: WsRequestContext,
+    done: bool,
 }
 
 fn log_ws_terminal_diagnostic(
@@ -2838,6 +3591,7 @@ mod tests {
             incoming_headers: sample_incoming_headers(Some("conversation-1"), None),
             prompt_cache_key: Some("sticky-thread".to_string()),
             effective_upstream_base: "https://chatgpt.com/backend-api/codex".to_string(),
+            backend_base_url: None,
             prefer_raw_errors: false,
             transparent_mode: false,
         };
@@ -2917,6 +3671,7 @@ mod tests {
             incoming_headers: sample_incoming_headers_with_metadata(),
             prompt_cache_key: None,
             effective_upstream_base: "https://chatgpt.com/backend-api/codex".to_string(),
+            backend_base_url: None,
             prefer_raw_errors: false,
             transparent_mode: false,
         };
@@ -2948,6 +3703,7 @@ mod tests {
             incoming_headers: sample_incoming_headers_with_metadata(),
             prompt_cache_key: Some("sticky-thread".to_string()),
             effective_upstream_base: "https://chatgpt.com/backend-api/codex".to_string(),
+            backend_base_url: None,
             prefer_raw_errors: false,
             transparent_mode: true,
         };
@@ -2975,6 +3731,7 @@ mod tests {
             incoming_headers: sample_incoming_headers_with_metadata(),
             prompt_cache_key: None,
             effective_upstream_base: "https://chatgpt.com/backend-api/codex".to_string(),
+            backend_base_url: None,
             prefer_raw_errors: false,
             transparent_mode: true,
         };
@@ -3002,6 +3759,7 @@ mod tests {
             incoming_headers: sample_incoming_headers_with_metadata(),
             prompt_cache_key: Some("sticky-thread".to_string()),
             effective_upstream_base: "https://chatgpt.com/backend-api/codex".to_string(),
+            backend_base_url: None,
             prefer_raw_errors: false,
             transparent_mode: true,
         };
@@ -3022,6 +3780,7 @@ mod tests {
             incoming_headers: sample_incoming_headers_with_metadata(),
             prompt_cache_key: Some("sticky-thread".to_string()),
             effective_upstream_base: "https://chatgpt.com/backend-api/codex".to_string(),
+            backend_base_url: None,
             prefer_raw_errors: false,
             transparent_mode: true,
         };
@@ -3042,6 +3801,7 @@ mod tests {
             incoming_headers: sample_incoming_headers_with_metadata(),
             prompt_cache_key: Some("sticky-thread".to_string()),
             effective_upstream_base: "https://chatgpt.com/backend-api/codex".to_string(),
+            backend_base_url: None,
             prefer_raw_errors: false,
             transparent_mode: true,
         };
@@ -3067,6 +3827,7 @@ mod tests {
             incoming_headers: sample_incoming_headers_with_metadata(),
             prompt_cache_key: None,
             effective_upstream_base: "https://chatgpt.com/backend-api/codex".to_string(),
+            backend_base_url: None,
             prefer_raw_errors: false,
             transparent_mode: false,
         };
