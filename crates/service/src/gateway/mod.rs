@@ -79,8 +79,6 @@ mod failover;
 mod http_bridge;
 #[path = "request/incoming_headers.rs"]
 mod incoming_headers;
-#[path = "request/local_count_tokens.rs"]
-mod local_count_tokens;
 #[path = "request/local_response.rs"]
 mod local_response;
 mod local_validation;
@@ -132,7 +130,7 @@ pub(crate) use metrics::{
     record_usage_refresh_outcome, GatewayCandidateSkipReason,
 };
 pub(super) use official_responses_http::normalize_official_responses_http_body;
-use protocol_adapter::{adapt_request_for_protocol, ResponseAdapter, ToolNameRestoreMap};
+use protocol_adapter::{ResponseAdapter, ToolNameRestoreMap};
 pub(super) use request_helpers::{
     inspect_service_tier_for_log, inspect_service_tier_value, is_html_content_type,
     is_upstream_challenge_response, normalize_models_path, parse_request_metadata,
@@ -374,7 +372,6 @@ fn decode_base64_header_value(input: &[u8]) -> Option<Vec<u8>> {
     Some(output)
 }
 pub(super) use incoming_headers::IncomingHeaderSnapshot;
-use local_count_tokens::maybe_respond_local_count_tokens;
 pub(crate) use model_picker::fetch_models_for_picker;
 use openai_fallback::try_openai_fallback;
 pub(crate) use request_entry::handle_gateway_request;
