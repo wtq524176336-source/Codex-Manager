@@ -43,10 +43,7 @@ function toRpcPayload(params: ApiKeyPayload) {
 function normalizeProtocolType(value?: string | null) {
   const normalized = String(value || "").trim().toLowerCase();
   if (!normalized) return null;
-  if (normalized === "codex" || normalized === "openai" || normalized === "openai_compat") {
-    return "openai_compat";
-  }
-  return "openai_compat";
+  return normalized === "openai_compat" ? "openai_compat" : normalized;
 }
 
 export async function createApiKey(params: ApiKeyPayload) {

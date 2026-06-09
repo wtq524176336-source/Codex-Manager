@@ -312,10 +312,7 @@ function protocolLabel(value?: string | null) {
 
 function normalizeProtocolModeForForm(value?: string | null) {
   const normalized = String(value || "").trim().toLowerCase().replace(/-/g, "_");
-  if (["codex_cli", "codex", "codex_responses", "responses"].includes(normalized)) {
-    return "codex_cli";
-  }
-  return "openai_compat";
+  return normalized === "codex_cli" ? "codex_cli" : "openai_compat";
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

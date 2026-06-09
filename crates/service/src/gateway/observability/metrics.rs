@@ -622,9 +622,7 @@ fn classify_protocol(protocol_type: Option<&str>) -> &'static str {
     let Some(protocol_type) = protocol_type.map(str::trim).filter(|v| !v.is_empty()) else {
         return "unknown";
     };
-    if protocol_type.eq_ignore_ascii_case("openai_compat")
-        || protocol_type.eq_ignore_ascii_case("openai")
-    {
+    if protocol_type.eq_ignore_ascii_case("openai_compat") {
         return "openai_compat";
     }
     "other"

@@ -82,48 +82,35 @@ fn is_removed_gateway_request_path(normalized_path: &str) -> bool {
 ///
 /// # 返回
 /// 返回函数执行结果
-fn allow_compat_responses_path_rewrite(protocol_type: &str, normalized_path: &str) -> bool {
-    protocol_type == crate::apikey_profile::PROTOCOL_OPENAI_COMPAT
-        && (normalized_path.starts_with("/v1/chat/completions")
-            || normalized_path.starts_with("/v1/responses")
-            || normalized_path.starts_with("/v1/images/generations")
-            || normalized_path.starts_with("/v1/images/edits"))
+fn allow_compat_responses_path_rewrite(normalized_path: &str) -> bool {
+    normalized_path.starts_with("/v1/chat/completions")
+        || normalized_path.starts_with("/v1/responses")
+        || normalized_path.starts_with("/v1/images/generations")
+        || normalized_path.starts_with("/v1/images/edits")
 }
 
 fn allow_codex_compat_rewrite_for_client(
-    protocol_type: &str,
     normalized_path: &str,
     native_codex_client: bool,
 ) -> bool {
-    if protocol_type == crate::apikey_profile::PROTOCOL_OPENAI_COMPAT
-        && (normalized_path.starts_with("/v1/chat/completions")
-            || normalized_path.starts_with("/v1/responses")
-            || normalized_path.starts_with("/v1/images/generations")
-            || normalized_path.starts_with("/v1/images/edits"))
-    {
+    if allow_compat_responses_path_rewrite(normalized_path) {
         return !native_codex_client;
     }
-    allow_compat_responses_path_rewrite(protocol_type, normalized_path)
+    false
 }
 
 fn should_adapt_openai_chat_completions_to_responses(
-    protocol_type: &str,
     normalized_path: &str,
     native_codex_client: bool,
 ) -> bool {
-    protocol_type == crate::apikey_profile::PROTOCOL_OPENAI_COMPAT
-        && normalized_path.starts_with("/v1/chat/completions")
-        && !native_codex_client
+    normalized_path.starts_with("/v1/chat/completions") && !native_codex_client
 }
 
 fn is_non_native_openai_responses_api_request(
-    protocol_type: &str,
     normalized_path: &str,
     native_codex_client: bool,
 ) -> bool {
-    protocol_type == crate::apikey_profile::PROTOCOL_OPENAI_COMPAT
-        && normalized_path.starts_with("/v1/responses")
-        && !native_codex_client
+    normalized_path.starts_with("/v1/responses") && !native_codex_client
 }
 
 fn is_codex_image_tool_model(model: Option<&str>) -> bool {
@@ -939,8 +926,8 @@ fn adapt_openai_images_edits_body_to_responses(
 ///
 /// # 返回
 /// 返回函数执行结果
-fn should_derive_compat_conversation_anchor(protocol_type: &str, normalized_path: &str) -> bool {
-    allow_compat_responses_path_rewrite(protocol_type, normalized_path)
+fn should_derive_compat_conversation_anchor(normalized_path: &str) -> bool {
+    allow_compat_responses_path_rewrite(normalized_path)
 }
 
 /// 函数 `is_native_codex_client_request`
@@ -993,12 +980,11 @@ fn request_type_for_log(
 }
 
 fn should_normalize_compat_service_tier_for_codex_backend(
-    protocol_type: &str,
     normalized_path: &str,
     adapted_path: &str,
 ) -> bool {
     adapted_path.starts_with("/v1/responses")
-        && allow_compat_responses_path_rewrite(protocol_type, normalized_path)
+        && allow_compat_responses_path_rewrite(normalized_path)
 }
 
 fn normalize_compat_service_tier_for_codex_backend(body: Vec<u8>) -> Vec<u8> {
@@ -1064,7 +1050,6 @@ fn resolve_preferred_client_prompt_cache_key(
 /// # 返回
 /// 返回函数执行结果
 fn resolve_local_conversation_id(
-    protocol_type: &str,
     normalized_path: &str,
     incoming_headers: &super::super::IncomingHeaderSnapshot,
     client_has_prompt_cache_key: bool,
@@ -1072,12 +1057,11 @@ fn resolve_local_conversation_id(
     super::super::resolve_local_conversation_id_with_sticky_fallback(
         incoming_headers,
         !client_has_prompt_cache_key
-            && should_derive_compat_conversation_anchor(protocol_type, normalized_path),
+            && should_derive_compat_conversation_anchor(normalized_path),
     )
 }
 
 fn resolve_client_is_stream(
-    protocol_type: &str,
     normalized_path: &str,
     client_is_stream: bool,
     client_stream_specified: bool,
@@ -1087,7 +1071,6 @@ fn resolve_client_is_stream(
     client_is_stream
         || (normalized_path.starts_with("/v1/responses") && client_accepts_sse)
         || (is_non_native_openai_responses_api_request(
-            protocol_type,
             normalized_path,
             native_codex_client,
         ) && !client_stream_specified)
@@ -1279,7 +1262,6 @@ pub(super) fn build_local_validation_result(
         )
         .map_err(|err| LocalValidationError::new(500, err))?;
         let is_stream = resolve_client_is_stream(
-            effective_protocol_type.as_str(),
             normalized_path.as_str(),
             initial_request_meta.is_stream,
             initial_request_meta.stream_specified,
@@ -1325,7 +1307,6 @@ pub(super) fn build_local_validation_result(
         });
     }
     let initial_local_conversation_id = resolve_local_conversation_id(
-        effective_protocol_type.as_str(),
         normalized_path.as_str(),
         &incoming_headers,
         initial_request_meta.has_prompt_cache_key,
@@ -1379,11 +1360,8 @@ pub(super) fn build_local_validation_result(
             &api_key,
             initial_request_meta.service_tier.clone(),
         );
-        if is_non_native_openai_responses_api_request(
-            effective_protocol_type.as_str(),
-            normalized_path.as_str(),
-            native_codex_client,
-        ) {
+        if is_non_native_openai_responses_api_request(normalized_path.as_str(), native_codex_client)
+        {
             rewritten_body = default_omitted_responses_stream_to_true(rewritten_body);
         }
         let request_meta = super::super::parse_request_metadata(&rewritten_body);
@@ -1417,7 +1395,6 @@ pub(super) fn build_local_validation_result(
         let incoming_headers = incoming_headers
             .with_conversation_id_override(initial_local_conversation_id.as_deref());
         let is_stream = resolve_client_is_stream(
-            effective_protocol_type.as_str(),
             normalized_path.as_str(),
             initial_request_meta.is_stream,
             initial_request_meta.stream_specified,
@@ -1466,20 +1443,13 @@ pub(super) fn build_local_validation_result(
         initial_request_meta.service_tier.clone(),
     )
     .0;
-    if is_non_native_openai_responses_api_request(
-        effective_protocol_type.as_str(),
-        normalized_path.as_str(),
-        native_codex_client,
-    ) {
+    if is_non_native_openai_responses_api_request(normalized_path.as_str(), native_codex_client) {
         passthrough_body = default_omitted_responses_stream_to_true(passthrough_body);
     }
     super::super::validate_text_input_limit_for_path(&normalized_path, &passthrough_body)
         .map_err(|err| LocalValidationError::new(400, err.message()))?;
-    let original_body = body.clone();
-    let (mut path, mut response_adapter, mut tool_name_restore_map) =
-        if effective_protocol_type == crate::apikey_profile::PROTOCOL_OPENAI_COMPAT
-            && is_openai_images_generations_path(normalized_path.as_str())
-            && !native_codex_client
+    let (mut path, mut response_adapter, tool_name_restore_map) =
+        if is_openai_images_generations_path(normalized_path.as_str()) && !native_codex_client
         {
             if !super::super::runtime_config::codex_image_generation_enabled() {
                 return Err(LocalValidationError::new(
@@ -1503,9 +1473,7 @@ pub(super) fn build_local_validation_result(
                 response_adapter,
                 super::super::ToolNameRestoreMap::default(),
             )
-        } else if effective_protocol_type == crate::apikey_profile::PROTOCOL_OPENAI_COMPAT
-            && is_openai_images_edits_path(normalized_path.as_str())
-            && !native_codex_client
+        } else if is_openai_images_edits_path(normalized_path.as_str()) && !native_codex_client
         {
             if !super::super::runtime_config::codex_image_generation_enabled() {
                 return Err(LocalValidationError::new(
@@ -1539,7 +1507,6 @@ pub(super) fn build_local_validation_result(
             )
         };
     if should_adapt_openai_chat_completions_to_responses(
-        effective_protocol_type.as_str(),
         normalized_path.as_str(),
         native_codex_client,
     ) {
@@ -1552,29 +1519,8 @@ pub(super) fn build_local_validation_result(
         path = "/v1/responses".to_string();
         response_adapter = super::super::ResponseAdapter::ChatCompletionsFromResponses;
     }
-    if is_non_native_openai_responses_api_request(
-        effective_protocol_type.as_str(),
-        normalized_path.as_str(),
-        native_codex_client,
-    ) {
+    if is_non_native_openai_responses_api_request(normalized_path.as_str(), native_codex_client) {
         body = default_omitted_responses_stream_to_true(body);
-    }
-    if !normalized_path.starts_with("/v1/responses")
-        && path.starts_with("/v1/responses")
-        && !allow_compat_responses_path_rewrite(effective_protocol_type.as_str(), &normalized_path)
-    {
-        // 中文注释：防回归保护：仅已登记的兼容协议路径允许改写到 /v1/responses；
-        // 其余协议和路径一律保持原路径透传，避免客户端按原生协议却拿到错误的流格式。
-        log::warn!(
-            "event=gateway_protocol_adapt_guard protocol_type={} from_path={} to_path={} action=force_passthrough",
-            effective_protocol_type,
-            normalized_path,
-            path
-        );
-        path = normalized_path.clone();
-        body = original_body;
-        response_adapter = super::super::ResponseAdapter::Passthrough;
-        tool_name_restore_map.clear();
     }
     // 中文注释：下游调用方的 stream 语义必须来自原始客户端请求；
     // 否则兼容改写到 /responses 时会污染响应模式判断。
@@ -1588,7 +1534,6 @@ pub(super) fn build_local_validation_result(
     );
     let local_conversation_id = initial_local_conversation_id.clone();
     let allow_codex_compat_rewrite = allow_codex_compat_rewrite_for_client(
-        effective_protocol_type.as_str(),
         normalized_path.as_str(),
         native_codex_client,
     );
@@ -1609,7 +1554,6 @@ pub(super) fn build_local_validation_result(
         incoming_headers.with_conversation_id_override(local_conversation_id.as_deref());
     let should_normalize_compat_service_tier =
         should_normalize_compat_service_tier_for_codex_backend(
-            effective_protocol_type.as_str(),
             normalized_path.as_str(),
             path.as_str(),
         );
@@ -1662,7 +1606,6 @@ pub(super) fn build_local_validation_result(
     let service_tier_for_log = client_request_meta.service_tier;
     let effective_service_tier_for_log = request_meta.service_tier;
     let is_stream = resolve_client_is_stream(
-        effective_protocol_type.as_str(),
         normalized_path.as_str(),
         client_request_meta.is_stream,
         client_request_meta.stream_specified,
