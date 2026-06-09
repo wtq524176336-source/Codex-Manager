@@ -1,4 +1,4 @@
-use crate::apikey_profile::{resolve_gateway_protocol_type, ROTATION_AGGREGATE_API};
+use crate::apikey_profile::{ROTATION_ACCOUNT, ROTATION_AGGREGATE_API};
 use crate::gateway::request_helpers::ParsedRequestMetadata;
 use base64::Engine;
 use bytes::Bytes;
@@ -959,7 +959,7 @@ fn is_native_codex_client_request(incoming_headers: &super::super::IncomingHeade
 }
 
 fn should_use_transparent_account_mode(native_codex_client: bool, rotation_strategy: &str) -> bool {
-    native_codex_client && rotation_strategy != ROTATION_AGGREGATE_API
+    native_codex_client && rotation_strategy == ROTATION_ACCOUNT
 }
 
 fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
@@ -1230,8 +1230,7 @@ pub(super) fn build_local_validation_result(
             ),
         ));
     }
-    let effective_protocol_type =
-        resolve_gateway_protocol_type(api_key.protocol_type.as_str(), normalized_path.as_str());
+    let effective_protocol_type = api_key.protocol_type.clone();
     let upstream_base = super::super::gateway_resolve_effective_upstream_base(&api_key);
     let request_method = request.method().as_str().to_string();
     let method = Method::from_bytes(request_method.as_bytes()).map_err(|_| {
@@ -1280,7 +1279,7 @@ pub(super) fn build_local_validation_result(
         )
         .map_err(|err| LocalValidationError::new(500, err))?;
         let is_stream = resolve_client_is_stream(
-            effective_protocol_type,
+            effective_protocol_type.as_str(),
             normalized_path.as_str(),
             initial_request_meta.is_stream,
             initial_request_meta.stream_specified,
@@ -1305,7 +1304,7 @@ pub(super) fn build_local_validation_result(
             upstream_base,
             is_stream,
             request_shape,
-            protocol_type: effective_protocol_type.to_string(),
+            protocol_type: effective_protocol_type.clone(),
             rotation_strategy: api_key.rotation_strategy,
             aggregate_api_id: api_key.aggregate_api_id,
             account_plan_filter: api_key.account_plan_filter,
@@ -1326,7 +1325,7 @@ pub(super) fn build_local_validation_result(
         });
     }
     let initial_local_conversation_id = resolve_local_conversation_id(
-        effective_protocol_type,
+        effective_protocol_type.as_str(),
         normalized_path.as_str(),
         &incoming_headers,
         initial_request_meta.has_prompt_cache_key,
@@ -1381,7 +1380,7 @@ pub(super) fn build_local_validation_result(
             initial_request_meta.service_tier.clone(),
         );
         if is_non_native_openai_responses_api_request(
-            effective_protocol_type,
+            effective_protocol_type.as_str(),
             normalized_path.as_str(),
             native_codex_client,
         ) {
@@ -1418,7 +1417,7 @@ pub(super) fn build_local_validation_result(
         let incoming_headers = incoming_headers
             .with_conversation_id_override(initial_local_conversation_id.as_deref());
         let is_stream = resolve_client_is_stream(
-            effective_protocol_type,
+            effective_protocol_type.as_str(),
             normalized_path.as_str(),
             initial_request_meta.is_stream,
             initial_request_meta.stream_specified,
@@ -1438,7 +1437,7 @@ pub(super) fn build_local_validation_result(
             upstream_base,
             is_stream,
             request_shape,
-            protocol_type: effective_protocol_type.to_string(),
+            protocol_type: effective_protocol_type.clone(),
             rotation_strategy: ROTATION_AGGREGATE_API.to_string(),
             aggregate_api_id: api_key.aggregate_api_id,
             account_plan_filter: api_key.account_plan_filter,
@@ -1468,7 +1467,7 @@ pub(super) fn build_local_validation_result(
     )
     .0;
     if is_non_native_openai_responses_api_request(
-        effective_protocol_type,
+        effective_protocol_type.as_str(),
         normalized_path.as_str(),
         native_codex_client,
     ) {
@@ -1534,7 +1533,7 @@ pub(super) fn build_local_validation_result(
             )
         } else {
             let adapted = super::super::adapt_request_for_protocol(
-                effective_protocol_type,
+                effective_protocol_type.as_str(),
                 &normalized_path,
                 body,
             )
@@ -1552,7 +1551,7 @@ pub(super) fn build_local_validation_result(
             )
         };
     if should_adapt_openai_chat_completions_to_responses(
-        effective_protocol_type,
+        effective_protocol_type.as_str(),
         normalized_path.as_str(),
         native_codex_client,
     ) {
@@ -1566,7 +1565,7 @@ pub(super) fn build_local_validation_result(
         response_adapter = super::super::ResponseAdapter::ChatCompletionsFromResponses;
     }
     if is_non_native_openai_responses_api_request(
-        effective_protocol_type,
+        effective_protocol_type.as_str(),
         normalized_path.as_str(),
         native_codex_client,
     ) {
@@ -1574,7 +1573,7 @@ pub(super) fn build_local_validation_result(
     }
     if !normalized_path.starts_with("/v1/responses")
         && path.starts_with("/v1/responses")
-        && !allow_compat_responses_path_rewrite(effective_protocol_type, &normalized_path)
+        && !allow_compat_responses_path_rewrite(effective_protocol_type.as_str(), &normalized_path)
     {
         // 中文注释：防回归保护：仅已登记的兼容协议路径允许改写到 /v1/responses；
         // 其余协议和路径一律保持原路径透传，避免客户端按原生协议却拿到错误的流格式。
@@ -1601,7 +1600,7 @@ pub(super) fn build_local_validation_result(
     );
     let local_conversation_id = initial_local_conversation_id.clone();
     let allow_codex_compat_rewrite = allow_codex_compat_rewrite_for_client(
-        effective_protocol_type,
+        effective_protocol_type.as_str(),
         normalized_path.as_str(),
         native_codex_client,
     );
@@ -1622,7 +1621,7 @@ pub(super) fn build_local_validation_result(
         incoming_headers.with_conversation_id_override(local_conversation_id.as_deref());
     let should_normalize_compat_service_tier =
         should_normalize_compat_service_tier_for_codex_backend(
-            effective_protocol_type,
+            effective_protocol_type.as_str(),
             normalized_path.as_str(),
             path.as_str(),
         );
@@ -1675,7 +1674,7 @@ pub(super) fn build_local_validation_result(
     let service_tier_for_log = client_request_meta.service_tier;
     let effective_service_tier_for_log = request_meta.service_tier;
     let is_stream = resolve_client_is_stream(
-        effective_protocol_type,
+        effective_protocol_type.as_str(),
         normalized_path.as_str(),
         client_request_meta.is_stream,
         client_request_meta.stream_specified,
@@ -1697,7 +1696,7 @@ pub(super) fn build_local_validation_result(
         upstream_base,
         is_stream,
         request_shape,
-        protocol_type: effective_protocol_type.to_string(),
+        protocol_type: effective_protocol_type,
         response_adapter,
         tool_name_restore_map,
         request_type_for_log,

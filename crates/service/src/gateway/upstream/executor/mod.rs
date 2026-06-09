@@ -7,11 +7,6 @@ use super::attempt_flow::transport::UpstreamRequestContext;
 mod codex;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum GatewayUpstreamExecutorKind {
-    CodexResponses,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum GatewayUpstreamRouteKind {
     AccountRotation,
     AggregateApi,
@@ -19,28 +14,17 @@ pub(super) enum GatewayUpstreamRouteKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct GatewayUpstreamExecutionPlan {
-    pub(super) executor_kind: GatewayUpstreamExecutorKind,
     pub(super) route_kind: GatewayUpstreamRouteKind,
 }
 
-pub(super) fn resolve_gateway_upstream_executor_kind(
-    _protocol_type: &str,
-) -> GatewayUpstreamExecutorKind {
-    GatewayUpstreamExecutorKind::CodexResponses
-}
-
 pub(super) fn resolve_gateway_upstream_execution_plan(
-    protocol_type: &str,
     rotation_strategy: &str,
 ) -> GatewayUpstreamExecutionPlan {
     let route_kind = match rotation_strategy {
         crate::apikey_profile::ROTATION_AGGREGATE_API => GatewayUpstreamRouteKind::AggregateApi,
         _ => GatewayUpstreamRouteKind::AccountRotation,
     };
-    GatewayUpstreamExecutionPlan {
-        executor_kind: resolve_gateway_upstream_executor_kind(protocol_type),
-        route_kind,
-    }
+    GatewayUpstreamExecutionPlan { route_kind }
 }
 
 pub(super) enum CandidateUpstreamDecision {
@@ -51,7 +35,6 @@ pub(super) enum CandidateUpstreamDecision {
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn execute_candidate_upstream_flow<F>(
-    executor_kind: GatewayUpstreamExecutorKind,
     storage: &Storage,
     method: &reqwest::Method,
     request_ctx: UpstreamRequestContext<'_>,
@@ -76,64 +59,48 @@ pub(super) fn execute_candidate_upstream_flow<F>(
 where
     F: FnMut(Option<&str>, u16, Option<&str>),
 {
-    match executor_kind {
-        GatewayUpstreamExecutorKind::CodexResponses => codex::execute(
-            storage,
-            method,
-            request_ctx,
-            incoming_headers,
-            body,
-            is_stream,
-            base,
-            path,
-            primary_url,
-            alt_url,
-            request_deadline,
-            upstream_fallback_base,
-            account,
-            token,
-            strip_session_affinity,
-            debug,
-            allow_openai_fallback,
-            disable_challenge_stateless_retry,
-            has_more_candidates,
-            log_gateway_result,
-        ),
-    }
+    codex::execute(
+        storage,
+        method,
+        request_ctx,
+        incoming_headers,
+        body,
+        is_stream,
+        base,
+        path,
+        primary_url,
+        alt_url,
+        request_deadline,
+        upstream_fallback_base,
+        account,
+        token,
+        strip_session_affinity,
+        debug,
+        allow_openai_fallback,
+        disable_challenge_stateless_retry,
+        has_more_candidates,
+        log_gateway_result,
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        resolve_gateway_upstream_execution_plan, resolve_gateway_upstream_executor_kind,
-        GatewayUpstreamExecutionPlan, GatewayUpstreamExecutorKind, GatewayUpstreamRouteKind,
+        resolve_gateway_upstream_execution_plan, GatewayUpstreamExecutionPlan,
+        GatewayUpstreamRouteKind,
     };
-
-    #[test]
-    fn protocol_type_maps_to_executor_kind() {
-        assert_eq!(
-            resolve_gateway_upstream_executor_kind("openai_compat"),
-            GatewayUpstreamExecutorKind::CodexResponses
-        );
-        assert_eq!(
-            resolve_gateway_upstream_executor_kind("legacy_native"),
-            GatewayUpstreamExecutorKind::CodexResponses
-        );
-    }
 
     #[test]
     fn protocol_and_rotation_map_to_execution_plan() {
         assert_eq!(
-            resolve_gateway_upstream_execution_plan("openai_compat", "account_rotation"),
+            resolve_gateway_upstream_execution_plan("account_rotation"),
             GatewayUpstreamExecutionPlan {
-                executor_kind: GatewayUpstreamExecutorKind::CodexResponses,
                 route_kind: GatewayUpstreamRouteKind::AccountRotation,
             }
         );
         assert_eq!(
-            resolve_gateway_upstream_execution_plan("openai_compat", "aggregate_api_rotation"),
+            resolve_gateway_upstream_execution_plan("aggregate_api_rotation"),
             GatewayUpstreamExecutionPlan {
-                executor_kind: GatewayUpstreamExecutorKind::CodexResponses,
                 route_kind: GatewayUpstreamRouteKind::AggregateApi,
             }
         );

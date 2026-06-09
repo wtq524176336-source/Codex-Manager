@@ -3,9 +3,7 @@ use std::time::Instant;
 use tiny_http::Request;
 
 use super::super::local_validation::LocalValidationResult;
-use super::executor::{
-    resolve_gateway_upstream_execution_plan, GatewayUpstreamExecutorKind, GatewayUpstreamRouteKind,
-};
+use super::executor::{resolve_gateway_upstream_execution_plan, GatewayUpstreamRouteKind};
 use super::proxy_pipeline::candidate_executor::{
     execute_candidate_sequence, CandidateExecutionResult, CandidateExecutorParams,
 };
@@ -92,30 +90,6 @@ fn should_try_provider_executor_aggregate_route(
         execution_plan.route_kind,
         GatewayUpstreamRouteKind::AggregateApi
     )
-}
-
-fn is_models_request_path(path: &str) -> bool {
-    let normalized = path.split('?').next().unwrap_or(path);
-    matches!(
-        normalized,
-        "/models" | "/v1/models" | "/backend-api/codex/models"
-    )
-}
-
-fn should_route_aggregate_models_to_account(
-    execution_plan: super::executor::GatewayUpstreamExecutionPlan,
-    path: &str,
-) -> bool {
-    matches!(
-        execution_plan.route_kind,
-        GatewayUpstreamRouteKind::AggregateApi
-    ) && is_models_request_path(path)
-}
-
-fn executor_kind_label(value: GatewayUpstreamExecutorKind) -> &'static str {
-    match value {
-        GatewayUpstreamExecutorKind::CodexResponses => "codex_responses",
-    }
 }
 
 fn route_kind_label(value: GatewayUpstreamRouteKind) -> &'static str {
@@ -322,29 +296,16 @@ pub(in super::super) fn proxy_validated_request(
     );
     super::super::trace_log::log_request_body_preview(trace_id.as_str(), body.as_ref());
 
-    let execution_plan =
-        resolve_gateway_upstream_execution_plan(protocol_type.as_str(), rotation_strategy.as_str());
+    let execution_plan = resolve_gateway_upstream_execution_plan(rotation_strategy.as_str());
     super::super::log_request_execution_plan(
         trace_id.as_str(),
         path.as_str(),
         protocol_type.as_str(),
-        executor_kind_label(execution_plan.executor_kind),
+        "codex_responses",
         route_kind_label(execution_plan.route_kind),
     );
 
-    let aggregate_models_account_route =
-        should_route_aggregate_models_to_account(execution_plan, path.as_str());
-    if aggregate_models_account_route {
-        log::info!(
-            "event=gateway_aggregate_models_use_account_route trace_id={} path={}",
-            trace_id,
-            path
-        );
-    }
-
-    if should_try_provider_executor_aggregate_route(execution_plan)
-        && !aggregate_models_account_route
-    {
+    if should_try_provider_executor_aggregate_route(execution_plan) {
         match resolve_aggregate_candidates_for_route(
             &storage,
             protocol_type.as_str(),
@@ -397,7 +358,7 @@ pub(in super::super) fn proxy_validated_request(
     let native_active_turn_replay = transparent_mode
         && super::super::has_native_active_turn_state(&incoming_headers)
         && conversation_binding.is_some();
-    let respond_when_empty = !native_active_turn_replay;
+    let allow_empty_candidates = native_active_turn_replay;
 
     let (request, mut candidates) = match prepare_candidates_for_proxy(
         request,
@@ -412,18 +373,12 @@ pub(in super::super) fn proxy_validated_request(
         reasoning_for_log.as_deref(),
         account_plan_filter.as_deref(),
         request_type_for_log.as_str(),
-        respond_when_empty,
+        allow_empty_candidates,
     ) {
         CandidatePrecheckResult::Ready {
             request,
             candidates,
         } => (request, candidates),
-        CandidatePrecheckResult::Empty { request } if native_active_turn_replay => {
-            (request, Vec::new())
-        }
-        CandidatePrecheckResult::Empty { .. } => {
-            return Err("account candidate precheck returned empty unexpectedly".to_string());
-        }
         CandidatePrecheckResult::Responded => return Ok(()),
     };
     let preserve_native_turn_account_id = if native_active_turn_replay {
@@ -554,10 +509,10 @@ pub(in super::super) fn proxy_validated_request(
 mod tests {
     use super::{
         exhausted_gateway_error_for_log, request_deadline_for_path, resolve_upstream_is_stream,
-        should_route_aggregate_models_to_account, should_try_provider_executor_aggregate_route,
+        should_try_provider_executor_aggregate_route,
     };
     use crate::gateway::upstream::executor::{
-        GatewayUpstreamExecutionPlan, GatewayUpstreamExecutorKind, GatewayUpstreamRouteKind,
+        GatewayUpstreamExecutionPlan, GatewayUpstreamRouteKind,
     };
     use std::time::{Duration, Instant};
 
@@ -645,47 +600,13 @@ mod tests {
     fn only_explicit_aggregate_route_uses_aggregate_candidates() {
         assert!(should_try_provider_executor_aggregate_route(
             GatewayUpstreamExecutionPlan {
-                executor_kind: GatewayUpstreamExecutorKind::CodexResponses,
                 route_kind: GatewayUpstreamRouteKind::AggregateApi,
             }
         ));
         assert!(!should_try_provider_executor_aggregate_route(
             GatewayUpstreamExecutionPlan {
-                executor_kind: GatewayUpstreamExecutorKind::CodexResponses,
                 route_kind: GatewayUpstreamRouteKind::AccountRotation,
             }
-        ));
-    }
-
-    #[test]
-    fn aggregate_models_requests_use_account_route() {
-        let aggregate = GatewayUpstreamExecutionPlan {
-            executor_kind: GatewayUpstreamExecutorKind::CodexResponses,
-            route_kind: GatewayUpstreamRouteKind::AggregateApi,
-        };
-        let account = GatewayUpstreamExecutionPlan {
-            executor_kind: GatewayUpstreamExecutorKind::CodexResponses,
-            route_kind: GatewayUpstreamRouteKind::AccountRotation,
-        };
-
-        assert!(should_route_aggregate_models_to_account(
-            aggregate,
-            "/v1/models"
-        ));
-        assert!(should_route_aggregate_models_to_account(
-            aggregate,
-            "/v1/models?limit=20"
-        ));
-        assert!(should_route_aggregate_models_to_account(
-            aggregate, "/models"
-        ));
-        assert!(!should_route_aggregate_models_to_account(
-            aggregate,
-            "/v1/responses"
-        ));
-        assert!(!should_route_aggregate_models_to_account(
-            account,
-            "/v1/models"
         ));
     }
 

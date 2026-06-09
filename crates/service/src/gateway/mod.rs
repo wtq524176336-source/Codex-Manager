@@ -939,14 +939,7 @@ pub(crate) fn gateway_resolve_effective_upstream_base(
 pub(crate) fn gateway_supports_official_responses_websocket(
     api_key: &codexmanager_core::storage::ApiKey,
 ) -> bool {
-    if crate::apikey_profile::resolve_gateway_protocol_type(
-        api_key.protocol_type.as_str(),
-        "/v1/responses",
-    ) != crate::apikey_profile::PROTOCOL_OPENAI_COMPAT
-    {
-        return false;
-    }
-    if api_key.rotation_strategy == crate::apikey_profile::ROTATION_AGGREGATE_API {
+    if api_key.rotation_strategy != crate::apikey_profile::ROTATION_ACCOUNT {
         return false;
     }
     upstream::config::is_chatgpt_backend_base(&gateway_resolve_effective_upstream_base(api_key))

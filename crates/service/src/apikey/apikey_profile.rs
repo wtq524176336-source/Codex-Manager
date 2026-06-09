@@ -19,22 +19,6 @@ fn normalize_key(value: &str) -> String {
     value.trim().to_ascii_lowercase().replace('-', "_")
 }
 
-/// 函数 `resolve_gateway_protocol_type`
-///
-/// 作者: gaohongshun
-///
-/// 时间: 2026-04-05
-///
-/// # 参数
-/// - protocol_type: 参数 protocol_type
-/// - path: 参数 path
-///
-/// # 返回
-/// 返回函数执行结果
-pub(crate) fn resolve_gateway_protocol_type(_protocol_type: &str, _path: &str) -> &'static str {
-    PROTOCOL_OPENAI_COMPAT
-}
-
 /// 函数 `normalize_protocol_type`
 ///
 /// 作者: gaohongshun
@@ -172,8 +156,8 @@ pub(crate) fn normalize_static_headers_json(
 #[cfg(test)]
 mod tests {
     use super::{
-        normalize_protocol_type, normalize_rotation_strategy, resolve_gateway_protocol_type,
-        PROTOCOL_OPENAI_COMPAT, ROTATION_ACCOUNT, ROTATION_AGGREGATE_API,
+        normalize_protocol_type, normalize_rotation_strategy, PROTOCOL_OPENAI_COMPAT,
+        ROTATION_ACCOUNT, ROTATION_AGGREGATE_API,
     };
 
     #[test]
@@ -185,30 +169,6 @@ mod tests {
         assert_eq!(
             normalize_rotation_strategy(Some("aggregate_api_rotation".to_string())).as_deref(),
             Ok(ROTATION_AGGREGATE_API)
-        );
-    }
-
-    #[test]
-    fn gateway_protocol_always_uses_openai_compat() {
-        assert_eq!(
-            resolve_gateway_protocol_type(PROTOCOL_OPENAI_COMPAT, "/v1/responses"),
-            PROTOCOL_OPENAI_COMPAT
-        );
-        assert_eq!(
-            resolve_gateway_protocol_type("legacy_native", "/legacy/native"),
-            PROTOCOL_OPENAI_COMPAT
-        );
-    }
-
-    #[test]
-    fn removed_azure_protocol_falls_back_to_wildcard_routing() {
-        assert_eq!(
-            resolve_gateway_protocol_type("azure_openai", "/legacy/native"),
-            PROTOCOL_OPENAI_COMPAT
-        );
-        assert_eq!(
-            resolve_gateway_protocol_type("azure_openai", "/v1/responses"),
-            PROTOCOL_OPENAI_COMPAT
         );
     }
 

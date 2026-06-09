@@ -6,10 +6,39 @@
 | --- | --- | --- |
 | 前端 | 前端入口使用 Vite + Vue，`@` 指向 `apps/src-vue`。 | `apps/vite.config.ts:2`、`apps/vite.config.ts:6`、`apps/vite.config.ts:9` |
 | 桌面存储 | Tauri 默认将数据库文件命名为 `codexmanager.db`，并放在应用数据目录下。 | `apps/src-tauri/src/app_storage/env.rs:130`、`apps/src-tauri/src/app_storage/env.rs:135` |
-| 平台密钥模式 | API Key 页面存在 `account_rotation`、`aggregate_api_rotation`、`hybrid_rotation` 三个筛选值，行操作按钮只在账号轮转和聚合 API 轮转之间切换。 | `apps/src-vue/views/ApiKeysView.vue:101`、`apps/src-vue/views/ApiKeysView.vue:104`、`apps/src-vue/views/ApiKeysView.vue:191` |
+| 平台密钥模式 | API Key 页面策略筛选和创建/编辑表单只保留 `account_rotation`、`aggregate_api_rotation`；行操作按钮只在账号轮转和聚合 API 轮转之间切换。 | `apps/src-vue/views/ApiKeysView.vue:88`、`apps/src-vue/views/ApiKeysView.vue:205`、`apps/src-vue/views/ApiKeysView.vue:606` |
 | 严格字段过滤 | 严格请求参数白名单由 `CODEXMANAGER_STRICT_REQUEST_PARAM_ALLOWLIST` 控制。 | `crates/service/src/gateway/core/runtime_config.rs:70`、`crates/service/src/gateway/core/runtime_config.rs:496` |
 | 聚合诊断日志 | `gateway-trace.log` 写入器有 24 小时保留窗口和 60 秒清理间隔。 | `crates/service/src/gateway/observability/trace_log.rs:18`、`crates/service/src/gateway/observability/trace_log.rs:19` |
 | Responses 字段过滤 | `/v1/responses` 官方字段保留逻辑集中在 `retain_official_fields`。 | `crates/service/src/gateway/request/official_responses_http.rs:577` |
+
+## 2026-06-09 删除混合轮转模式
+
+### 需求
+
+用户要求前后端全部删除 `hybrid_rotation` / 混合轮转（账号优先）模式，只保留聚合 API 模式和账号模式透明传递。
+
+### 依据
+
+- API Key 页面策略筛选、创建/编辑表单、模式标签和行切换逻辑均只保留账号轮转与聚合 API 轮转。依据：`apps/src-vue/views/ApiKeysView.vue:88`、`apps/src-vue/views/ApiKeysView.vue:205`、`apps/src-vue/views/ApiKeysView.vue:379`、`apps/src-vue/views/ApiKeysView.vue:413`、`apps/src-vue/views/ApiKeysView.vue:606`
+- 账号管理页当前平台密钥模式提示和切换 payload 只在账号模式与聚合 API 模式之间处理。依据：`apps/src-vue/views/AccountsView.vue:469`、`apps/src-vue/views/AccountsView.vue:841`、`apps/src-vue/views/AccountsView.vue:863`
+- 后端平台密钥策略常量和归一化逻辑只保留 `account_rotation` 与 `aggregate_api_rotation`。依据：`crates/service/src/apikey/apikey_profile.rs:4`、`crates/service/src/apikey/apikey_profile.rs:88`
+- 创建和更新平台密钥时，`aggregate_api_id` 只在聚合 API 模式保存，`account_plan_filter` 只在账号模式保存。依据：`crates/service/src/apikey/apikey_create.rs:46`、`crates/service/src/apikey/apikey_create.rs:56`、`crates/service/src/apikey/apikey_update_model.rs:59`、`crates/service/src/apikey/apikey_update_model.rs:69`
+- 网关执行计划只剩账号轮转和聚合 API 两类；聚合 API 模式直接走聚合候选，账号模式走账号候选。依据：`crates/service/src/gateway/upstream/executor/mod.rs:15`、`crates/service/src/gateway/upstream/executor/mod.rs:32`、`crates/service/src/gateway/upstream/proxy.rs:345`、`crates/service/src/gateway/upstream/proxy.rs:402`
+- 账号透明模式仍由“原生 Codex 客户端且非聚合 API 策略”触发；当前只剩账号策略会进入透明账号模式。依据：`crates/service/src/gateway/local_validation/request.rs:961`、`crates/service/src/gateway/local_validation/request.rs:1254`
+- 存量 `hybrid_rotation` 数据通过迁移改为 `account_rotation` 并清空 `aggregate_api_id`。依据：`crates/core/src/storage/mod.rs:649`、`crates/core/migrations/058_api_key_rotation_strategy_cleanup.sql:1`
+
+### 修复
+
+- 删除 API Key 页面和账号管理页的混合轮转入口、标签与 payload 分支。
+- 删除后端 `ROTATION_HYBRID` 常量、混合策略别名归一化、网关 `HybridAccountFirst` 执行计划、账号耗尽后聚合 API 兜底分支和相关测试引用。
+- 新增 `058_api_key_rotation_strategy_cleanup` 迁移，将旧混合轮转记录切到账号轮转，避免继续出现第三种业务模式。
+
+### 影响范围
+
+- 平台密钥只剩两种模式：账号轮转与聚合 API 轮转。
+- 账号模式保留原生 Codex 透明账号传递链路。
+- 聚合 API 模式保留 HTTP 聚合 API 转发链路。
+- 账号候选为空或账号耗尽时不再转入聚合 API 兜底。
 
 ## 2026-06-09 聚合 API 旧对象切回账号模式仍走 HTTP POST
 
