@@ -533,9 +533,7 @@ fn normalize_provider_type(value: Option<String>) -> Result<String, String> {
         Some(raw) => {
             let normalized = raw.trim().to_ascii_lowercase().replace('-', "_");
             match normalized.as_str() {
-                "codex" | "openai" | "openai_compat" | "gpt" => {
-                    Ok(AGGREGATE_API_PROVIDER_CODEX.to_string())
-                }
+                AGGREGATE_API_PROVIDER_CODEX => Ok(AGGREGATE_API_PROVIDER_CODEX.to_string()),
                 other => Err(format!("unsupported aggregate api provider type: {other}")),
             }
         }
@@ -548,10 +546,10 @@ fn normalize_protocol_mode(value: Option<String>) -> Result<String, String> {
         Some(raw) => {
             let normalized = raw.trim().to_ascii_lowercase().replace('-', "_");
             match normalized.as_str() {
-                "openai_compat" | "openai" | "compatible" | "compat" => {
+                AGGREGATE_API_PROTOCOL_OPENAI_COMPAT => {
                     Ok(AGGREGATE_API_PROTOCOL_OPENAI_COMPAT.to_string())
                 }
-                "codex_cli" | "codex" | "codex_responses" | "responses" => {
+                AGGREGATE_API_PROTOCOL_CODEX_CLI => {
                     Ok(AGGREGATE_API_PROTOCOL_CODEX_CLI.to_string())
                 }
                 other => Err(format!("unsupported aggregate api protocol mode: {other}")),
