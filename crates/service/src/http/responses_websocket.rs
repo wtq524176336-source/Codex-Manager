@@ -1,15 +1,13 @@
-use axum::body::{to_bytes, Body};
+use axum::body::Body;
 use axum::extract::ws::{CloseFrame as ClientCloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::extract::FromRequestParts;
 use axum::http::header::{self, HeaderMap, HeaderValue};
 use axum::http::{Request as HttpRequest, Response, StatusCode};
 use base64::Engine as _;
-use bytes::Bytes;
-use futures_util::{stream, SinkExt, StreamExt};
+use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::convert::Infallible;
 use std::future::Future;
 use std::net::IpAddr;
 use std::time::{Duration, Instant};
@@ -101,7 +99,6 @@ struct PendingWsRequestLog {
     trace_id: String,
     request_path: &'static str,
     request_type: &'static str,
-    request_method: &'static str,
     model: Option<String>,
     reasoning_effort: Option<String>,
     service_tier: Option<String>,
@@ -230,7 +227,7 @@ pub(super) async fn upgrade_responses_websocket(request: HttpRequest<Body>) -> R
     })
 }
 
-pub(super) fn should_bridge_http_post_to_websocket(headers: &HeaderMap) -> bool {
+pub(super) fn should_reject_http_post_for_websocket_mode(headers: &HeaderMap) -> bool {
     let incoming_headers = crate::gateway::IncomingHeaderSnapshot::from_http_headers(headers);
     if !incoming_headers.is_native_codex_client() {
         return false;
@@ -247,431 +244,30 @@ pub(super) fn should_bridge_http_post_to_websocket(headers: &HeaderMap) -> bool 
     crate::gateway::gateway_supports_official_responses_websocket(&api_key)
 }
 
-pub(super) async fn bridge_http_post_to_websocket(
-    request: HttpRequest<Body>,
-) -> Response<Body> {
-    let context = match authorize_http_post_websocket_bridge_request(request.headers()) {
-        Ok(context) => context,
-        Err(response) => return response,
-    };
-    let (parts, body) = request.into_parts();
-    let read_limit = match crate::gateway::front_proxy_max_body_bytes() {
-        0 => usize::MAX,
-        value => value,
-    };
-    let body_bytes = match to_bytes(body, read_limit).await {
-        Ok(bytes) => bytes,
-        Err(_) => {
-            let message = if read_limit == usize::MAX {
-                crate::gateway::bilingual_error("请求体过大", "request body too large")
-            } else {
-                crate::gateway::bilingual_error(
-                    "请求体过大",
-                    format!("request body too large: content-length>{read_limit}"),
-                )
-            };
-            return text_error_response(
-                StatusCode::PAYLOAD_TOO_LARGE,
-                crate::gateway::error_message_for_client(context.prefer_raw_errors, message),
-            );
-        }
-    };
-    let frame_text = match prepare_http_post_websocket_frame(&parts.headers, body_bytes) {
-        Ok(frame_text) => frame_text,
-        Err(err) => return http_bridge_error_response(err, context.prefer_raw_errors),
-    };
-    let prepared_first =
-        match prepare_initial_client_frame(Message::Text(frame_text.into()), &context) {
-            Ok(prepared) => prepared,
-            Err(err) => return http_bridge_error_response(err, context.prefer_raw_errors),
-        };
-    if let Err(err) = ensure_current_websocket_route(&context) {
-        return http_bridge_error_response(err, context.prefer_raw_errors);
-    }
-
-    let mut upstream = match connect_upstream_websocket(&context).await {
-        Ok(stream) => stream,
-        Err(err) => return http_bridge_error_response(err, context.prefer_raw_errors),
-    };
-    let first_pending = PendingWsRequestState {
-        log: begin_ws_request_log_with_method(&context, &prepared_first, "POST"),
-        prepared: prepared_first.clone(),
-    };
-    log_ws_frame_route(
-        &context,
-        &first_pending,
-        upstream.account_id.as_str(),
-        upstream.upstream_url.as_str(),
-        "http_bridge",
-    );
-
-    if let Err(err) = upstream
-        .stream
-        .send(first_pending.prepared.upstream_message.clone())
-        .await
-    {
-        finalize_ws_request_log(
-            &context,
-            &first_pending.log,
-            Some(upstream.account_id.as_str()),
-            Some(upstream.upstream_url.as_str()),
-            502,
-            crate::gateway::RequestLogUsage::default(),
-            Some(crate::gateway::bilingual_error(
-                "发送上游 WebSocket 首帧失败",
-                format!("send first upstream websocket frame failed: {err}"),
-            )),
-        );
-        return http_bridge_error_response(
-            WsSessionError::bad_gateway_bilingual(
-                "发送上游 WebSocket 首帧失败",
-                format!("send first upstream websocket frame failed: {err}"),
-            ),
-            context.prefer_raw_errors,
-        );
-    }
-
-    http_bridge_stream_response(context, upstream, first_pending)
-}
-
-fn authorize_http_post_websocket_bridge_request(
-    headers: &HeaderMap,
-) -> Result<WsRequestContext, Response<Body>> {
+pub(super) fn reject_http_post_for_websocket_mode(headers: &HeaderMap) -> Response<Body> {
     let prefer_raw_errors = crate::gateway::prefers_raw_errors_for_http_headers(headers);
     let incoming_headers = crate::gateway::IncomingHeaderSnapshot::from_http_headers(headers);
-    if !incoming_headers.is_native_codex_client() {
-        return Err(text_error_response(
-            StatusCode::BAD_REQUEST,
-            crate::gateway::error_message_for_client(
-                prefer_raw_errors,
-                crate::gateway::bilingual_error(
-                    "非原生 Codex 请求不使用账号 WebSocket 桥接",
-                    "non-native Codex request is not eligible for websocket bridge",
-                ),
-            ),
-        ));
-    }
-    let Some(platform_key) = incoming_headers.platform_key() else {
-        return Err(text_error_response(
-            StatusCode::UNAUTHORIZED,
-            crate::gateway::error_message_for_client(
-                prefer_raw_errors,
-                crate::gateway::bilingual_error("缺少平台 API Key", "missing platform api key"),
-            ),
-        ));
-    };
-
-    let storage = open_storage().ok_or_else(|| {
-        text_error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            crate::gateway::error_message_for_client(
-                prefer_raw_errors,
-                crate::gateway::bilingual_error("存储不可用", "storage unavailable"),
-            ),
-        )
-    })?;
-    let api_key = storage
-        .find_api_key_by_hash(&hash_platform_key(platform_key))
-        .map_err(|err| {
-            text_error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                crate::gateway::error_message_for_client(
-                    prefer_raw_errors,
-                    crate::gateway::bilingual_error(
-                        "读取存储失败",
-                        format!("storage read failed: {err}"),
-                    ),
-                ),
-            )
-        })?
-        .ok_or_else(|| {
-            text_error_response(
-                StatusCode::FORBIDDEN,
-                crate::gateway::error_message_for_client(
-                    prefer_raw_errors,
-                    crate::gateway::bilingual_error(
-                        "平台 API Key 不存在",
-                        "platform api key not found",
-                    ),
-                ),
-            )
-        })?;
-
-    if !crate::gateway::gateway_supports_official_responses_websocket(&api_key) {
-        return Err(upgrade_required_response(
-            crate::gateway::error_message_for_client(
-                prefer_raw_errors,
-                crate::gateway::bilingual_error(
-                    "Responses WebSocket 仅支持官方 Codex 上游",
-                    "responses websocket is only available for official Codex upstream",
-                ),
-            ),
-        ));
-    }
-
-    let bridge_headers = http_post_websocket_bridge_headers(headers);
-    let incoming_headers = crate::gateway::IncomingHeaderSnapshot::from_http_headers(&bridge_headers);
-    Ok(WsRequestContext {
-        effective_upstream_base: crate::gateway::gateway_resolve_effective_upstream_base(&api_key),
-        api_key,
-        incoming_headers,
-        prompt_cache_key: None,
+    log::warn!(
+        "event=responses_http_route_changed_to_websocket originator={} user_agent={}",
+        incoming_headers.originator().unwrap_or("-"),
+        incoming_headers.user_agent().unwrap_or("-")
+    );
+    let message = crate::gateway::error_message_for_client(
         prefer_raw_errors,
-        transparent_mode: true,
-    })
-}
-
-fn http_post_websocket_bridge_headers(headers: &HeaderMap) -> HeaderMap {
-    let mut bridge_headers = headers.clone();
-    bridge_headers.remove(header::CONTENT_LENGTH);
-    bridge_headers.remove(header::CONTENT_TYPE);
-    bridge_headers.remove(header::CONTENT_ENCODING);
-    bridge_headers.remove(header::TRANSFER_ENCODING);
-    bridge_headers
-}
-
-fn request_uses_zstd_encoding(headers: &HeaderMap) -> bool {
-    headers
-        .get(header::CONTENT_ENCODING)
-        .and_then(|value| value.to_str().ok())
-        .is_some_and(|value| {
-            value
-                .split(',')
-                .any(|item| item.trim().eq_ignore_ascii_case("zstd"))
-        })
-}
-
-fn prepare_http_post_websocket_frame(
-    headers: &HeaderMap,
-    body: Bytes,
-) -> Result<String, WsSessionError> {
-    let body = if request_uses_zstd_encoding(headers) {
-        zstd::stream::decode_all(std::io::Cursor::new(body.as_ref())).map_err(|err| {
-            WsSessionError::bad_request_bilingual(
-                "解压旧 HTTP Responses 请求体失败",
-                format!("decode zstd http responses body failed: {err}"),
-            )
-        })?
-    } else {
-        body.to_vec()
-    };
-    let mut payload = serde_json::from_slice::<Value>(&body).map_err(|err| {
-        WsSessionError::bad_request_bilingual(
-            "旧 HTTP Responses 请求体不是有效 JSON",
-            format!("invalid http responses json body for websocket bridge: {err}"),
-        )
-    })?;
-    let Some(object) = payload.as_object_mut() else {
-        return Err(WsSessionError::bad_request_bilingual(
-            "旧 HTTP Responses 请求体必须是 JSON 对象",
-            "http responses body for websocket bridge must be a JSON object",
-        ));
-    };
-    match object.get("type").and_then(Value::as_str) {
-        Some("response.create") => {}
-        Some(other) => {
-            return Err(WsSessionError::bad_request_bilingual(
-                "旧 HTTP Responses 请求体的 WebSocket 类型不支持",
-                format!("unsupported websocket bridge frame type: {other}"),
-            ))
-        }
-        None => {
-            object.insert(
-                "type".to_string(),
-                Value::String("response.create".to_string()),
-            );
-        }
-    }
-    serde_json::to_string(&payload).map_err(|err| {
-        WsSessionError::bad_request_bilingual(
-            "序列化旧 HTTP Responses WebSocket 首帧失败",
-            format!("serialize http responses websocket bridge frame failed: {err}"),
-        )
-    })
-}
-
-fn http_bridge_error_response(err: WsSessionError, prefer_raw_errors: bool) -> Response<Body> {
-    let status = StatusCode::from_u16(err.status).unwrap_or(StatusCode::BAD_GATEWAY);
-    text_error_response(
-        status,
-        crate::gateway::error_message_for_client(prefer_raw_errors, err.message),
-    )
-}
-
-struct HttpPostWebsocketBridgeStreamState {
-    context: WsRequestContext,
-    upstream: ConnectedUpstreamWebsocket,
-    pending: Option<PendingWsRequestState>,
-    finished: bool,
-}
-
-fn http_bridge_stream_response(
-    context: WsRequestContext,
-    upstream: ConnectedUpstreamWebsocket,
-    pending: PendingWsRequestState,
-) -> Response<Body> {
-    let trace_id = pending.log.trace_id.clone();
-    let state = HttpPostWebsocketBridgeStreamState {
-        context,
-        upstream,
-        pending: Some(pending),
-        finished: false,
-    };
-    let body_stream = stream::unfold(state, |mut state| async move {
-        state
-            .next_chunk()
-            .await
-            .map(|chunk| (Ok::<Bytes, Infallible>(chunk), state))
-    });
-    Response::builder()
-        .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, "text/event-stream")
-        .header("Cache-Control", "no-cache")
-        .header("X-Accel-Buffering", "no")
-        .header(crate::error_codes::TRACE_ID_HEADER_NAME, trace_id)
-        .body(Body::from_stream(body_stream))
-        .unwrap_or_else(|err| {
-            text_error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                crate::gateway::bilingual_error(
-                    "构建 HTTP 到 WebSocket 桥接响应失败",
-                    format!("build http websocket bridge response failed: {err}"),
-                ),
-            )
-        })
-}
-
-impl HttpPostWebsocketBridgeStreamState {
-    async fn next_chunk(&mut self) -> Option<Bytes> {
-        if self.finished {
-            return None;
-        }
-        loop {
-            match self.upstream.stream.next().await {
-                Some(Ok(UpstreamMessage::Text(text))) => {
-                    if let Some(pending) = self.pending.as_mut() {
-                        collect_ws_output_text_from_frame(
-                            &mut pending.log.output_text,
-                            text.as_str(),
-                        );
-                    }
-                    let bytes = websocket_text_to_sse_bytes(text.as_str());
-                    if let Some(terminal) = inspect_ws_terminal_event(text.as_str()) {
-                        if let Some(pending) = self.pending.as_ref() {
-                            log_ws_terminal_diagnostic(
-                                &self.context,
-                                &self.upstream,
-                                pending,
-                                &terminal,
-                                "http_bridge_received",
-                            );
-                        }
-                        if let Some(mut pending) = self.pending.take() {
-                            mark_ws_first_response(&mut pending);
-                            finalize_ws_request_log(
-                                &self.context,
-                                &pending.log,
-                                Some(self.upstream.account_id.as_str()),
-                                Some(self.upstream.upstream_url.as_str()),
-                                terminal.status_code,
-                                terminal.usage,
-                                terminal.error,
-                            );
-                        }
-                        let _ = self.upstream.stream.close(None).await;
-                        self.finished = true;
-                    } else if let Some(pending) = self.pending.as_mut() {
-                        mark_ws_first_response(pending);
-                    }
-                    return Some(bytes);
-                }
-                Some(Ok(UpstreamMessage::Binary(bytes))) => {
-                    return Some(bytes);
-                }
-                Some(Ok(UpstreamMessage::Ping(payload))) => {
-                    let _ = self.upstream.stream.send(UpstreamMessage::Pong(payload)).await;
-                }
-                Some(Ok(UpstreamMessage::Pong(_))) => {}
-                Some(Ok(UpstreamMessage::Close(_))) | None => {
-                    let err = WsSessionError::bad_gateway_bilingual(
-                        "上游 WebSocket 在 response.completed 前关闭",
-                        "upstream websocket closed before response.completed",
-                    );
-                    let bytes = self.finish_with_error(err).await;
-                    self.finished = true;
-                    return Some(bytes);
-                }
-                Some(Ok(UpstreamMessage::Frame(_))) => {}
-                Some(Err(err)) => {
-                    let err = WsSessionError::bad_gateway_bilingual(
-                        "接收上游 WebSocket 帧失败",
-                        format!("receive upstream websocket frame failed: {err}"),
-                    );
-                    let bytes = self.finish_with_error(err).await;
-                    self.finished = true;
-                    return Some(bytes);
-                }
-            }
-        }
-    }
-
-    async fn finish_with_error(&mut self, err: WsSessionError) -> Bytes {
-        if let Some(mut pending) = self.pending.take() {
-            mark_ws_first_response(&mut pending);
-            finalize_ws_request_log(
-                &self.context,
-                &pending.log,
-                Some(self.upstream.account_id.as_str()),
-                Some(self.upstream.upstream_url.as_str()),
-                err.status,
-                crate::gateway::RequestLogUsage::default(),
-                Some(err.message.clone()),
-            );
-        }
-        let _ = self.upstream.stream.close(None).await;
-        websocket_error_to_sse_bytes(&err, self.context.prefer_raw_errors)
-    }
-}
-
-fn websocket_text_to_sse_bytes(text: &str) -> Bytes {
-    let event_type = serde_json::from_str::<Value>(text)
-        .ok()
-        .and_then(|value| {
-            value
-                .get("type")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-        });
-    let mut output = String::new();
-    if let Some(event_type) = event_type {
-        output.push_str("event: ");
-        output.push_str(event_type.as_str());
-        output.push('\n');
-    }
-    for line in text.lines() {
-        output.push_str("data: ");
-        output.push_str(line);
-        output.push('\n');
-    }
-    if text.is_empty() {
-        output.push_str("data: \n");
-    }
-    output.push('\n');
-    Bytes::from(output)
-}
-
-fn websocket_error_to_sse_bytes(err: &WsSessionError, prefer_raw_errors: bool) -> Bytes {
-    let message =
-        crate::gateway::error_message_for_client(prefer_raw_errors, err.message.clone());
-    let payload = json!({
-        "type": "error",
-        "status": err.status,
-        "error": {
-            "code": err.code,
-            "message": message,
-        }
-    });
-    websocket_text_to_sse_bytes(payload.to_string().as_str())
+        crate::gateway::bilingual_error(
+            "平台密钥已切换为账号 WebSocket 模式，请重新发起请求",
+            "api key switched to account websocket mode; recreate request",
+        ),
+    );
+    let mut response = text_response(StatusCode::UPGRADE_REQUIRED, message);
+    response
+        .headers_mut()
+        .insert(header::UPGRADE, HeaderValue::from_static("websocket"));
+    response.headers_mut().insert(
+        crate::error_codes::ERROR_CODE_HEADER_NAME,
+        HeaderValue::from_static(RESPONSES_WS_ROUTE_CHANGED_CODE),
+    );
+    response
 }
 
 async fn run_responses_websocket_session(mut socket: WebSocket, context: WsRequestContext) {
@@ -2581,14 +2177,6 @@ fn begin_ws_request_log(
     context: &WsRequestContext,
     prepared: &PreparedClientFrame,
 ) -> PendingWsRequestLog {
-    begin_ws_request_log_with_method(context, prepared, "GET")
-}
-
-fn begin_ws_request_log_with_method(
-    context: &WsRequestContext,
-    prepared: &PreparedClientFrame,
-    request_method: &'static str,
-) -> PendingWsRequestLog {
     let trace_id = crate::gateway::next_trace_id();
     let effective_protocol_type = crate::apikey_profile::resolve_gateway_protocol_type(
         context.api_key.protocol_type.as_str(),
@@ -2597,7 +2185,7 @@ fn begin_ws_request_log_with_method(
     crate::gateway::log_request_start(
         trace_id.as_str(),
         context.api_key.id.as_str(),
-        request_method,
+        "GET",
         prepared.request_path,
         prepared.model.as_deref(),
         prepared.reasoning_effort.as_deref(),
@@ -2640,7 +2228,6 @@ fn begin_ws_request_log_with_method(
         trace_id,
         request_path: prepared.request_path,
         request_type: prepared.request_type,
-        request_method,
         model: prepared.model.clone(),
         reasoning_effort: prepared.reasoning_effort.clone(),
         service_tier: prepared.service_tier.clone(),
@@ -2698,7 +2285,7 @@ fn finalize_ws_request_log(
         Some(context.api_key.id.as_str()),
         account_id,
         pending.request_path,
-        pending.request_method,
+        "GET",
         pending.model.as_deref(),
         pending.reasoning_effort.as_deref(),
         upstream_url,

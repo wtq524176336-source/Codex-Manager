@@ -11,6 +11,35 @@
 | 聚合诊断日志 | `gateway-trace.log` 写入器有 24 小时保留窗口和 60 秒清理间隔。 | `crates/service/src/gateway/observability/trace_log.rs:18`、`crates/service/src/gateway/observability/trace_log.rs:19` |
 | Responses 字段过滤 | `/v1/responses` 官方字段保留逻辑集中在 `retain_official_fields`。 | `crates/service/src/gateway/request/official_responses_http.rs:577` |
 
+## 2026-06-09 聚合 API 旧对象切回账号模式仍走 HTTP POST
+
+### 需求
+
+用户补充说明：一开始就是账号模式时走 WebSocket，一开始就是聚合 API 模式时走 HTTP POST，这两个行为符合预期；问题只发生在同一个旧 Codex 对象先以某个模式运行，中途切到另一种模式后仍沿用旧 transport。聚合 API 旧对象切到账号模式时不应继续 HTTP POST；账号模式旧对象切到聚合 API 时也不应继续 WebSocket。中途切断对话后再切换模式，应尽量等同于在当前模式下重新发起一个新请求。
+
+### 依据
+
+- 用户截图 `file:///C:/Users/52417/AppData/Local/PixPin/Temp/PixPin_2026-06-09_18-36-53.png` 显示 Codex 前端出现 `Stream disconnected before completion: stream closed before response.completed`。
+- 用户截图 `file:///C:/Users/52417/AppData/Local/PixPin/Temp/PixPin_2026-06-09_18-42-22.png` 显示切换前后请求日志中有账号请求 200，也有聚合 API 502。
+- 本机数据库请求日志中，2026-06-09 18:36 到 18:39 多条账号请求上游为 `https://chatgpt.com/backend-api/codex/responses`，状态 200；对应 trace 仍记录 `request_type=http`、`route_kind=account_rotation`，说明旧对象切到账号模式后仍通过 HTTP POST 进入账号透明链路。依据：`/mnt/c/Users/52417/AppData/Roaming/com.codexmanager.desktop/codexmanager.db`、`/mnt/c/Users/52417/AppData/Roaming/com.codexmanager.desktop/gateway-trace.log`
+- 前端代理此前只有 `GET /v1/responses` 且带 WebSocket upgrade 头时才进入 Responses WebSocket 处理，普通 `POST /v1/responses` 会继续转发到后端 HTTP 网关。依据：`crates/service/src/http/proxy_runtime.rs:224`
+- 本地校验此前将原生 Codex 且非聚合策略直接判为透明账号模式，并把 body 原样交给 HTTP 账号上游。依据：`crates/service/src/gateway/local_validation/request.rs:961`、`crates/service/src/gateway/local_validation/request.rs:1271`
+- 反向切换已有 Responses WebSocket 路由变更检测：当平台密钥从账号模式切到聚合 API 或其他不支持 WebSocket 的模式时，旧 WebSocket 请求会返回 `responses_websocket_route_changed` 并关闭连接。依据：`crates/service/src/http/responses_websocket.rs:561`
+
+### 修复
+
+- 前端代理新增窄分流：仅当请求是原生 Codex 的 `POST /v1/responses`，且当前平台密钥已经是支持官方账号 Responses WebSocket 的账号模式时，返回 `426 Upgrade Required` 和 `responses_websocket_route_changed`，提示客户端重新发起请求。
+- 不做 HTTP 到 WSS 或 WSS 到 HTTP 的协议桥接；模式切换后的旧 transport 直接失效，下一次新建请求按当前平台密钥模式重新选择 WebSocket 或 HTTP。
+- 保留已有账号模式旧 WebSocket 切到聚合 API 时的 route changed 关闭逻辑。
+
+### 影响范围
+
+- 只影响原生 Codex 旧对象在 `/v1/responses` 上从聚合 API 模式切回账号模式后的 HTTP POST 请求。
+- 不改变初始账号模式的客户端 WebSocket upgrade 链路。
+- 不改变聚合 API 模式的 HTTP POST 链路。
+- 不改变账号模式旧 WebSocket 切到聚合 API 时已有的关闭逻辑。
+- 不改变非原生 Codex 客户端的 HTTP Responses 请求。
+
 ## 2026-06-09 聚合 API 连通性测试误报失败和错误展示不完整
 
 ### 需求

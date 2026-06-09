@@ -255,11 +255,13 @@ async fn responses_handler(
     }
     if request.method() == axum::http::Method::POST
         && request.uri().path() == "/v1/responses"
-        && crate::http::responses_websocket::should_bridge_http_post_to_websocket(
+        && crate::http::responses_websocket::should_reject_http_post_for_websocket_mode(
             request.headers(),
         )
     {
-        return crate::http::responses_websocket::bridge_http_post_to_websocket(request).await;
+        return crate::http::responses_websocket::reject_http_post_for_websocket_mode(
+            request.headers(),
+        );
     }
     proxy_handler(State(state), request).await
 }
