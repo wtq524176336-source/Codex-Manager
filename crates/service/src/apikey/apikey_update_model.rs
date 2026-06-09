@@ -66,8 +66,9 @@ pub(crate) fn update_api_key_model(
     } else {
         None
     };
-    let normalized_account_plan_filter =
-        if normalized_rotation_strategy == crate::apikey_profile::ROTATION_ACCOUNT {
+    let normalized_account_plan_filter = if normalized_rotation_strategy
+        == crate::apikey_profile::ROTATION_ACCOUNT
+    {
         crate::account_plan::normalize_account_plan_filter(account_plan_filter)?
     } else {
         None
