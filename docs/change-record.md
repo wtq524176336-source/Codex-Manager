@@ -11,6 +11,33 @@
 | 聚合诊断日志 | `gateway-trace.log` 写入器有 24 小时保留窗口和 60 秒清理间隔。 | `crates/service/src/gateway/observability/trace_log.rs:18`、`crates/service/src/gateway/observability/trace_log.rs:19` |
 | Responses 字段过滤 | `/v1/responses` 官方字段保留逻辑集中在 `retain_official_fields`。 | `crates/service/src/gateway/request/official_responses_http.rs:577` |
 
+## 2026-06-09 聚合 API 连通性测试误报失败和错误展示不完整
+
+### 需求
+
+用户提供截图 `file:///C:/Users/52417/AppData/Local/PixPin/Temp/PixPin_2026-06-09_18-11-52.png` 和 `file:///C:/Users/52417/AppData/Local/PixPin/Temp/PixPin_2026-06-09_18-14-56.png`，说明 `https://api.xtokenmirror.cn` 实际能通，但聚合 API 列表测试显示失败；同时顶部弹窗只显示“操作失败”，表格错误信息被省略号截断。
+
+### 依据
+
+- 截图显示 `https://api.xtokenmirror.cn` 行启用中，连通性列为“失败”，错误文本显示为 `provider=codex; c...`，顶部 toast 为“操作失败”。
+- 本机数据库副本中该聚合 API 配置为 `protocol_mode=codex_cli`、`url=https://api.xtokenmirror.cn`、`last_test_error=provider=codex; codex probe http_status=400`。依据：`/mnt/c/Users/52417/AppData/Roaming/com.codexmanager.desktop/codexmanager.db`
+- 本机请求日志中 `https://api.xtokenmirror.cn/v1/responses` 在 2026-06-09 18:17 到 18:20 多次返回 200，模型为 `gpt-5.5`。依据：`/mnt/c/Users/52417/AppData/Roaming/com.codexmanager.desktop/codexmanager.db`
+- 修复前前端传输层会把 RPC 结果中的 `ok:false` 当成业务异常；聚合 API 测试结果类型本身用 `ok:false` 表示“测试完成但未连通”，本次修复后传输层只按 `error` 字段抛业务异常。依据：`apps/src-vue/api/transport.ts:131`、`crates/core/src/rpc/types.rs:467`
+- 真实 Responses 请求示例包含 `instructions` 和 message-list `input`；本次修复后的 Codex CLI 探测 body 已按该形状发送。依据：`crates/service/src/aggregate_api.rs:645`、`crates/service/src/gateway/request/official_responses_http.rs:786`
+- 截图可见聚合 API 列表错误行被省略号截断；本次修复后连通性列使用 `min-width`，错误文本使用 `white-space: normal` 和 `overflow-wrap: anywhere`。依据：`apps/src-vue/views/AggregateApiView.vue:91`、`apps/src-vue/views/AggregateApiView.vue:736`
+
+### 修复
+
+- 前端传输层只在 RPC 结果包含 `error` 字段时抛业务异常，不再把测试结果里的 `ok:false` 泛化成“操作失败”。
+- 聚合 API 列表连通性错误文本允许换行，并保留完整 `title`，不再用省略号截断。
+- Codex CLI 连通性探测改为发送带 `instructions` 和 message-list `input` 的 Responses 请求体，贴近真实 Codex CLI 上游请求。
+- 聚合 API 探测遇到非 2xx 响应时，把上游响应摘要拼入错误信息，便于定位具体失败原因。
+
+### 影响范围
+
+- 影响聚合 API 页面测试按钮、测试结果 toast 和连通性错误展示。
+- 影响聚合 API Codex CLI 兼容模式的连通性探测请求体；不改变真实网关转发请求。
+
 ## 2026-06-04 账号管理列表移除额度详情入口
 
 ### 需求

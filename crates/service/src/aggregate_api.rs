@@ -18,6 +18,8 @@ pub(crate) const AGGREGATE_API_AUTH_USERPASS: &str = "userpass";
 pub(crate) const AGGREGATE_API_PROTOCOL_OPENAI_COMPAT: &str = "openai_compat";
 pub(crate) const AGGREGATE_API_PROTOCOL_CODEX_CLI: &str = "codex_cli";
 const CODEX_CLI_DEFAULT_PROBE_MODEL: &str = "gpt-5.5";
+const CODEX_CLI_PROBE_INSTRUCTIONS: &str =
+    "You are Codex, a helpful AI assistant. Follow the user's instructions.";
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -643,9 +645,35 @@ fn read_first_chunk(mut response: reqwest::blocking::Response) -> Result<(), Str
 fn build_codex_probe_body(model: &str) -> serde_json::Value {
     json!({
         "model": model,
-        "input": "hi",
+        "instructions": CODEX_CLI_PROBE_INSTRUCTIONS,
+        "input": [{
+            "type": "message",
+            "role": "user",
+            "content": [{
+                "type": "input_text",
+                "text": "hi"
+            }]
+        }],
         "stream": true
     })
+}
+
+fn probe_http_error(
+    label: &str,
+    status_code: u16,
+    response: reqwest::blocking::Response,
+) -> String {
+    let hint = response
+        .bytes()
+        .ok()
+        .and_then(|body| gateway::summarize_upstream_error_hint_from_body(status_code, &body));
+    match hint
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        Some(hint) => format!("{label} http_status={status_code}; {hint}"),
+        None => format!("{label} http_status={status_code}"),
+    }
 }
 
 fn codex_probe_model<'a>(api: &'a AggregateApi, default_model: &'a str) -> &'a str {
@@ -729,7 +757,11 @@ fn probe_codex_models_endpoint(
 
     let status_code = response.status().as_u16() as i64;
     if !response.status().is_success() {
-        return Err(format!("codex models probe http_status={status_code}"));
+        return Err(probe_http_error(
+            "codex models probe",
+            status_code as u16,
+            response,
+        ));
     }
     read_first_chunk(response)?;
     Ok(status_code)
@@ -796,7 +828,11 @@ fn probe_codex_responses_endpoint(
 
     let status_code = response.status().as_u16() as i64;
     if !response.status().is_success() {
-        return Err(format!("codex probe http_status={status_code}"));
+        return Err(probe_http_error(
+            "codex probe",
+            status_code as u16,
+            response,
+        ));
     }
     read_first_chunk(response)?;
     Ok(status_code)

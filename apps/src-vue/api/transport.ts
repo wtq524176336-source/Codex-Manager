@@ -131,9 +131,6 @@ function readErrorMessage(error: unknown): string {
 function readBusinessErrorMessage(payload: unknown): string {
   const source = asRecord(payload);
   if (!source) return "";
-  if (source.ok === false) {
-    return source.error ? readErrorMessage(source.error) : "操作失败";
-  }
   return source.error ? readErrorMessage(source.error) : "";
 }
 

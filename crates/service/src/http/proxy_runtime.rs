@@ -253,6 +253,14 @@ async fn responses_handler(
             request.headers().contains_key("sec-websocket-key")
         );
     }
+    if request.method() == axum::http::Method::POST
+        && request.uri().path() == "/v1/responses"
+        && crate::http::responses_websocket::should_bridge_http_post_to_websocket(
+            request.headers(),
+        )
+    {
+        return crate::http::responses_websocket::bridge_http_post_to_websocket(request).await;
+    }
     proxy_handler(State(state), request).await
 }
 

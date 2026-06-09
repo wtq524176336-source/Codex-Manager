@@ -88,7 +88,7 @@
               <el-button link type="primary" @click="confirmReset(row)">重置</el-button>
             </template>
           </el-table-column>
-          <el-table-column label="连通性" width="150">
+          <el-table-column label="连通性" min-width="260">
             <template #default="{ row }">
               <el-tag :type="testTagType(row.lastTestStatus)" effect="light">
                 {{ testLabel(row.lastTestStatus) }}
@@ -96,7 +96,9 @@
               <el-button link type="primary" :loading="testingId === row.id" @click="testOne(row.id)">
                 测试
               </el-button>
-              <div v-if="row.lastTestError" class="muted error-line">{{ row.lastTestError }}</div>
+              <div v-if="row.lastTestError" class="muted error-line" :title="row.lastTestError">
+                {{ row.lastTestError }}
+              </div>
             </template>
           </el-table-column>
           <el-table-column label="状态" width="110">
@@ -732,10 +734,10 @@ onMounted(loadData);
   }
 
   .error-line {
-    max-width: 130px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    margin-top: 4px;
+    line-height: 1.4;
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 
   .icon-actions {
