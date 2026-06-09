@@ -12,7 +12,7 @@ use super::super::support::deadline;
 use super::CandidateUpstreamDecision;
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn execute<F>(
+pub(in super::super) fn execute<F>(
     storage: &Storage,
     method: &reqwest::Method,
     request_ctx: UpstreamRequestContext<'_>,
