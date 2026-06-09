@@ -946,9 +946,7 @@ pub(crate) fn gateway_supports_official_responses_websocket(
     {
         return false;
     }
-    if api_key.rotation_strategy == crate::apikey_profile::ROTATION_AGGREGATE_API
-        || api_key.rotation_strategy == crate::apikey_profile::ROTATION_HYBRID
-    {
+    if api_key.rotation_strategy == crate::apikey_profile::ROTATION_AGGREGATE_API {
         return false;
     }
     upstream::config::is_chatgpt_backend_base(&gateway_resolve_effective_upstream_base(api_key))

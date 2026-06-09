@@ -15,7 +15,6 @@ pub(super) enum GatewayUpstreamExecutorKind {
 pub(super) enum GatewayUpstreamRouteKind {
     AccountRotation,
     AggregateApi,
-    HybridAccountFirst,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,7 +35,6 @@ pub(super) fn resolve_gateway_upstream_execution_plan(
 ) -> GatewayUpstreamExecutionPlan {
     let route_kind = match rotation_strategy {
         crate::apikey_profile::ROTATION_AGGREGATE_API => GatewayUpstreamRouteKind::AggregateApi,
-        crate::apikey_profile::ROTATION_HYBRID => GatewayUpstreamRouteKind::HybridAccountFirst,
         _ => GatewayUpstreamRouteKind::AccountRotation,
     };
     GatewayUpstreamExecutionPlan {
@@ -137,13 +135,6 @@ mod tests {
             GatewayUpstreamExecutionPlan {
                 executor_kind: GatewayUpstreamExecutorKind::CodexResponses,
                 route_kind: GatewayUpstreamRouteKind::AggregateApi,
-            }
-        );
-        assert_eq!(
-            resolve_gateway_upstream_execution_plan("openai_compat", "hybrid_rotation"),
-            GatewayUpstreamExecutionPlan {
-                executor_kind: GatewayUpstreamExecutorKind::CodexResponses,
-                route_kind: GatewayUpstreamRouteKind::HybridAccountFirst,
             }
         );
     }

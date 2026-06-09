@@ -469,7 +469,6 @@ const activeApiKey = computed(
 const activeApiKeyModeLabel = computed(() => {
   const strategy = activeApiKey.value?.rotationStrategy;
   if (strategy === "aggregate_api_rotation") return "聚合API模式";
-  if (strategy === "hybrid_rotation") return "混合模式";
   if (strategy === "account_rotation") return "账号模式";
   return "未启用";
 });
@@ -851,9 +850,7 @@ function apiKeyPayloadForMode(row: ApiKeySummary, rotationStrategy: string) {
     rotationStrategy,
     aggregateApiId: rotationStrategy === "aggregate_api_rotation" ? row.aggregateApiId || null : null,
     accountPlanFilter:
-      rotationStrategy === "account_rotation" || rotationStrategy === "hybrid_rotation"
-        ? row.accountPlanFilter || null
-        : null,
+      rotationStrategy === "account_rotation" ? row.accountPlanFilter || null : null,
   };
 }
 

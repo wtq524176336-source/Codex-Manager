@@ -89,7 +89,6 @@
             <el-option label="全部策略" value="all" />
             <el-option label="账号轮转" value="account_rotation" />
             <el-option label="聚合API轮转" value="aggregate_api_rotation" />
-            <el-option label="混合轮转" value="hybrid_rotation" />
           </el-select>
           <el-button :loading="loading" @click="loadData">刷新</el-button>
         </div>
@@ -206,7 +205,6 @@
         <el-select v-model="form.rotationStrategy" placeholder="轮转策略">
           <el-option label="账号轮转" value="account_rotation" />
           <el-option label="聚合API轮转" value="aggregate_api_rotation" />
-          <el-option label="混合轮转（账号优先）" value="hybrid_rotation" />
         </el-select>
         <el-select
           v-if="usesAggregateApi"
@@ -378,16 +376,8 @@ const totalTokens = computed(() =>
 const totalCost = computed(() =>
   items.value.reduce((sum, item) => sum + Math.max(0, Number(item.estimatedCostUsd) || 0), 0),
 );
-const usesAggregateApi = computed(
-  () =>
-    form.rotationStrategy === "aggregate_api_rotation" ||
-    form.rotationStrategy === "hybrid_rotation",
-);
-const usesAccountPlanFilter = computed(
-  () =>
-    form.rotationStrategy === "account_rotation" ||
-    form.rotationStrategy === "hybrid_rotation",
-);
+const usesAggregateApi = computed(() => form.rotationStrategy === "aggregate_api_rotation");
+const usesAccountPlanFilter = computed(() => form.rotationStrategy === "account_rotation");
 const gatewayOrigin = computed(() => {
   const addr = appStore.serviceAddr || "localhost:48760";
   const value = addr.startsWith("http://") || addr.startsWith("https://") ? addr : `http://${addr}`;
@@ -422,7 +412,6 @@ function formatUsd(value: number) {
 
 function rotationLabel(value?: string | null) {
   if (value === "aggregate_api_rotation") return "聚合API轮转";
-  if (value === "hybrid_rotation") return "混合轮转";
   return "账号轮转";
 }
 
