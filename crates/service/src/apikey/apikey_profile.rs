@@ -186,7 +186,6 @@ mod tests {
             normalize_rotation_strategy(Some("aggregate_api_rotation".to_string())).as_deref(),
             Ok(ROTATION_AGGREGATE_API)
         );
-        assert!(normalize_rotation_strategy(Some("hybrid_rotation".to_string())).is_err());
     }
 
     #[test]

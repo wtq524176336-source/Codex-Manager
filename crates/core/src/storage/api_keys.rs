@@ -543,13 +543,6 @@ impl Storage {
         )?;
         self.conn.execute(
             "UPDATE api_keys
-             SET rotation_strategy = 'account_rotation',
-                 aggregate_api_id = NULL
-             WHERE rotation_strategy = 'hybrid_rotation'",
-            [],
-        )?;
-        self.conn.execute(
-            "UPDATE api_keys
              SET account_plan_filter = NULL
              WHERE account_plan_filter IS NOT NULL AND TRIM(account_plan_filter) = ''",
             [],

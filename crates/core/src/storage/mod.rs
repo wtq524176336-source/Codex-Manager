@@ -647,8 +647,8 @@ impl Storage {
             include_str!("../../migrations/057_api_key_profiles_openai_only.sql"),
         )?;
         self.apply_sql_migration(
-            "058_drop_hybrid_rotation",
-            include_str!("../../migrations/058_drop_hybrid_rotation.sql"),
+            "058_api_key_rotation_strategy_cleanup",
+            include_str!("../../migrations/058_api_key_rotation_strategy_cleanup.sql"),
         )?;
         self.ensure_api_key_rotation_columns()?;
         self.ensure_aggregate_apis_table()?;

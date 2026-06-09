@@ -553,9 +553,7 @@ pub(in super::super) fn proxy_validated_request(
 #[cfg(test)]
 mod tests {
     use super::{
-        exhausted_gateway_error_for_log, hybrid_route_error_message, request_deadline_for_path,
-        resolve_upstream_is_stream, respond_when_account_candidates_empty,
-        should_fallback_to_aggregate_after_account_exhaustion,
+        exhausted_gateway_error_for_log, request_deadline_for_path, resolve_upstream_is_stream,
         should_route_aggregate_models_to_account, should_try_provider_executor_aggregate_route,
     };
     use crate::gateway::upstream::executor::{
