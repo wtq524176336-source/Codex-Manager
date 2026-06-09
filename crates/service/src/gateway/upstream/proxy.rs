@@ -289,10 +289,7 @@ pub(in super::super) fn proxy_validated_request(
     );
 
     if use_aggregate_api_route {
-        match resolve_aggregate_candidates_for_route(
-            &storage,
-            aggregate_api_id.as_deref(),
-        ) {
+        match resolve_aggregate_candidates_for_route(&storage, aggregate_api_id.as_deref()) {
             Ok(aggregate_api_candidates) => {
                 return proxy_with_aggregate_candidates(
                     request,
@@ -571,5 +568,4 @@ mod tests {
         assert!(timeout > Duration::from_secs(250));
         assert!(timeout <= Duration::from_secs(300));
     }
-
 }

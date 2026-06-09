@@ -622,7 +622,7 @@ async function toggleStatus(row: AggregateApiSummary, checked: unknown) {
   try {
     await updateAggregateApi(row.id, {
       providerType: "codex",
-      protocolMode: row.protocolMode,
+      protocolMode: normalizeProtocolModeForForm(row.protocolMode),
       supplierName: row.supplierName,
       sort: row.sort,
       status: enabled ? "active" : "disabled",
@@ -654,7 +654,7 @@ async function prioritize(row: AggregateApiSummary) {
   try {
     await updateAggregateApi(row.id, {
       providerType: "codex",
-      protocolMode: row.protocolMode,
+      protocolMode: normalizeProtocolModeForForm(row.protocolMode),
       supplierName: row.supplierName,
       sort: nextSort,
       url: row.url,

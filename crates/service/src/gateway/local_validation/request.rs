@@ -89,10 +89,7 @@ fn allow_compat_responses_path_rewrite(normalized_path: &str) -> bool {
         || normalized_path.starts_with("/v1/images/edits")
 }
 
-fn allow_codex_compat_rewrite_for_client(
-    normalized_path: &str,
-    native_codex_client: bool,
-) -> bool {
+fn allow_codex_compat_rewrite_for_client(normalized_path: &str, native_codex_client: bool) -> bool {
     if allow_compat_responses_path_rewrite(normalized_path) {
         return !native_codex_client;
     }
@@ -1056,8 +1053,7 @@ fn resolve_local_conversation_id(
 ) -> Option<String> {
     super::super::resolve_local_conversation_id_with_sticky_fallback(
         incoming_headers,
-        !client_has_prompt_cache_key
-            && should_derive_compat_conversation_anchor(normalized_path),
+        !client_has_prompt_cache_key && should_derive_compat_conversation_anchor(normalized_path),
     )
 }
 
@@ -1070,10 +1066,8 @@ fn resolve_client_is_stream(
 ) -> bool {
     client_is_stream
         || (normalized_path.starts_with("/v1/responses") && client_accepts_sse)
-        || (is_non_native_openai_responses_api_request(
-            normalized_path,
-            native_codex_client,
-        ) && !client_stream_specified)
+        || (is_non_native_openai_responses_api_request(normalized_path, native_codex_client)
+            && !client_stream_specified)
 }
 
 fn client_accepts_sse(incoming_headers: &super::super::IncomingHeaderSnapshot) -> bool {
@@ -1449,8 +1443,7 @@ pub(super) fn build_local_validation_result(
     super::super::validate_text_input_limit_for_path(&normalized_path, &passthrough_body)
         .map_err(|err| LocalValidationError::new(400, err.message()))?;
     let (mut path, mut response_adapter, tool_name_restore_map) =
-        if is_openai_images_generations_path(normalized_path.as_str()) && !native_codex_client
-        {
+        if is_openai_images_generations_path(normalized_path.as_str()) && !native_codex_client {
             if !super::super::runtime_config::codex_image_generation_enabled() {
                 return Err(LocalValidationError::new(
                     404,
@@ -1473,8 +1466,7 @@ pub(super) fn build_local_validation_result(
                 response_adapter,
                 super::super::ToolNameRestoreMap::default(),
             )
-        } else if is_openai_images_edits_path(normalized_path.as_str()) && !native_codex_client
-        {
+        } else if is_openai_images_edits_path(normalized_path.as_str()) && !native_codex_client {
             if !super::super::runtime_config::codex_image_generation_enabled() {
                 return Err(LocalValidationError::new(
                     404,
@@ -1533,10 +1525,8 @@ pub(super) fn build_local_validation_result(
         &client_request_meta,
     );
     let local_conversation_id = initial_local_conversation_id.clone();
-    let allow_codex_compat_rewrite = allow_codex_compat_rewrite_for_client(
-        normalized_path.as_str(),
-        native_codex_client,
-    );
+    let allow_codex_compat_rewrite =
+        allow_codex_compat_rewrite_for_client(normalized_path.as_str(), native_codex_client);
     let conversation_binding = super::super::conversation_binding::load_conversation_binding(
         &storage,
         api_key.key_hash.as_str(),

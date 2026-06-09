@@ -9,5 +9,3 @@ pub(crate) enum ResponseAdapter {
 }
 
 pub(crate) type ToolNameRestoreMap = BTreeMap<String, String>;
-
-#[derive(Debug)]

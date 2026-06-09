@@ -33,10 +33,7 @@ impl<'a> UpstreamRequestContext<'a> {
     ///
     /// # 返回
     /// 返回函数执行结果
-    pub(in super::super) fn from_request(
-        request: &'a Request,
-        transparent_mode: bool,
-    ) -> Self {
+    pub(in super::super) fn from_request(request: &'a Request, transparent_mode: bool) -> Self {
         Self {
             request_path: request.url(),
             transparent_mode,
