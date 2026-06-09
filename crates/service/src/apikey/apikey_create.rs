@@ -4,7 +4,7 @@ use codexmanager_core::storage::{now_ts, ApiKey};
 use crate::apikey::service_tier::normalize_service_tier_owned;
 use crate::apikey_profile::{
     normalize_protocol_type, normalize_rotation_strategy, normalize_static_headers_json,
-    normalize_upstream_base_url, profile_from_protocol,
+    normalize_upstream_base_url, AUTH_BEARER, CLIENT_CODEX,
 };
 use crate::reasoning_effort::normalize_reasoning_effort_owned;
 use crate::storage_helpers::{
@@ -40,7 +40,6 @@ pub(crate) fn create_api_key(
     let key_hash = hash_platform_key(&key);
     let key_id = generate_key_id();
     let protocol_type = normalize_protocol_type(protocol_type)?;
-    let (client_type, protocol_type, auth_scheme) = profile_from_protocol(&protocol_type)?;
     let upstream_base_url = normalize_upstream_base_url(upstream_base_url)?;
     let static_headers_json = normalize_static_headers_json(static_headers_json)?;
     let rotation_strategy = normalize_rotation_strategy(rotation_strategy)?;
@@ -68,9 +67,9 @@ pub(crate) fn create_api_key(
         aggregate_api_id,
         account_plan_filter,
         aggregate_api_url: None,
-        client_type,
+        client_type: CLIENT_CODEX.to_string(),
         protocol_type,
-        auth_scheme,
+        auth_scheme: AUTH_BEARER.to_string(),
         upstream_base_url,
         static_headers_json,
         key_hash,

@@ -425,15 +425,6 @@ function normalizeEditableServiceTier(value?: string | null) {
   return String(value || "").trim().toLowerCase() === "fast" ? "fast" : "";
 }
 
-function normalizeEditableProtocolType(value?: string | null) {
-  const normalized = String(value || "").trim().toLowerCase();
-  if (!normalized) return "openai_compat";
-  if (["codex", "openai", "openai_compat"].includes(normalized)) {
-    return "openai_compat";
-  }
-  return "openai_compat";
-}
-
 function buildCcSwitchProviderName(name?: string | null, id?: string | null): string {
   const label = String(name || id || "Platform Key").trim();
   return label.toLowerCase().startsWith("codexmanager") ? label : `CodexManager - ${label}`;
@@ -513,7 +504,7 @@ function openEdit(row: ApiKeySummary) {
     modelSlug: row.modelSlug || row.model || "",
     reasoningEffort: row.reasoningEffort || "",
     serviceTier: normalizeEditableServiceTier(row.serviceTier),
-    protocolType: normalizeEditableProtocolType(row.protocol || row.clientType),
+    protocolType: "openai_compat",
     upstreamBaseUrl: row.upstreamBaseUrl || "",
     staticHeadersJson: row.staticHeadersJson || "",
     rotationStrategy: row.rotationStrategy || "account_rotation",
@@ -612,7 +603,7 @@ async function switchRotation(row: ApiKeySummary) {
       modelSlug: row.modelSlug || row.model,
       reasoningEffort: row.reasoningEffort,
       serviceTier: normalizeEditableServiceTier(row.serviceTier),
-      protocolType: normalizeEditableProtocolType(row.protocol || row.clientType),
+      protocolType: "openai_compat",
       upstreamBaseUrl: row.upstreamBaseUrl,
       staticHeadersJson: row.staticHeadersJson,
       rotationStrategy: next,

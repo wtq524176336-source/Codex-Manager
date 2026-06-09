@@ -844,7 +844,7 @@ function apiKeyPayloadForMode(row: ApiKeySummary, rotationStrategy: string) {
     modelSlug: row.modelSlug || row.model || null,
     reasoningEffort: row.reasoningEffort || null,
     serviceTier: String(row.serviceTier || "").trim().toLowerCase() === "fast" ? "fast" : null,
-    protocolType: row.protocol || row.clientType || null,
+    protocolType: "openai_compat",
     upstreamBaseUrl: row.upstreamBaseUrl || null,
     staticHeadersJson: row.staticHeadersJson || null,
     rotationStrategy,

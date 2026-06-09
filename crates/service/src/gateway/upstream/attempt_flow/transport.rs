@@ -18,7 +18,6 @@ enum RequestCompression {
 #[derive(Debug, Clone, Copy)]
 pub(in super::super) struct UpstreamRequestContext<'a> {
     pub(in super::super) request_path: &'a str,
-    pub(in super::super) protocol_type: &'a str,
     pub(in super::super) transparent_mode: bool,
 }
 
@@ -36,12 +35,10 @@ impl<'a> UpstreamRequestContext<'a> {
     /// 返回函数执行结果
     pub(in super::super) fn from_request(
         request: &'a Request,
-        protocol_type: &'a str,
         transparent_mode: bool,
     ) -> Self {
         Self {
             request_path: request.url(),
-            protocol_type,
             transparent_mode,
         }
     }
@@ -144,11 +141,6 @@ fn strip_compact_service_tier_for_transport(body: &Bytes, preserve_service_tier:
 /// 返回函数执行结果
 fn is_compact_request_path(path: &str) -> bool {
     path == "/v1/responses/compact" || path.starts_with("/v1/responses/compact?")
-}
-
-fn should_preserve_client_identity(protocol_type: &str) -> bool {
-    let _ = protocol_type;
-    false
 }
 
 /// 函数 `has_header`
@@ -572,7 +564,6 @@ fn send_upstream_request_with_compression_override(
             installation_id: installation_id.as_deref(),
             incoming_user_agent: incoming_headers.user_agent(),
             incoming_originator: incoming_headers.originator(),
-            preserve_client_identity: should_preserve_client_identity(request_ctx.protocol_type),
             incoming_session_id: request_affinity.incoming_session_id,
             thread_id: request_affinity.fallback_session_id,
             incoming_window_id: incoming_headers.window_id(),
@@ -590,7 +581,6 @@ fn send_upstream_request_with_compression_override(
             chatgpt_account_id: chatgpt_account_header,
             incoming_user_agent: incoming_headers.user_agent(),
             incoming_originator: incoming_headers.originator(),
-            preserve_client_identity: should_preserve_client_identity(request_ctx.protocol_type),
             incoming_session_id: request_affinity.incoming_session_id,
             incoming_window_id: incoming_headers.window_id(),
             incoming_client_request_id: request_affinity.incoming_client_request_id,

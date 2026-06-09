@@ -1,7 +1,7 @@
 use crate::apikey::service_tier::normalize_service_tier_owned;
 use crate::apikey_profile::{
     normalize_protocol_type, normalize_rotation_strategy, normalize_static_headers_json,
-    normalize_upstream_base_url, profile_from_protocol, ROTATION_AGGREGATE_API,
+    normalize_upstream_base_url, AUTH_BEARER, CLIENT_CODEX, ROTATION_AGGREGATE_API,
 };
 use crate::reasoning_effort::normalize_reasoning_effort;
 use crate::storage_helpers::open_storage;
@@ -94,9 +94,10 @@ pub(crate) fn update_api_key_model(
             .find_api_key_by_id(key_id)
             .map_err(|e| e.to_string())?
             .ok_or_else(|| "api key not found".to_string())?;
-        let protocol = protocol_type.unwrap_or_else(|| current.protocol_type.clone());
-        let normalized_protocol = normalize_protocol_type(Some(protocol))?;
-        let (next_client, next_protocol, next_auth) = profile_from_protocol(&normalized_protocol)?;
+        let next_protocol = match protocol_type {
+            Some(protocol) => normalize_protocol_type(Some(protocol))?,
+            None => current.protocol_type.clone(),
+        };
         let next_upstream_base_url = if has_upstream_base_url {
             normalized_upstream_base_url.as_deref()
         } else {
@@ -110,9 +111,9 @@ pub(crate) fn update_api_key_model(
         storage
             .update_api_key_profile_config(
                 key_id,
-                &next_client,
+                CLIENT_CODEX,
                 &next_protocol,
-                &next_auth,
+                AUTH_BEARER,
                 next_upstream_base_url,
                 next_static_headers_json,
                 normalized_service_tier

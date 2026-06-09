@@ -33,8 +33,7 @@ fn should_skip_codex_v1_alt_for_api_client(
     incoming_headers: &super::super::super::IncomingHeaderSnapshot,
     alt_url: &str,
 ) -> bool {
-    request_ctx.protocol_type == crate::apikey_profile::PROTOCOL_OPENAI_COMPAT
-        && request_ctx.request_path.starts_with("/v1/responses")
+    request_ctx.request_path.starts_with("/v1/responses")
         && alt_url
             .to_ascii_lowercase()
             .contains("/backend-api/codex/v1/")
@@ -183,7 +182,6 @@ mod tests {
     fn api_client_responses_request_skips_codex_v1_alt_retry() {
         let request_ctx = UpstreamRequestContext {
             request_path: "/v1/responses",
-            protocol_type: crate::apikey_profile::PROTOCOL_OPENAI_COMPAT,
             transparent_mode: false,
         };
         let incoming_headers = headers(Some("CherryStudio/1.0"), None);
@@ -199,7 +197,6 @@ mod tests {
     fn native_codex_responses_request_keeps_codex_v1_alt_retry_available() {
         let request_ctx = UpstreamRequestContext {
             request_path: "/v1/responses",
-            protocol_type: crate::apikey_profile::PROTOCOL_OPENAI_COMPAT,
             transparent_mode: false,
         };
         let incoming_headers = headers(Some("codex-cli/0.1.0"), Some("codex_cli_rs"));

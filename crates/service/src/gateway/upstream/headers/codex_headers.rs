@@ -20,22 +20,16 @@ fn looks_like_codex_identity(value: &str) -> bool {
     value.to_ascii_lowercase().contains("codex")
 }
 
-fn resolve_originator_header(
-    incoming_originator: Option<&str>,
-    preserve_client_identity: bool,
-) -> String {
+fn resolve_originator_header(incoming_originator: Option<&str>) -> String {
     normalize_non_empty(incoming_originator)
-        .filter(|value| preserve_client_identity || looks_like_codex_identity(value))
+        .filter(|value| looks_like_codex_identity(value))
         .map(str::to_string)
         .unwrap_or_else(crate::gateway::current_wire_originator)
 }
 
-fn resolve_user_agent_header(
-    incoming_user_agent: Option<&str>,
-    preserve_client_identity: bool,
-) -> String {
+fn resolve_user_agent_header(incoming_user_agent: Option<&str>) -> String {
     normalize_non_empty(incoming_user_agent)
-        .filter(|value| preserve_client_identity || looks_like_codex_identity(value))
+        .filter(|value| looks_like_codex_identity(value))
         .map(str::to_string)
         .unwrap_or_else(crate::gateway::current_codex_user_agent)
 }
@@ -45,7 +39,6 @@ pub(crate) struct CodexUpstreamHeaderInput<'a> {
     pub(crate) chatgpt_account_id: Option<&'a str>,
     pub(crate) incoming_user_agent: Option<&'a str>,
     pub(crate) incoming_originator: Option<&'a str>,
-    pub(crate) preserve_client_identity: bool,
     pub(crate) incoming_session_id: Option<&'a str>,
     pub(crate) incoming_window_id: Option<&'a str>,
     pub(crate) incoming_client_request_id: Option<&'a str>,
@@ -68,7 +61,6 @@ pub(crate) struct CodexCompactUpstreamHeaderInput<'a> {
     pub(crate) installation_id: Option<&'a str>,
     pub(crate) incoming_user_agent: Option<&'a str>,
     pub(crate) incoming_originator: Option<&'a str>,
-    pub(crate) preserve_client_identity: bool,
     pub(crate) incoming_session_id: Option<&'a str>,
     pub(crate) thread_id: Option<&'a str>,
     pub(crate) incoming_window_id: Option<&'a str>,
@@ -108,10 +100,8 @@ pub(crate) fn resolve_codex_installation_id(
 pub(crate) fn build_codex_upstream_headers(
     input: CodexUpstreamHeaderInput<'_>,
 ) -> Vec<(String, String)> {
-    let user_agent =
-        resolve_user_agent_header(input.incoming_user_agent, input.preserve_client_identity);
-    let originator =
-        resolve_originator_header(input.incoming_originator, input.preserve_client_identity);
+    let user_agent = resolve_user_agent_header(input.incoming_user_agent);
+    let originator = resolve_originator_header(input.incoming_originator);
     let mut headers = Vec::with_capacity(16);
     headers.push((
         "Authorization".to_string(),
@@ -232,10 +222,8 @@ pub(crate) fn build_codex_upstream_headers(
 pub(crate) fn build_codex_compact_upstream_headers(
     input: CodexCompactUpstreamHeaderInput<'_>,
 ) -> Vec<(String, String)> {
-    let user_agent =
-        resolve_user_agent_header(input.incoming_user_agent, input.preserve_client_identity);
-    let originator =
-        resolve_originator_header(input.incoming_originator, input.preserve_client_identity);
+    let user_agent = resolve_user_agent_header(input.incoming_user_agent);
+    let originator = resolve_originator_header(input.incoming_originator);
     let mut headers = Vec::with_capacity(13);
     headers.push((
         "Authorization".to_string(),

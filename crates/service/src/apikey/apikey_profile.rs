@@ -33,29 +33,11 @@ fn normalize_key(value: &str) -> String {
 pub(crate) fn normalize_protocol_type(value: Option<String>) -> Result<String, String> {
     match value {
         Some(raw) => match normalize_key(&raw).as_str() {
-            "codex" | "openai" | "openai_compat" => Ok(PROTOCOL_OPENAI_COMPAT.to_string()),
+            PROTOCOL_OPENAI_COMPAT => Ok(PROTOCOL_OPENAI_COMPAT.to_string()),
             other => Err(format!("unsupported protocol type: {other}")),
         },
         None => Ok(PROTOCOL_OPENAI_COMPAT.to_string()),
     }
-}
-
-/// 函数 `profile_from_protocol`
-///
-/// 作者: gaohongshun
-///
-/// 时间: 2026-04-02
-///
-/// # 参数
-/// - crate: 参数 crate
-///
-/// # 返回
-/// 返回函数执行结果
-pub(crate) fn profile_from_protocol(
-    protocol_type: &str,
-) -> Result<(String, String, String), String> {
-    let protocol = normalize_protocol_type(Some(protocol_type.to_string()))?;
-    Ok((CLIENT_CODEX.to_string(), protocol, AUTH_BEARER.to_string()))
 }
 
 /// 函数 `normalize_rotation_strategy`
@@ -170,6 +152,15 @@ mod tests {
             normalize_rotation_strategy(Some("aggregate_api_rotation".to_string())).as_deref(),
             Ok(ROTATION_AGGREGATE_API)
         );
+    }
+
+    #[test]
+    fn removed_protocol_aliases_are_rejected_for_profile_configuration() {
+        for value in ["codex", "openai"] {
+            let err = normalize_protocol_type(Some(value.to_string()))
+                .expect_err("protocol aliases should be rejected");
+            assert!(err.contains("unsupported protocol type"));
+        }
     }
 
     #[test]

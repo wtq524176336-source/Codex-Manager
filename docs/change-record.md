@@ -23,21 +23,29 @@
 - 账号管理页当前平台密钥模式提示和切换 payload 只在账号模式与聚合 API 模式之间处理。依据：`apps/src-vue/views/AccountsView.vue:469`、`apps/src-vue/views/AccountsView.vue:841`、`apps/src-vue/views/AccountsView.vue:863`
 - 后端平台密钥策略常量和归一化逻辑只保留 `account_rotation` 与 `aggregate_api_rotation`。依据：`crates/service/src/apikey/apikey_profile.rs:4`、`crates/service/src/apikey/apikey_profile.rs:88`
 - 创建和更新平台密钥时，`aggregate_api_id` 只在聚合 API 模式保存，`account_plan_filter` 只在账号模式保存。依据：`crates/service/src/apikey/apikey_create.rs:46`、`crates/service/src/apikey/apikey_create.rs:56`、`crates/service/src/apikey/apikey_update_model.rs:59`、`crates/service/src/apikey/apikey_update_model.rs:69`
-- 网关执行计划只剩账号轮转和聚合 API 两类；聚合 API 模式直接走聚合候选，账号模式走账号候选。依据：`crates/service/src/gateway/upstream/executor/mod.rs:15`、`crates/service/src/gateway/upstream/executor/mod.rs:32`、`crates/service/src/gateway/upstream/proxy.rs:345`、`crates/service/src/gateway/upstream/proxy.rs:402`
-- 账号透明模式仍由“原生 Codex 客户端且非聚合 API 策略”触发；当前只剩账号策略会进入透明账号模式。依据：`crates/service/src/gateway/local_validation/request.rs:961`、`crates/service/src/gateway/local_validation/request.rs:1254`
+- 网关执行计划只剩账号轮转和聚合 API 两类；聚合 API 模式直接走聚合候选，账号模式走账号候选。依据：`crates/service/src/gateway/upstream/executor/mod.rs:9`、`crates/service/src/gateway/upstream/executor/mod.rs:20`、`crates/service/src/gateway/upstream/proxy.rs:299`、`crates/service/src/gateway/upstream/proxy.rs:308`
+- 账号透明模式只由“原生 Codex 客户端 + 账号策略”触发，聚合 API 策略不会进入账号透明模式。依据：`crates/service/src/gateway/local_validation/request.rs:961`、`crates/service/src/gateway/local_validation/request.rs:1253`、`crates/service/src/gateway/local_validation/request.rs:1341`
+- Responses WebSocket 支持只接受账号模式且上游为 ChatGPT 后端；聚合 API 模式不支持 WebSocket，会走 upgrade required / route changed 处理。依据：`crates/service/src/gateway/mod.rs:939`、`crates/service/src/http/responses_websocket.rs:683`
+- 账号候选预检查只保留 `Ready` 和 `Responded` 两种结果，旧混合兜底需要的空候选返回分支已移除；允许空候选仅用于原生 active turn replay 继续恢复绑定账号。依据：`crates/service/src/gateway/upstream/support/precheck.rs:4`、`crates/service/src/gateway/upstream/support/precheck.rs:93`、`crates/service/src/gateway/upstream/proxy.rs:358`
+- 上游执行器不再保留单一 executor 的枚举分发，账号候选执行直接进入 Codex Responses 执行器。依据：`crates/service/src/gateway/upstream/executor/mod.rs:37`、`crates/service/src/gateway/upstream/executor/mod.rs:62`、`crates/service/src/gateway/upstream/proxy_pipeline/candidate_attempt.rs:72`
 - 存量 `hybrid_rotation` 数据通过迁移改为 `account_rotation` 并清空 `aggregate_api_id`。依据：`crates/core/src/storage/mod.rs:649`、`crates/core/migrations/058_api_key_rotation_strategy_cleanup.sql:1`
 
 ### 修复
 
 - 删除 API Key 页面和账号管理页的混合轮转入口、标签与 payload 分支。
 - 删除后端 `ROTATION_HYBRID` 常量、混合策略别名归一化、网关 `HybridAccountFirst` 执行计划、账号耗尽后聚合 API 兜底分支和相关测试引用。
+- 删除聚合 API 模式下 `/models` 回账号路由的兼容分支，聚合 API 模式统一进入聚合 API 候选链路。
+- 删除固定返回 `openai_compat` 的旧协议解析壳和单一 executor 枚举分发。
+- 将账号透明模式和 Responses WebSocket 支持收紧为账号策略专属。
 - 新增 `058_api_key_rotation_strategy_cleanup` 迁移，将旧混合轮转记录切到账号轮转，避免继续出现第三种业务模式。
 
 ### 影响范围
 
 - 平台密钥只剩两种模式：账号轮转与聚合 API 轮转。
 - 账号模式保留原生 Codex 透明账号传递链路。
+- 账号模式保留 Responses WebSocket 支持；聚合 API 模式不支持 WebSocket。
 - 聚合 API 模式保留 HTTP 聚合 API 转发链路。
+- 聚合 API 模式不再为 `/models` 请求切回账号候选。
 - 账号候选为空或账号耗尽时不再转入聚合 API 兜底。
 
 ## 2026-06-09 聚合 API 旧对象切回账号模式仍走 HTTP POST
@@ -52,7 +60,7 @@
 - 用户截图 `file:///C:/Users/52417/AppData/Local/PixPin/Temp/PixPin_2026-06-09_18-42-22.png` 显示切换前后请求日志中有账号请求 200，也有聚合 API 502。
 - 本机数据库请求日志中，2026-06-09 18:36 到 18:39 多条账号请求上游为 `https://chatgpt.com/backend-api/codex/responses`，状态 200；对应 trace 仍记录 `request_type=http`、`route_kind=account_rotation`，说明旧对象切到账号模式后仍通过 HTTP POST 进入账号透明链路。依据：`/mnt/c/Users/52417/AppData/Roaming/com.codexmanager.desktop/codexmanager.db`、`/mnt/c/Users/52417/AppData/Roaming/com.codexmanager.desktop/gateway-trace.log`
 - 前端代理此前只有 `GET /v1/responses` 且带 WebSocket upgrade 头时才进入 Responses WebSocket 处理，普通 `POST /v1/responses` 会继续转发到后端 HTTP 网关。依据：`crates/service/src/http/proxy_runtime.rs:224`
-- 本地校验此前将原生 Codex 且非聚合策略直接判为透明账号模式，并把 body 原样交给 HTTP 账号上游。依据：`crates/service/src/gateway/local_validation/request.rs:961`、`crates/service/src/gateway/local_validation/request.rs:1271`
+- 本地校验当前只在原生 Codex 且账号策略时进入透明账号模式；聚合 API 策略单独进入聚合 API 分支。依据：`crates/service/src/gateway/local_validation/request.rs:961`、`crates/service/src/gateway/local_validation/request.rs:1253`、`crates/service/src/gateway/local_validation/request.rs:1341`
 - 反向切换已有 Responses WebSocket 路由变更检测：当平台密钥从账号模式切到聚合 API 或其他不支持 WebSocket 的模式时，旧 WebSocket 请求会返回 `responses_websocket_route_changed` 并关闭连接。依据：`crates/service/src/http/responses_websocket.rs:561`
 
 ### 修复

@@ -272,11 +272,7 @@ pub(in super::super) fn execute_candidate_sequence(
         let request_ref = request
             .as_ref()
             .ok_or_else(|| "request already consumed".to_string())?;
-        let request_ctx = UpstreamRequestContext::from_request(
-            request_ref,
-            context.protocol_type(),
-            transparent_mode,
-        );
+        let request_ctx = UpstreamRequestContext::from_request(request_ref, transparent_mode);
         let incoming_session_id = attempt_headers.session_id();
         let incoming_turn_state = attempt_headers.turn_state();
         let incoming_conversation_id = attempt_headers.conversation_id();

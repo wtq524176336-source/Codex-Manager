@@ -3,7 +3,6 @@ use std::time::Instant;
 use tiny_http::Request;
 
 use super::super::local_validation::LocalValidationResult;
-use super::executor::{resolve_gateway_upstream_execution_plan, GatewayUpstreamRouteKind};
 use super::proxy_pipeline::candidate_executor::{
     execute_candidate_sequence, CandidateExecutionResult, CandidateExecutorParams,
 };
@@ -83,31 +82,13 @@ fn request_deadline_for_path(
     super::support::deadline::request_deadline(started_at, upstream_is_stream)
 }
 
-fn should_try_provider_executor_aggregate_route(
-    execution_plan: super::executor::GatewayUpstreamExecutionPlan,
-) -> bool {
-    matches!(
-        execution_plan.route_kind,
-        GatewayUpstreamRouteKind::AggregateApi
-    )
-}
-
-fn route_kind_label(value: GatewayUpstreamRouteKind) -> &'static str {
-    match value {
-        GatewayUpstreamRouteKind::AccountRotation => "account_rotation",
-        GatewayUpstreamRouteKind::AggregateApi => "aggregate_api",
-    }
-}
-
 #[allow(clippy::too_many_arguments)]
 fn resolve_aggregate_candidates_for_route(
     storage: &crate::storage_helpers::StorageHandle,
-    protocol_type: &str,
     aggregate_api_id: Option<&str>,
 ) -> Result<Vec<codexmanager_core::storage::AggregateApi>, String> {
     super::protocol::aggregate_api::resolve_aggregate_api_rotation_candidates(
         storage,
-        protocol_type,
         aggregate_api_id,
     )
 }
@@ -128,7 +109,6 @@ fn respond_aggregate_route_error(
     reasoning_for_log: Option<&str>,
     started_at: Instant,
     message: String,
-    transparent_mode: bool,
 ) -> Result<(), String> {
     super::super::record_gateway_request_outcome(path, 404, Some("aggregate_api"));
     super::super::trace_log::log_request_final(
@@ -148,7 +128,7 @@ fn respond_aggregate_route_error(
             response_adapter: Some(response_adapter),
             request_type: Some(request_type_for_log),
             effective_service_tier: effective_service_tier_for_log,
-            transparent_mode: Some(transparent_mode),
+            transparent_mode: Some(false),
             ..Default::default()
         },
         Some(key_id),
@@ -194,7 +174,6 @@ fn proxy_with_aggregate_candidates(
     request_deadline: Option<Instant>,
     started_at: Instant,
     aggregate_api_candidates: Vec<codexmanager_core::storage::AggregateApi>,
-    transparent_mode: bool,
 ) -> Result<(), String> {
     let mut aggregate_api_candidates = aggregate_api_candidates;
     super::protocol::aggregate_api::apply_gateway_route_strategy_to_aggregate_candidates(
@@ -223,7 +202,6 @@ fn proxy_with_aggregate_candidates(
             aggregate_api_candidates,
             request_deadline,
             started_at,
-            transparent_mode,
         },
     )
 }
@@ -296,19 +274,23 @@ pub(in super::super) fn proxy_validated_request(
     );
     super::super::trace_log::log_request_body_preview(trace_id.as_str(), body.as_ref());
 
-    let execution_plan = resolve_gateway_upstream_execution_plan(rotation_strategy.as_str());
+    let use_aggregate_api_route =
+        rotation_strategy.as_str() == crate::apikey_profile::ROTATION_AGGREGATE_API;
     super::super::log_request_execution_plan(
         trace_id.as_str(),
         path.as_str(),
         protocol_type.as_str(),
         "codex_responses",
-        route_kind_label(execution_plan.route_kind),
+        if use_aggregate_api_route {
+            "aggregate_api"
+        } else {
+            "account_rotation"
+        },
     );
 
-    if should_try_provider_executor_aggregate_route(execution_plan) {
+    if use_aggregate_api_route {
         match resolve_aggregate_candidates_for_route(
             &storage,
-            protocol_type.as_str(),
             aggregate_api_id.as_deref(),
         ) {
             Ok(aggregate_api_candidates) => {
@@ -330,7 +312,6 @@ pub(in super::super) fn proxy_validated_request(
                     request_deadline,
                     started_at,
                     aggregate_api_candidates,
-                    transparent_mode,
                 );
             }
             Err(err) => {
@@ -349,7 +330,6 @@ pub(in super::super) fn proxy_validated_request(
                     reasoning_for_log.as_deref(),
                     started_at,
                     err,
-                    transparent_mode,
                 );
             }
         }
@@ -509,10 +489,6 @@ pub(in super::super) fn proxy_validated_request(
 mod tests {
     use super::{
         exhausted_gateway_error_for_log, request_deadline_for_path, resolve_upstream_is_stream,
-        should_try_provider_executor_aggregate_route,
-    };
-    use crate::gateway::upstream::executor::{
-        GatewayUpstreamExecutionPlan, GatewayUpstreamRouteKind,
     };
     use std::time::{Duration, Instant};
 
@@ -594,20 +570,6 @@ mod tests {
 
         assert!(timeout > Duration::from_secs(250));
         assert!(timeout <= Duration::from_secs(300));
-    }
-
-    #[test]
-    fn only_explicit_aggregate_route_uses_aggregate_candidates() {
-        assert!(should_try_provider_executor_aggregate_route(
-            GatewayUpstreamExecutionPlan {
-                route_kind: GatewayUpstreamRouteKind::AggregateApi,
-            }
-        ));
-        assert!(!should_try_provider_executor_aggregate_route(
-            GatewayUpstreamExecutionPlan {
-                route_kind: GatewayUpstreamRouteKind::AccountRotation,
-            }
-        ));
     }
 
 }
