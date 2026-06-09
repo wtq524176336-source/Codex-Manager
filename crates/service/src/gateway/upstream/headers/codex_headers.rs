@@ -531,7 +531,6 @@ mod tests {
             chatgpt_account_id: Some("account-123"),
             incoming_user_agent: None,
             incoming_originator: None,
-            preserve_client_identity: false,
             incoming_session_id: Some("conversation-anchor"),
             incoming_window_id: Some("conversation-anchor:7"),
             incoming_client_request_id: Some("conversation-anchor"),
@@ -629,7 +628,6 @@ mod tests {
             chatgpt_account_id: None,
             incoming_user_agent: None,
             incoming_originator: None,
-            preserve_client_identity: false,
             incoming_session_id: Some("conversation-anchor"),
             incoming_window_id: Some("conversation-anchor:9"),
             incoming_client_request_id: Some("conversation-anchor"),
@@ -694,7 +692,6 @@ mod tests {
             installation_id: Some("install-compact-internal"),
             incoming_user_agent: None,
             incoming_originator: None,
-            preserve_client_identity: false,
             incoming_session_id: None,
             thread_id: Some("thread-anchor-c"),
             incoming_window_id: Some("conversation-anchor:11"),
@@ -754,7 +751,6 @@ mod tests {
             chatgpt_account_id: None,
             incoming_user_agent: None,
             incoming_originator: None,
-            preserve_client_identity: false,
             incoming_session_id: Some("session-anchor"),
             incoming_window_id: Some("stale-window-anchor:9"),
             incoming_client_request_id: Some("request-anchor"),
@@ -789,7 +785,6 @@ mod tests {
             chatgpt_account_id: None,
             incoming_user_agent: Some("codex_sdk_ts/1.2.3 (Windows 11; x86_64) node"),
             incoming_originator: Some("codex_sdk_ts"),
-            preserve_client_identity: false,
             incoming_session_id: Some("thread-ident"),
             incoming_window_id: Some("thread-ident:0"),
             incoming_client_request_id: Some("thread-ident"),
@@ -814,41 +809,6 @@ mod tests {
     }
 
     #[test]
-    fn build_codex_upstream_headers_preserves_non_codex_identity_for_compat_routes() {
-        let _guard = crate::test_env_guard();
-        let _ = set_originator("codex_cli_rs_tests").expect("set originator");
-        let _ = set_codex_user_agent_version("0.999.5").expect("set ua version");
-
-        let headers = build_codex_upstream_headers(CodexUpstreamHeaderInput {
-            auth_token: "token-compat",
-            chatgpt_account_id: None,
-            incoming_user_agent: Some("openai-python/2.0.0"),
-            incoming_originator: Some("openai_python"),
-            preserve_client_identity: true,
-            incoming_session_id: Some("thread-compat"),
-            incoming_window_id: Some("thread-compat:0"),
-            incoming_client_request_id: Some("thread-compat"),
-            incoming_subagent: None,
-            incoming_beta_features: None,
-            incoming_turn_metadata: None,
-            incoming_parent_thread_id: None,
-            incoming_responsesapi_include_timing_metrics: None,
-            passthrough_codex_headers: &[],
-            fallback_session_id: Some("thread-compat"),
-            incoming_turn_state: None,
-            include_turn_state: true,
-            strip_session_affinity: false,
-            has_body: true,
-        });
-
-        assert_eq!(
-            header_value(&headers, "User-Agent"),
-            Some("openai-python/2.0.0")
-        );
-        assert_eq!(header_value(&headers, "originator"), Some("openai_python"));
-    }
-
-    #[test]
     fn build_codex_compact_upstream_headers_omits_thread_id_when_missing() {
         let _guard = crate::test_env_guard();
         let headers = build_codex_compact_upstream_headers(CodexCompactUpstreamHeaderInput {
@@ -857,7 +817,6 @@ mod tests {
             installation_id: None,
             incoming_user_agent: None,
             incoming_originator: None,
-            preserve_client_identity: false,
             incoming_session_id: Some("session-anchor"),
             thread_id: None,
             incoming_window_id: None,
